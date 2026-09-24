@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "./api";
 
 // Nền TanStack Query. Cấu hình BẢO TOÀN HÀNH VI app hiện tại:
 // - refetchOnWindowFocus: false → app cũ KHÔNG refetch khi focus lại; giữ nguyên.
 // - staleTime ngắn → điều hướng qua-lại hiện tức thì (cache) nhưng vẫn tươi; SSE invalidate khi đổi thật.
 // - retry 1 → chịu lỗi mạng thoáng qua (app cũ 0 retry; 1 lần không đổi hành vi ca thành công).
+//   TRỪ 401/403: lỗi đăng nhập / quyền không phải trục trặc thoáng qua — thử lại chỉ nhân đôi số lượt gọi
+//   hỏng lên máy chủ (đo được 2026-09-24: mỗi lượt dựng lại trang sau khi mất phiên = 2 request).
+export const thuLaiTruyVan = (lan: number, loi: unknown) =>
+  !(loi instanceof ApiError && (loi.status === 401 || loi.status === 403)) && lan < 1;
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
       staleTime: 5_000,
       gcTime: 5 * 60_000,
-      retry: 1,
+      retry: thuLaiTruyVan,
     },
   },
 });

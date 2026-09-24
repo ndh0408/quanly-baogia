@@ -296,6 +296,18 @@ function docThan(t: string, r: Response): unknown {
 let lenhGhiDangBay = 0;
 export const soLenhGhiDangBay = () => lenhGhiDangBay;
 
+// PHIÊN ĐÃ MẤT — lớp phủ "Phiên đăng nhập đã hết" (App.tsx) đang mở. Lúc đó MỌI lời gọi người-dùng tới
+// máy chủ chắc chắn 401, nên CHẶN NGAY TẠI TRÌNH DUYỆT, không gửi đi: đo được 2026-09-24 trên máy thử,
+// trang Danh sách đứng sau lớp phủ bị kích dựng lại liên tục (nghi do tự dịch trang của trình duyệt) và
+// mỗi lần gọi /api/quotes + thử lại — ~2 request/giây tới khi tải lại trang. Chặn ở đây thì kẻ kích là
+// gì cũng không còn lượt gọi nào. VẪN để lọt: /auth/* (đăng nhập lại, dò phiên) và lời gọi NỀN im401
+// (nhịp tim presence) — một nhịp tim thành công là bằng chứng phiên còn sống và tự đóng lớp phủ
+// (401 muộn đua với lượt đăng nhập lại — xem chú thích "auth:ok" trong reqGoc).
+let phienDaMat = false;
+export const laPhienDaMat = () => phienDaMat;
+const baoMatPhien = () => { phienDaMat = true; resetCsrfToken(); window.dispatchEvent(new Event("auth:expired")); };
+const baoPhienSong = () => { phienDaMat = false; window.dispatchEvent(new Event("auth:ok")); };
+
 async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   if (!CAN_GHI((opts.method || "GET").toUpperCase()) || opts.im401) return reqGoc<T>(path, opts);
   lenhGhiDangBay++;
@@ -311,6 +323,9 @@ async function reqGoc<T>(path: string, opts: ReqOpts = {}): Promise<T> {
     let payload: Record<string, unknown> = {};
     try { payload = opts.body ? JSON.parse(opts.body as string) : {}; } catch { /* ignore */ }
     return { ok: true, id: 900000000 + Math.floor(Math.random() * 1e8), _preview: true, ...payload } as T;
+  }
+  if (phienDaMat && !opts.im401 && !path.startsWith("/auth/")) {
+    throw new ApiError("Phiên đăng nhập đã hết — đăng nhập lại để tiếp tục.", 401, { error: "Phiên đăng nhập đã hết", chanTaiMay: true });
   }
   // Báo giá lớn (50 trang × vài trăm dòng) nặng vài MB mỗi lần Lưu. Gói JSON nén rất tốt (~10 lần)
   // nên với thân lớn thì nén trước khi gửi — mạng văn phòng chậm hay 4G đỡ hẳn, và không phải cứ
@@ -343,7 +358,7 @@ async function reqGoc<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   if (!res.ok) {
     // Mất phiên giữa chừng → báo App mở LỚP PHỦ đăng nhập lại (App lắng nghe "auth:expired").
     // Lời gọi nền (im401) chỉ dọn mã CSRF rồi im — xem chú thích ở ReqOpts.
-    if (res.status === 401) { resetCsrfToken(); if (!opts.im401) window.dispatchEvent(new Event("auth:expired")); }
+    if (res.status === 401) { if (opts.im401) resetCsrfToken(); else baoMatPhien(); }
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
@@ -358,7 +373,7 @@ async function reqGoc<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   // Đăng nhập TỰ NÓ cũng là một lời gọi thành công nên sự kiện này bắn cả ở đó — khỏi cần gọi hai
   // nơi. Cho phép cả lời gọi NỀN (`im401`) bắn sự kiện này: một nhịp tim presence thành công cũng
   // là bằng chứng hợp lệ, dù 401 của chính nó bị im lặng.
-  window.dispatchEvent(new Event("auth:ok"));
+  baoPhienSong();
   return body as T;
 }
 
@@ -367,6 +382,7 @@ async function reqGoc<T>(path: string, opts: ReqOpts = {}): Promise<T> {
  * Không đi qua chặn "xem thử" như `req` vì endpoint nhập Excel CHỈ ĐỌC file, không ghi DB.
  */
 async function reqForm<T>(path: string, form: FormData): Promise<T> {
+  if (phienDaMat) throw new ApiError("Phiên đăng nhập đã hết — đăng nhập lại để tiếp tục.", 401, { error: "Phiên đăng nhập đã hết", chanTaiMay: true });
   const goi = async (token: string | null) => {
     // KHÔNG đặt Content-Type — trình duyệt phải tự thêm boundary. Chỉ thêm header CSRF.
     const headers: Record<string, string> = {};
@@ -378,11 +394,11 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
   let { r: res, body } = await goi(await layCsrf());
   if (res.status === 403 && LA_LOI_CSRF(body)) ({ r: res, body } = await goi(await layCsrf(true)));
   if (!res.ok) {
-    if (res.status === 401) { resetCsrfToken(); window.dispatchEvent(new Event("auth:expired")); }
+    if (res.status === 401) baoMatPhien();
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
-  window.dispatchEvent(new Event("auth:ok")); // xem chú thích ở req() — cùng lý do, cùng cơ chế
+  baoPhienSong(); // xem chú thích ở req() — cùng lý do, cùng cơ chế
   return body as T;
 }
 
