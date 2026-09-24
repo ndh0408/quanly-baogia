@@ -41,6 +41,11 @@ function docHetNguon(thuMuc) {
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       if (["node_modules", ".git", "dist", "web", "coverage"].includes(e.name)) continue;
+      // Thư mục ẨN (`.claude/worktrees/*` giữ hàng chục bản sao repo, `.scan`…) và thư mục sinh ra ngoài
+      // mã nguồn. Trên cây chính D:\QuanLY bài từng đọc cả các worktree đó → 72s, quá trần 20s, đỏ oan ở
+      // verify (2026-09-24); trong worktree thì không có thư mục lồng nên xanh. `.github/workflows/ci.yml`
+      // và `.husky/pre-commit` vẫn được nối riêng bên dưới.
+      if (e.isDirectory() && (e.name.startsWith(".") || ["_bmad", "_bmad-output", "graphify-out", "backups"].includes(e.name))) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (/\.(ts|tsx|js|mjs|cjs)$/.test(e.name)) out.push(p);

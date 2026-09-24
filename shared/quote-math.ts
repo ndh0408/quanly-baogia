@@ -173,6 +173,23 @@ export function liveFormat(raw: string) {
   const out = rest.length ? (grouped || "0") + "," + rest.join("") : grouped;
   return (neg ? "-" : "") + out;
 }
+/**
+ * Vị trí con trỏ SAU khi ô số được định dạng lại lúc gõ (liveFormat chèn/bớt dấu chấm nghìn, thêm "0"
+ * trước dấu phẩy). Tính TỪ CUỐI: đếm ký tự CÓ NGHĨA (chữ số và dấu phẩy thập phân) nằm SAU con trỏ
+ * trong chuỗi vừa gõ, rồi lùi đúng bấy nhiêu ký tự có nghĩa trong chuỗi đã định dạng.
+ *
+ * Bản cũ đếm CHỮ SỐ TỪ ĐẦU và bỏ qua dấu phẩy: gõ "9," thì trước con trỏ có 1 chữ số → con trỏ bị đặt
+ * ngay sau "9", tức TRƯỚC dấu phẩy → gõ tiếp "5" ra "95," (người dùng báo 2026-09-24: không nhập được
+ * số lượng có dấu phẩy).
+ */
+export function conTroSauDinhDang(raw: string, truoc: number, formatted: string): number {
+  const coNghia = (ch: string) => ch === "," || (ch >= "0" && ch <= "9");
+  let sau = 0;
+  for (let k = Math.max(0, truoc); k < raw.length; k++) if (coNghia(raw[k])) sau++;
+  let pos = formatted.length;
+  while (pos > 0 && sau > 0) { pos--; if (coNghia(formatted[pos])) sau--; }
+  return pos;
+}
 export function vnDateText(d?: string, city?: string) {
   const dt = d ? new Date(d) : new Date();
   if (isNaN(dt.getTime())) return city || "TP. Hồ Chí Minh";

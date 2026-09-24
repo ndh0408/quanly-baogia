@@ -150,9 +150,14 @@ if chay_buoc deps; then
   # k8s (23 tài nguyên trong 13 file + chart Helm) hết giờ giữa chừng với
   # "kubernetes scan error: context deadline exceeded". Hết giờ trông Y HỆT một phát hiện thật
   # trong dòng tổng kết, nên phải nới chứ không được để nguyên.
+  #
+  # `--skip-dirs /src/.claude`: trivy fs KHÔNG đọc .gitignore. `.claude/worktrees/*` giữ hàng chục bản
+  # sao repo (worktree của các lượt sửa song song) → trivy phân tích từng package.json trong đó và hết
+  # giờ "semaphore acquire: context deadline exceeded" (verify 2026-09-24) — đọc y như một phát hiện thật.
   docker run --rm "${CA_ARGS[@]}" -v "$GOC_MOUNT:/src" -v "$(duong_dan_may "$CACHE/trivy"):/root/.cache/trivy" "$TRIVY" \
     fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
        --ignorefile /src/.trivyignore.yaml --exit-code 1 --quiet \
+       --skip-dirs /src/.claude \
        --timeout "${TRIVY_TIMEOUT:-20m}" /src >/tmp/trivy-out.$$ 2>&1
   ma=$?
   ket $ma "không lỗ hổng HIGH/CRITICAL có bản vá, không cấu hình sai"

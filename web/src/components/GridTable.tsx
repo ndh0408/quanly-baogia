@@ -2077,7 +2077,7 @@ function GridTableInner(props: GridTableProps) {
   }, []);
 
   // ── ô SỐ (công thức + gom nghìn live + autocomplete) / text / textarea ─────────
-  const onNumInput = (i: number, f: string, el: HTMLInputElement) => {
+  const onNumInput = (i: number, f: string, el: HTMLInputElement, vuaGo?: string | null) => {
     editingRef.current = true;   // có gõ = đang SỬA (kể cả gõ tiếng Việt qua IME — keydown không bắt được)
     markEditUndo(i, f);          // Ctrl+Z lùi được cả ô (trước đây gõ tay KHÔNG hề ghi undo)
     fitCell(el);
@@ -2098,10 +2098,16 @@ function GridTableInner(props: GridTableProps) {
       return;
     }
     const before = el.selectionStart ?? raw.length;
-    const digitsBefore = raw.slice(0, before).replace(/\D/g, "").length;
-    const formatted = M.liveFormat(raw);
+    // SỐ LƯỢNG / SỐ NGÀY là SỐ ĐO: dấu "." VỪA GÕ là dấu THẬP PHÂN (bàn phím số, thói quen máy US) → đổi
+    // thành "," thập phân VN. Trước đây liveFormat coi mọi "." là dấu nghìn và XOÁ nó: gõ "2.5" ra 25.
+    // Chỉ khi đúng phím vừa gõ là "." (inputType insertText) — xoá một chữ số nằm sau dấu chấm nghìn
+    // của "1.500" thì dấu chấm đó vẫn là dấu nghìn. ĐƠN GIÁ không đổi: "250.000" gõ tay là tiền có dấu nghìn.
+    const rawSo = vuaGo === "." && (f === "quantity" || f === "days") && before > 0 && raw[before - 1] === "." && !raw.includes(",")
+      ? raw.slice(0, before - 1) + "," + raw.slice(before)
+      : raw;
+    const formatted = M.liveFormat(rawSo);
     el.value = formatted;
-    let pos = 0, seen = 0; while (pos < formatted.length && seen < digitsBefore) { if (/\d/.test(formatted[pos])) seen++; pos++; }
+    const pos = M.conTroSauDinhDang(rawSo, before, formatted);
     try { el.setSelectionRange(pos, pos); } catch { /* */ }
     const n = M.parseVN(formatted); it[f] = n;
     if (it.formulas) delete (it.formulas as Record<string, string>)[f];
@@ -2127,7 +2133,7 @@ function GridTableInner(props: GridTableProps) {
   // `data-f`, vai trò từ `data-xl` của chính ô; việc thật đi qua `xuLyRef` (luôn trỏ closure của lần
   // vẽ mới nhất). Prop không đổi → React bỏ qua dòng không đổi → hết đợt ghi DOM thừa.
   const xuLyRef = useRef<{
-    so: (i: number, f: string, el: HTMLInputElement) => void;
+    so: (i: number, f: string, el: HTMLInputElement, vuaGo?: string | null) => void;
     chu: (i: number, f: string, el: HTMLInputElement) => void;
     ta: (i: number, f: string, el: HTMLTextAreaElement) => void;
     tenNhom: (i: number, el: HTMLTextAreaElement) => void;
@@ -2136,7 +2142,7 @@ function GridTableInner(props: GridTableProps) {
     duyet: (i: number, checked: boolean) => void;
     bam: (vai: string, i: number, el: HTMLElement) => void;
   } | null>(null);
-  const xuLyO = useCallback((e: { target: EventTarget | null }) => {
+  const xuLyO = useCallback((e: { target: EventTarget | null; nativeEvent?: Event }) => {
     const el = e.target as (HTMLInputElement & HTMLTextAreaElement) | null;
     const h = xuLyRef.current;
     if (!el || !h) return;
@@ -2145,7 +2151,11 @@ function GridTableInner(props: GridTableProps) {
     if (i < 0) return;
     const f = el.getAttribute("data-f") || "";
     const vai = el.getAttribute("data-xl");
-    if (vai === "so") h.so(i, f, el);
+    if (vai === "so") {
+      // Ký tự VỪA GÕ (không phải xoá/dán) — onNumInput cần biết người dùng bấm "." hay vừa xoá chữ số.
+      const ne = e.nativeEvent as InputEvent | undefined;
+      h.so(i, f, el, ne && ne.inputType === "insertText" ? ne.data : null);
+    }
     else if (vai === "chu") h.chu(i, f, el);
     else if (vai === "ta") h.ta(i, f, el);
     else if (vai === "ten-nhom") h.tenNhom(i, el);

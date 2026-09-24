@@ -1317,13 +1317,13 @@ Lý do (không bắt buộc):`,
                       onInput={(e) => {
                         const el = e.target as HTMLInputElement;
                         const raw = el.value;
-                        const truoc = raw.slice(0, el.selectionStart ?? raw.length).replace(/\D/g, "").length;
+                        const truoc = el.selectionStart ?? raw.length;
                         // Discount luôn ≥ 0. `liveFormat` GIỮ dấu trừ, nên không cắt ở đây thì ô
                         // hiện "-3.000.000" trong khi giá trị lưu là 0 — người dùng tưởng đã giảm giá.
                         const formatted = M.liveFormat(raw).replace(/^-/, "");
                         el.value = formatted;
-                        let pos = 0, seen = 0;
-                        while (pos < formatted.length && seen < truoc) { if (/\d/.test(formatted[pos])) seen++; pos++; }
+                        // Con trỏ tính TỪ CUỐI (conTroSauDinhDang) — bản đếm chữ số từ đầu đặt con trỏ trước dấu phẩy.
+                        const pos = M.conTroSauDinhDang(raw.replace(/^-/, ""), Math.max(0, truoc - (raw.startsWith("-") ? 1 : 0)), formatted);
                         try { el.setSelectionRange(pos, pos); } catch { /* */ }
                         activeSheet.discount = Math.max(0, M.parseVN(formatted));
                         mark(); redrawMeta();
