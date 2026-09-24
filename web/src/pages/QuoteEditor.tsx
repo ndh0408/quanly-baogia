@@ -86,6 +86,18 @@ export const ngayChoO = (v: unknown): string => {
 type WinDirty = Window & { __editorDirty?: boolean };
 
 /**
+ * Đợt 4 — bỏ mọi khoá bắt đầu bằng '_' của một hạng mục / bảng trước khi đem vào vân tay. Đó là cờ PHIÊN
+ * của lưới (`_k`, `_fxWarn`, `_fxLoi`, …): máy chủ không bao giờ trả về (zod bỏ), còn lượt soát lúc mở
+ * của lưới gắn `_fxLoi` lên chính hạng mục đang soạn. Để lọt vào là bản đang soạn lệch bản máy chủ dù
+ * không ai sửa gì → không nhận mốc mới → lần Lưu kế nhận 409 GIẢ.
+ */
+const boKhoaPhien = (o: unknown): Record<string, unknown> => {
+  const r: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries((o || {}) as Record<string, unknown>)) if (!k.startsWith("_")) r[k] = v;
+  return r;
+};
+
+/**
  * app#11 — VÂN TAY PHẦN NGOÀI HÀ NỘI của một bản báo giá MÁY CHỦ trả về: các trường đầu trang dạng
  * giá trị đơn, và từng trang (id · mẫu · tên · Discount · cờ · hạng mục). Bỏ `updatedAt`, `members`,
  * mọi trường `hn*` — đúng những thứ giao/duyệt phần HN được phép đổi (src/hnWorkflow.ts).
@@ -98,18 +110,6 @@ type WinDirty = Window & { __editorDirty?: boolean };
  * (ngayChoO +7h làm quoteDate cũ ≥17:00 UTC qua ngày — X2). Ngày (`…Date`) vẫn cắt 10 ký tự cho chắc.
  * Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
  */
-/**
- * Đợt 4 — bỏ mọi khoá bắt đầu bằng '_' của một hạng mục / bảng trước khi đem vào vân tay. Đó là cờ PHIÊN
- * của lưới (`_k`, `_fxWarn`, `_fxLoi`, …): máy chủ không bao giờ trả về (zod bỏ), còn lượt soát lúc mở
- * của lưới gắn `_fxLoi` lên chính hạng mục đang soạn. Để lọt vào là bản đang soạn lệch bản máy chủ dù
- * không ai sửa gì → không nhận mốc mới → lần Lưu kế nhận 409 GIẢ.
- */
-const boKhoaPhien = (o: unknown): Record<string, unknown> => {
-  const r: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries((o || {}) as Record<string, unknown>)) if (!k.startsWith("_")) r[k] = v;
-  return r;
-};
-
 export const vanTayMain = (q: unknown): string => {
   const r = (q || {}) as Record<string, unknown>;
   const dau: Record<string, unknown> = {};
