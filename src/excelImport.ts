@@ -235,6 +235,35 @@ const chia100 = (n: number) => Number((n / 100).toPrecision(12));
 const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
 const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
 
+// KHOẢNG SỐ (PORT laKhoangSo, soát toàn diện đợt 5): bộ lọc ký tự ghép chữ số hai đầu của khoảng thành MỘT số
+// khác 0 — Đơn Giá "500.000 – 700.000" nạp 500.000.700.000, SL "10-12" nạp 1012, không cảnh báo nào (tệp không
+// có cột Thành Tiền thì tiền phình không ai thấy). Hai số ngăn bởi -, –, —, ~, "đến" → không đọc được số (0),
+// vòng quét dòng báo "không đọc được số" như ô chữ. Một số có dấu trừ đầu ("-500.000") không phải khoảng.
+const SO_TOKEN = /\d(?:[\d.,]*\d)?/g;
+const NOI_KHOANG = /[-–—~]|(?<!\p{L})(?:đến|den)(?!\p{L})/iu;
+const laKhoangSo = (s: string): boolean => {
+  const t = String(s ?? "").normalize("NFC");
+  const so = [...t.matchAll(SO_TOKEN)];
+  for (let k = 1; k < so.length; k++) if (NOI_KHOANG.test(t.slice(so[k - 1].index! + so[k - 1][0].length, so[k].index))) return true;
+  return false;
+};
+
+// BỘI SỐ TIẾNG VIỆT (PORT tachBoiSo / coBoiSo, soát toàn diện đợt 5): "1.5tr" từng nạp 1,5, "500k" nạp 500 —
+// hụt cả nghìn / triệu lần, số khác 0 nên không cảnh báo nào bắt. Hậu tố đứng NGAY sau số, không dính chữ cái
+// sau: "tr" / "triệu" ×1.000.000, "k" / "nghìn" / "ngàn" ×1.000 ("kg", "km", "trọn gói" không phải). Chỉ khi ô
+// có đúng MỘT con số sau bước bỏ cụm. Vòng quét dòng báo "đã hiểu “1.5tr” = 1.500.000" để người nạp soát lại.
+const BOI_SO = /(\d)\s*(triệu|tr|nghìn|ngàn|k)(?!\p{L})/iu;
+const HE_SO_BOI: Record<string, number> = { "triệu": 1e6, tr: 1e6, "nghìn": 1e3, "ngàn": 1e3, k: 1e3 };
+const tachBoiSo = (s: string): { s: string; heSo: number } | null => {
+  const t = boCumChuSo(String(s ?? "").normalize("NFC"));
+  const m = BOI_SO.exec(t);
+  if (!m || (t.match(SO_TOKEN) || []).length !== 1) return null;
+  const con = t.slice(0, m.index + 1) + t.slice(m.index + m[0].length);
+  return BOI_SO.test(con) ? null : { s: con, heSo: HE_SO_BOI[m[2].toLowerCase()] };
+};
+const nhanBoiSo = (n: number, heSo: number) => Number((n * heSo).toPrecision(12));
+const coBoiSo = (s: string): boolean => !laKhoangSo(s) && tachBoiSo(tachNgoacKeToan(String(s ?? "")).s) != null;
+
 // Ô CHỮ ở cột số mà ĐỌC RA 0 (PORT chuKhongRaSo, soát toàn diện đợt 4): sau L17 "ĐG1.500.000", "SL12",
 // "12m2" đọc 0 mà không có cảnh báo dòng nào — tệp không có cột Thành Tiền thì Đơn Giá về 0 không ai thấy.
 // Còn chữ số KHÁC 0 mà đọc ra 0 (khoảng giá "1.500.000 - 2.000.000" → NaN → 0) cũng báo. Số 0 viết bằng chữ
@@ -249,9 +278,11 @@ const chuKhongRaSo = (s: string, n: number): boolean => {
 };
 
 function parseLooseNumber(s: string): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseLooseNumber(bs.s), bs.heSo);
   let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   if (str.includes(",") && str.includes(".")) {
@@ -268,9 +299,11 @@ function parseLooseNumber(s: string): number {
 }
 /** Cột SỐ LƯỢNG / SỐ NGÀY là SỐ ĐO NHỎ: 1 dấu chấm/phẩy = THẬP PHÂN (13.5 ≠ 13500). */
 function parseLooseDecimal(s: string): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseLooseDecimal(bs.s), bs.heSo);
   let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
@@ -316,9 +349,11 @@ function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boolean): Qu
  *  mọi "." nên SL "0.5" thành 5, tiền sai 10 lần, và bảng không có cột Thành Tiền thì không một cảnh báo
  *  (soát toàn diện đợt 3, L51). Lưới đọc ô đó cũng ra 0,5 (khopQuyUoc → parseLooseDecimal). */
 function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseTheoQuyUoc(bs.s, qu), bs.heSo);
   let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
@@ -714,15 +749,18 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; it.days = null; }
 
     // Ô SỐ mà lại là NGÀY THÁNG (khách gõ nhầm ô) → numOf trả 0, phải nói rõ để không âm thầm mất tiền.
+    // Số Ngày và SL của NHÓM về 0 / trống thì app tính ×1 — câu báo nói đúng con số app dùng, như cảnh báo ô
+    // CHỮ bên dưới (soát toàn diện đợt 5; trước đây mọi ô đều ghi "đã để 0").
+    const deLaiO = (role: string) => (role === "days" || (isGroup && role === "quantity") ? "đã bỏ trống (tính như 1)" : "đã để 0");
     for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"]] as const) {
-      if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — đã để 0, cần nhập lại`);
+      if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — ${deLaiO(role)}, cần nhập lại`);
     }
     // Ô số đang LỖI trong Excel → numOf đọc thành 0. Nói rõ, đừng để lẫn với ô trống (XLSX-08).
     if (kind !== "info") {
       for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"], ["_amount", "Thành Tiền"]] as const) {
         if (isGroup && role !== "quantity") continue;   // nhóm: Đơn Giá/Thành Tiền do app tự tính lại
         const loi = colOf[role] ? errOf(cellAt(r, role)) : null;
-        if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — đã để 0, cần nhập lại`);
+        if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — ${deLaiO(role)}, cần nhập lại`);
       }
       // Ô CHỮ không đọc được số → 0 (soát toàn diện đợt 4): "ĐG1.500.000" / "Liên hệ" ở Đơn Giá mà tệp
       // không có cột Thành Tiền thì không cảnh báo nào khác bắt được. Nhóm: như trên, chỉ xét SL.
@@ -731,8 +769,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0]] as const) {
         if (isGroup && role !== "quantity") continue;
         const t = colOf[role] ? chuSo(cellAt(r, role)) : "";
-        const deLai = isGroup || role === "days" ? "đã bỏ trống (tính như 1)" : "đã để 0";
-        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, ${deLai}, cần nhập lại`);
+        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, ${deLaiO(role)}, cần nhập lại`);
+        // Bội số "1.5tr" / "500k" đã được NHÂN (soát toàn diện đợt 5) — nói ra con số app hiểu để người nạp soát lại.
+        else if (n && coBoiSo(t)) warn.push(`Ô ${vn}: đã hiểu “${t.length > 40 ? t.slice(0, 40) + "…" : t}” = ${n.toLocaleString("vi-VN")}`);
       }
     }
 
