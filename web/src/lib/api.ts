@@ -307,6 +307,14 @@ let phienDaMat = false;
 export const laPhienDaMat = () => phienDaMat;
 const baoMatPhien = () => { phienDaMat = true; resetCsrfToken(); window.dispatchEvent(new Event("auth:expired")); };
 const baoPhienSong = () => { phienDaMat = false; window.dispatchEvent(new Event("auth:ok")); };
+/** Tab KHÁC vừa đăng nhập lại CÙNG người (lib/authSync.ts) → phiên chung đã sống lại: gỡ chặn ở tab này. */
+export const phienSongLai = () => { phienDaMat = false; };
+/**
+ * 401 vì gõ SAI mật khẩu / mã xác nhận khi đang đăng nhập (máy chủ gắn `code: "xac_nhan_sai"` —
+ * src/httpError.ts loiXacNhanSai): phiên vẫn sống, KHÔNG được bật lớp phủ hay chặn lời gọi (diễn tập
+ * 2026-09-25: gõ sai mật khẩu lúc bật MFA / đổi mật khẩu là cả tab bị chặn tới khi đăng nhập lại).
+ */
+const laXacNhanSai = (b: unknown) => !!b && typeof b === "object" && (b as { code?: unknown }).code === "xac_nhan_sai";
 
 async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   if (!CAN_GHI((opts.method || "GET").toUpperCase()) || opts.im401) return reqGoc<T>(path, opts);
@@ -316,7 +324,9 @@ async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
 
 async function reqGoc<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   const method = (opts.method || "GET").toUpperCase();
-  if (__preview && method !== "GET" && method !== "HEAD") {
+  // ĐĂNG XUẤT luôn đi thật: làm giả nó lúc xem thử là máy chủ KHÔNG huỷ phiên mà tab này vẫn phát
+  // "đã đăng xuất" cho mọi tab khác (tải lại hết) — diễn tập 2026-09-25.
+  if (__preview && method !== "GET" && method !== "HEAD" && path !== "/auth/logout") {
     // XEM THỬ (sandbox): KHÔNG gửi lên server → trả "thành công giả" để thao tác chạy mượt, lưu TẠM ở client,
     // KHÔNG đụng dữ liệu thật. Thoát xem thử là mất hết. Echo body + id giả cho UI hiển thị như đã lưu.
     window.dispatchEvent(new Event("preview:write"));
@@ -358,7 +368,7 @@ async function reqGoc<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   if (!res.ok) {
     // Mất phiên giữa chừng → báo App mở LỚP PHỦ đăng nhập lại (App lắng nghe "auth:expired").
     // Lời gọi nền (im401) chỉ dọn mã CSRF rồi im — xem chú thích ở ReqOpts.
-    if (res.status === 401) { if (opts.im401) resetCsrfToken(); else baoMatPhien(); }
+    if (res.status === 401 && !laXacNhanSai(body)) { if (opts.im401) resetCsrfToken(); else baoMatPhien(); }
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
@@ -394,7 +404,7 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
   let { r: res, body } = await goi(await layCsrf());
   if (res.status === 403 && LA_LOI_CSRF(body)) ({ r: res, body } = await goi(await layCsrf(true)));
   if (!res.ok) {
-    if (res.status === 401) baoMatPhien();
+    if (res.status === 401 && !laXacNhanSai(body)) baoMatPhien();
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }

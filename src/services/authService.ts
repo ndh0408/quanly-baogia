@@ -9,7 +9,7 @@ import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { audit } from "../audit.js";
 import { logger } from "../logger.js";
-import { httpError } from "../httpError.js";
+import { httpError, loiXacNhanSai } from "../httpError.js";
 import { revokeAllForUser } from "../jwt.js";
 import { findLoginUser, verifyMfaChallenge } from "../authCore.js";
 import { destroyAllSessions } from "../sessions.js";
@@ -127,7 +127,7 @@ export async function changePassword(req: Request) {
   const ok = await bcrypt.compare(oldPassword, user.passwordHash);
   if (!ok) {
     await audit(req, "password.change.failed", { resource: "user", resourceId: user.id, actorId: user.id });
-    throw httpError(401, "Mật khẩu cũ không đúng");
+    throw loiXacNhanSai("Mật khẩu cũ không đúng");
   }
   const updated = await prisma.user.update({
     where: { id: user.id },

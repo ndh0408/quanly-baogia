@@ -233,7 +233,10 @@ services:
       # có lý do gì để sống sót qua một lần khởi động lại — dựng lại mỗi lần là cách bảo đảm nó
       # luôn khớp `.env` hiện tại. (ĐÃ ĐO: thiếu dòng này thì container thoát ngay với
       # `mkdir: can't create directory '/render': Permission denied` — ảnh chạy bằng `nobody`.)
-      - /render
+      # `mode=1777` TƯỜNG MINH: không khai thì `docker restart` dựng lại tmpfs thành root 755 và
+      # `nobody` không ghi được nữa (ĐÃ ĐO 2026-09-25 trên chính ảnh v0.28.1 — deploy.sh [5d/6] restart
+      # container này khi bản mẫu đổi). Có khai thì quyền giữ nguyên qua restart (đo cùng lượt).
+      - /render:mode=1777
     deploy:
       resources:
         limits:

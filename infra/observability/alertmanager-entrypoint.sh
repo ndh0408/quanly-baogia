@@ -108,7 +108,19 @@ else
 fi
 
 # ── 2. THAY GIÁ TRỊ ───────────────────────────────────────────────────────
-mkdir -p "$(dirname "$RA")"
+# CHỖ GHI BẢN ĐÃ DỰNG. `docker restart` dựng lại tmpfs /render với quyền root 755 — ĐÃ ĐO 2026-09-25
+# trên chính ảnh v0.28.1: trước restart `drwxrwxrwt`, sau restart `drwxr-xr-x root`. Ảnh chạy bằng
+# `nobody` nên không ghi được và container rơi vào vòng khởi động lại ("can't create
+# /render/alertmanager.yml: Permission denied") — đúng lúc deploy.sh [5d/6] restart nó sau khi bản mẫu
+# đổi. Compose nay khai `/render:mode=1777` (giữ qua restart), nhưng container tạo từ compose CŨ (đang
+# chạy trên production) vẫn dính → không ghi được thư mục đích thì LÙI về /tmp (1777 trong ảnh, và
+# vẫn 1777 sau restart — đã đo cùng lượt).
+mkdir -p "$(dirname "$RA")" 2>/dev/null || true
+if ! ( : > "$RA" ) 2>/dev/null; then
+  DU_PHONG="${AM_RENDERED_DU_PHONG:-/tmp/alertmanager.yml}"
+  echo "alertmanager-entrypoint: không ghi được $RA (tmpfs mất quyền sau docker restart?) — dùng $DU_PHONG" >&2
+  RA="$DU_PHONG"
+fi
 # Không xác thực → GỠ hai dòng `smtp_auth_*` khỏi bản mẫu TRƯỚC khi thay giá trị, nhờ đó
 # `${SMTP_USER}` không còn tồn tại để chốt chặn ở bước 3 phải bắt.
 if [ -n "${SMTP_USER:-}" ]; then

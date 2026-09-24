@@ -6,7 +6,7 @@ import type { Request } from "express";
 import bcrypt from "bcryptjs";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
-import { httpError } from "../httpError.js";
+import { httpError, loiXacNhanSai } from "../httpError.js";
 import { config } from "../config.js";
 import { quoteScopeWhere, readScopeWhere } from "../permissions.js";
 import { destroyAllSessions } from "../sessions.js";
@@ -524,7 +524,7 @@ export async function deleteSelf(req: Request) {
   const u = await prisma.user.findUnique({ where: { id }, select: { role: true, active: true, passwordHash: true } });
   if (!u) throw httpError(404, "Không tìm thấy tài khoản");
   if (!(await bcrypt.compare(String((req.body as any)?.password ?? ""), u.passwordHash || ""))) {
-    throw httpError(401, "Mật khẩu không đúng");
+    throw loiXacNhanSai("Mật khẩu không đúng");
   }
   if (u.role === "admin" && u.active) {
     const adminKhac = await prisma.user.count({ where: { role: "admin", active: true, id: { not: id } } });

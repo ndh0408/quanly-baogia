@@ -6,7 +6,7 @@ import speakeasy from "speakeasy";
 import qrcode from "qrcode";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
-import { httpError } from "../httpError.js";
+import { httpError, loiXacNhanSai } from "../httpError.js";
 import { encryptSecret, generateBackupCodes } from "../mfa.js";
 import { verifyMfaChallenge } from "../authCore.js";
 import { revokeAllForUser } from "../jwt.js";
@@ -49,7 +49,7 @@ export async function enableMfa(req: Request) {
   // Step-up: a stolen cookie alone must not be able to ENABLE MFA either — otherwise an
   // attacker could lock the victim out with an attacker-controlled secret. Mirror /disable.
   const pwOk = await bcrypt.compare(req.body.password, user.passwordHash || "");
-  if (!pwOk) throw httpError(401, "Mật khẩu không đúng");
+  if (!pwOk) throw loiXacNhanSai("Mật khẩu không đúng");
 
   const ok = speakeasy.totp.verifyDelta({
     secret: req.body.secret,
@@ -57,7 +57,7 @@ export async function enableMfa(req: Request) {
     token: req.body.token,
     window: 1,
   });
-  if (!ok) throw httpError(401, "Mã xác thực không đúng");
+  if (!ok) throw loiXacNhanSai("Mã xác thực không đúng");
 
   // Store the TOTP secret encrypted and only the HASHES of backup codes.
   // The plaintext codes are returned to the user exactly once, here.
@@ -90,7 +90,7 @@ export async function disableMfa(req: Request) {
   if (!user.mfaEnabled) throw httpError(400, "MFA chưa được bật");
   // Step-up: require the account password before allowing 2FA removal.
   const pwOk = await bcrypt.compare(req.body.password, user.passwordHash || "");
-  if (!pwOk) throw httpError(401, "Mật khẩu không đúng");
+  if (!pwOk) throw loiXacNhanSai("Mật khẩu không đúng");
   // Mã TOTP/dự phòng phải được TIÊU THỤ qua ĐÚNG MỘT chốt dùng chung với đường đăng nhập
   // (`verifyMfaChallenge`, authCore.ts) — ultracode audit 2026-09-09 (finding F2) bắt được: bản
   // trước tự gọi `claimTotpStep` + `consumeBackupCode` riêng, và nhánh backup-code KHÔNG qua chốt
@@ -99,7 +99,7 @@ export async function disableMfa(req: Request) {
   // cũ chỉ so trên bản mảng đã đọc, không xác nhận lại tại thời điểm ghi. Gọi thẳng
   // `verifyMfaChallenge` vừa đơn giản hơn vừa THỪA HƯỞNG chốt nguyên tử đó, không cần chép lại.
   const mfaOk = await verifyMfaChallenge(user, req.body.token);
-  if (!mfaOk) throw httpError(401, "Mã xác thực hoặc mã dự phòng không đúng");
+  if (!mfaOk) throw loiXacNhanSai("Mã xác thực hoặc mã dự phòng không đúng");
   await prisma.user.update({
     where: { id: user.id },
     // mfaLastStep về null: mốc đó chỉ có nghĩa với bí mật vừa bị xoá. Giữ lại thì lần BẬT MFA kế

@@ -40,11 +40,27 @@ export function canNapLai(tin: unknown, meId: number | null | undefined): boolea
   return false;
 }
 
-/** Nghe tin từ tab khác. Trả hàm huỷ. `layMeId` đọc danh tính HIỆN TẠI mỗi lần có tin. */
-export function ngheAuth(layMeId: () => number | null | undefined, napLai: () => void): () => void {
+/** Tin này là tab khác vừa ĐĂNG NHẬP LẠI chính người đang giữ ở tab này (phiên chung sống lại). */
+export function laDangNhapLaiCungNguoi(tin: unknown, meId: number | null | undefined): boolean {
+  if (meId == null || !tin || typeof tin !== "object") return false;
+  const t = tin as Partial<TinAuth> & { userId?: unknown };
+  return t.type === "login" && Number(t.userId) === meId;
+}
+
+/**
+ * Nghe tin từ tab khác. Trả hàm huỷ. `layMeId` đọc danh tính HIỆN TẠI mỗi lần có tin.
+ * `songLai` (tuỳ chọn): tab khác vừa đăng nhập lại CÙNG người — tab này đang hiện lớp phủ "Phiên đăng
+ * nhập đã hết" / đang chặn lời gọi (api.ts) thì gỡ ra, khỏi bắt người dùng đăng nhập lần hai (diễn tập
+ * 2026-09-25: tab bị chặn không tự hết chặn khi đăng nhập lại ở tab khác).
+ */
+export function ngheAuth(layMeId: () => number | null | undefined, napLai: () => void, songLai?: () => void): () => void {
   const k = moKenh();
   if (!k) return () => {};
-  k.onmessage = (e) => { if (canNapLai(e.data, layMeId())) napLai(); };
+  k.onmessage = (e) => {
+    const me = layMeId();
+    if (canNapLai(e.data, me)) napLai();
+    else if (songLai && laDangNhapLaiCungNguoi(e.data, me)) songLai();
+  };
   return () => k.close();
 }
 

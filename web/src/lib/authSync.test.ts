@@ -29,6 +29,22 @@ describe("FE-05 — tab khác đổi danh tính thì tab này nạp lại", () =
       expect(napLai).toHaveBeenCalledTimes(2);
     } finally { huy(); }
   });
+
+  it("tab khác đăng nhập lại CÙNG người → gọi songLai (gỡ chặn + đóng lớp phủ), KHÔNG nạp lại — diễn tập 2026-09-25", async () => {
+    const napLai = vi.fn();
+    const songLai = vi.fn();
+    const huy = ngheAuth(() => 1, napLai, songLai);
+    try {
+      phatDangNhap(1);
+      await cho();
+      expect(songLai).toHaveBeenCalledTimes(1);
+      expect(napLai).not.toHaveBeenCalled();
+      phatDangNhap(2);
+      await cho();
+      expect(napLai).toHaveBeenCalledTimes(1);
+      expect(songLai, "người KHÁC thì nạp lại sạch, không 'sống lại'").toHaveBeenCalledTimes(1);
+    } finally { huy(); }
+  });
 });
 
 // Dây nối: hàm thuần đúng mà App/Shell không gọi thì vô nghĩa. Cùng cách với App.draftleak.test.ts
@@ -39,6 +55,9 @@ describe("FE-05 — dây nối trong App / Shell", () => {
   it("App nghe kênh auth và phát tin khi đăng nhập", () => {
     expect(appSrc).toMatch(/ngheAuth\(/);
     expect(appSrc).toMatch(/phatDangNhap\(/);
+  });
+  it("App: tab khác đăng nhập lại cùng người → gỡ chặn lời gọi (phienSongLai) và đóng lớp phủ", () => {
+    expect(appSrc).toMatch(/ngheAuth\([^;]*phienSongLai\(\);\s*setMatPhien\(false\)/);
   });
   it("Shell: nút Đăng xuất chỉ nạp lại khi dangXuat() thành công, và phát tin cho tab khác", () => {
     const i = shellSrc.indexOf('className="logout"');

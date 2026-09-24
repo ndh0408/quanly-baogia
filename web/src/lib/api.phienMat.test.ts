@@ -66,6 +66,42 @@ describe("phiên đã mất → chặn tại trình duyệt", () => {
     expect(soLanGoi("/api/quotes?")).toBeGreaterThan(0);
   });
 
+  it("401 vì gõ SAI mật khẩu xác nhận (code xac_nhan_sai) → KHÔNG phải mất phiên: không lớp phủ, không chặn — diễn tập 2026-09-25", async () => {
+    const { api, laPhienDaMat } = await import("./api");
+    traLoi = (u) => u.includes("/auth/change-password") || u.includes("/mfa/")
+      ? new Response(JSON.stringify({ error: "Mật khẩu không đúng", code: "xac_nhan_sai" }), { status: 401 })
+      : new Response(JSON.stringify({ data: [], meta: { total: 0, page: 1, pageCount: 1 } }), { status: 200 });
+    await expect(api.changePassword("sai", "MatKhauMoi123!")).rejects.toMatchObject({ status: 401 });
+    expect(laPhienDaMat()).toBe(false);
+    expect(suKien).not.toContain("auth:expired");
+    await api.listQuotes({ page: 1, size: 20 });
+    expect(soLanGoi("/api/quotes?"), "vẫn gọi máy chủ bình thường").toBe(1);
+  });
+
+  it("tab khác đăng nhập lại cùng người → phienSongLai gỡ chặn", async () => {
+    const { api, laPhienDaMat, phienSongLai } = await import("./api");
+    traLoi = () => new Response(JSON.stringify({ error: "Chưa đăng nhập" }), { status: 401 });
+    await expect(api.listQuotes({ page: 1, size: 20 })).rejects.toThrow();
+    expect(laPhienDaMat()).toBe(true);
+    phienSongLai();
+    expect(laPhienDaMat()).toBe(false);
+    traLoi = () => new Response(JSON.stringify({ data: [], meta: { total: 0, page: 1, pageCount: 1 } }), { status: 200 });
+    await api.listQuotes({ page: 1, size: 20 });
+  });
+
+  it("đang XEM THỬ quyền: Đăng xuất vẫn đi THẬT lên máy chủ (không làm giả) — diễn tập 2026-09-25", async () => {
+    const { api, setPreviewMode } = await import("./api");
+    traLoi = () => new Response("{}", { status: 200 });
+    setPreviewMode(true);
+    try {
+      await api.logout();
+      expect(soLanGoi("/api/auth/logout"), "đăng xuất bị làm giả — phiên không bị huỷ mà tab khác vẫn tải lại").toBe(1);
+      const truoc = (g.fetch as ReturnType<typeof vi.fn>).mock.calls.length;
+      await api.updateSheetInvoice(5, "invoiceNo", "1");
+      expect((g.fetch as ReturnType<typeof vi.fn>).mock.calls.length, "lệnh ghi khác lúc xem thử vẫn là giả").toBe(truoc);
+    } finally { setPreviewMode(false); }
+  });
+
   it("401 của nhịp tim nền (im401) KHÔNG bật cờ — không chặn nhầm người đang làm", async () => {
     const { api, laPhienDaMat } = await import("./api");
     traLoi = () => new Response("{}", { status: 401 });

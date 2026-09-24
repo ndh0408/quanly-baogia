@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { api, ApiError, setPreviewMode, type Me } from "./lib/api";
+import { api, ApiError, setPreviewMode, phienSongLai, type Me } from "./lib/api";
 import { Shell } from "./components/Shell";
 import { promptModal, toast } from "./lib/ui";
 import { xoaMoiBanNhap, ghiNhanNguoiDung } from "./lib/localDraft";
@@ -54,7 +54,8 @@ export function App() {
   // dùng chung) → nạp lại sạch. `useRef` để listener đọc được `me` mới nhất mà không phải đăng ký lại.
   const meIdRef = useRef<number | null>(null);
   meIdRef.current = me?.id ?? null;
-  useEffect(() => ngheAuth(() => meIdRef.current, () => location.reload()), []);
+  // Tab khác đăng nhập lại CÙNG người → phiên chung đã sống lại: gỡ chặn lời gọi (api.ts) + đóng lớp phủ.
+  useEffect(() => ngheAuth(() => meIdRef.current, () => location.reload(), () => { phienSongLai(); setMatPhien(false); }), []);
   // app#16: đăng nhập từ màn Login / kích hoạt = lượt ĐĂNG NHẬP MỚI (khác đường khởi động có phiên sẵn
   // bên dưới) — lần đầu trên trình duyệt thì bản nháp khoá cũ không rõ chủ, bị xoá (xem localDraft.ts).
   const daDangNhap = (m: Me) => { ghiNhanNguoiDung(m.id, { dangNhapMoi: true }); phatDangNhap(m.id); };

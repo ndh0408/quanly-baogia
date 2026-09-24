@@ -102,6 +102,30 @@ describe.runIf(coSh)("alertmanager-entrypoint.sh — chạy thật", () => {
       .toContain("Gia Nguyen\\nBao Gia");
   });
 
+  it("thư mục đích KHÔNG ghi được (tmpfs /render mất quyền sau `docker restart`) → lùi về chỗ dự phòng, container vẫn lên", () => {
+    // Đo được 2026-09-25 trên chính ảnh v0.28.1: `docker restart` dựng lại tmpfs /render thành root 755
+    // và ảnh chạy bằng `nobody` → trước bản vá container rơi vào vòng khởi động lại sau deploy.sh [5d/6].
+    // Giả "không ghi được" bằng một đường mà thư mục cha là TỆP (mkdir và ghi đều hỏng, mọi hệ điều hành).
+    const tam = mkdtempSync(join(tmpdir(), "am-ep-chan-"));
+    const chan = join(tam, "la-tep");
+    writeFileSync(chan, "");
+    const duPhong = join(tam, "du-phong.yml");
+    const r = spawnSync("sh", [SCRIPT], {
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH, AM_TEMPLATE: MAU, AM_BIN: "echo",
+        AM_RENDERED: join(chan, "alertmanager.yml"), AM_RENDERED_DU_PHONG: duPhong,
+        AM_TELEGRAM_TOKEN_FILE: join(tmpdir(), "khong-bao-gio-ton-tai-telegram-token"), ...DU,
+      },
+    });
+    const cfg = (() => { try { return readFileSync(duPhong, "utf8"); } catch { return null; } })();
+    rmSync(tam, { recursive: true, force: true });
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/không ghi được/);
+    expect(cfg, "bản cấu hình phải được dựng ở chỗ dự phòng").toContain("smtp.example.com:587");
+    expect(r.stdout, "alertmanager phải được chạy với đúng tệp dự phòng").toContain(`--config.file=${duPhong}`);
+  });
+
   it("SMTP_USER CHƯA ĐẶT (không phải rỗng) vẫn chạy bình thường dưới `set -u`", () => {
     // `$SMTP_USER` trần dưới `set -u` làm script chết với "unbound variable" và mã thoát 1 — mất
     // luôn thông điệp đã soạn sẵn. Compose luôn đặt biến này, nhưng bộ test và người vận hành thì
