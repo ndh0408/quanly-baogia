@@ -199,6 +199,10 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
 /** Style cố định dùng chung — object nội tuyến mới mỗi lần vẽ cũng khiến React so lại ô. */
 const AN_O = { display: "none" } as const;
 
+/** Hai số chỉ khác nhau do sai số dấu phẩy động (≤ 1 phần tỉ) — coi là cùng một số. Số trong báo giá
+ *  lưu tối đa 4 số lẻ, nên một thay đổi thật không bao giờ nhỏ tới mức này. */
+const chiLechDauPhayDong = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+
 /**
  * MỘT DÒNG LƯỚI CÓ GHI NHỚ. React 19 luôn ghi lại name/type/defaultValue của MỌI <input>/<textarea>
  * được vẽ lại, kể cả khi không prop nào đổi — nên cách duy nhất để lưới dài không ì là KHÔNG vẽ lại
@@ -554,7 +558,7 @@ function GridTableInner(props: GridTableProps) {
     for (let pass = 0; pass < Math.max(8, soFx + 1); pass++) {
       let ch = false;
       const tn = tinhTongNhom();
-      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f) && khoaO(i, f) !== oDangGo) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f) && khoaO(i, f) !== oDangGo) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (!(typeof rec[f] === "number" && chiLechDauPhayDong(v, rec[f] as number))) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
   };
@@ -612,7 +616,12 @@ function GridTableInner(props: GridTableProps) {
       // không tính được, dù cờ `_fxLoi` đã rơi ở đâu đó (hồi quy 68f8800: Esc làm mất cờ) → giữ số đang
       // có và tô đỏ như recomputeAll, không báo — ghi 0 ở đây là mất tiền chỉ vì con trỏ đi qua.
       if (v === null && NUMERIC.has(f)) { datCoVong(i, f); if (giuCoHong && raw.trim() === fxCu) return; if (!daDo) baoFxLoi(); }
-      it[f] = NUMERIC.has(f) ? (v ?? 0) : (v != null ? M.fmtNumCell(v) : raw.trim());
+      // Số tính lại chỉ lệch DẤU PHẨY ĐỘNG so với số đang có (máy chủ lưu 4 số lẻ: 5.6375; JS tính
+      // "=2.75*2.05" ra 5.637499999999999) → giữ số đang có. Không thì chỉ BẤM QUA một ô công thức (rời ô,
+      // Enter, Esc) cũng đổi model → mốc so của onGridBlur lệch → báo giá thành "chưa lưu", hỏi khi rời
+      // trang, ghi bản nháp (kiểm trên dev 2026-09-24, báo giá #264).
+      const cu = it[f];
+      it[f] = NUMERIC.has(f) ? (v == null ? 0 : (typeof cu === "number" && chiLechDauPhayDong(v, cu) ? cu : v)) : (v != null ? M.fmtNumCell(v) : raw.trim());
     } else {
       if (it.formulas) { delete (it.formulas as Record<string, string>)[f]; if (!Object.keys(it.formulas).length) delete it.formulas; }
       it[f] = NUMERIC.has(f) ? (raw.trim() === "" ? 0 : M.parseVN(raw)) : (MULTILINE.has(f) ? raw : raw.trim().replace(/\s+/g, " "));
@@ -1791,7 +1800,16 @@ function GridTableInner(props: GridTableProps) {
     }
     if (e.key === "Enter") {
       e.preventDefault(); e.stopPropagation();
-      commitCell(i, f, ae!.value, !daGoO(i, f)); recomputeAll();
+      // Chỉ ĐI NGANG (không gõ gì trong ô): chỉ tính lại + báo đổi khi chốt thật sự đổi ô — như onGridBlur.
+      // Bản trước luôn onChange() → bấm một ô rồi Enter là báo giá thành "chưa lưu" (kiểm trên dev
+      // 2026-09-24). Có gõ thì giữ đường cũ: onNumInput đã ghi số LIVE vào model nên mốc trước/sau trùng
+      // mà công thức phụ thuộc vẫn phải tính lại.
+      const daGoEnter = daGoO(i, f);
+      const mocEnter = () => { const c = items[i] as CoDo; return JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]) + "|" + !!c._fxWarn?.[f] + !!c._fxLoi?.[f]; };
+      const truocEnter = mocEnter();
+      commitCell(i, f, ae!.value, !daGoEnter);
+      const coDoi = daGoEnter || mocEnter() !== truocEnter;
+      if (coDoi) recomputeAll();
       // Ctrl/⌘+Enter (Excel): đang gõ + chọn VÙNG → điền nội dung vào TOÀN vùng; còn lại →
       // CHỐT nội dung nhưng Ở LẠI ô (tiện nhìn kết quả).
       // Ở lại ô thì mốc Esc (escVal/escSo/escLoi) và mốc hoàn tác của phiên phải theo nội dung VỪA
@@ -1809,13 +1827,13 @@ function GridTableInner(props: GridTableProps) {
           recomputeAll(); onChange(); doiMocEscTaiCho(ae, i, f); lockCell(ae); paintSel();   // giữ nguyên vùng chọn như Excel
           return;
         }
-        onChange(); doiMocEscTaiCho(ae, i, f); lockCell(ae); selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); return;
+        if (coDoi) onChange(); doiMocEscTaiCho(ae, i, f); lockCell(ae); selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); return;
       }
       // Đang chọn VÙNG nhiều ô → Enter chạy VÒNG TRONG vùng (xuống, hết cột thì sang cột kế;
       // Shift+Enter đi ngược lại) — Excel.
       const rcSel = rectOf(selRef.current);
       if (rcSel && (rcSel.r0 !== rcSel.r1 || rcSel.c0 !== rcSel.c1)) {
-        onChange();
+        if (coDoi) onChange();
         const keep = { ...selRef.current! };
         let nr = i + (e.shiftKey ? -1 : 1), nc = ci;
         if (nr > rcSel.r1) { nr = rcSel.r0; nc = ci + 1 > rcSel.c1 ? rcSel.c0 : ci + 1; }
@@ -1825,9 +1843,9 @@ function GridTableInner(props: GridTableProps) {
         return;
       }
       // Shift+Enter = đi LÊN (Excel). Xuống dòng trong ô nhiều dòng = Alt+Enter (xử lý ở trên).
-      if (e.shiftKey) { onChange(); moveTo(i - 1, f, false); return; }
+      if (e.shiftKey) { if (coDoi) onChange(); moveTo(i - 1, f, false); return; }
       if (i >= items.length - 1) { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); focusCell(i + 1, f); onChange(); }
-      else { onChange(); moveTo(i + 1, f, false); }
+      else { if (coDoi) onChange(); moveTo(i + 1, f, false); }
       return;
     }
     // Ctrl/⌘+Shift+"+" = chèn hàng dưới · Ctrl/⌘+"-" = xóa các hàng đang chọn NGUYÊN HÀNG (Excel).

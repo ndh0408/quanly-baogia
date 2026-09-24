@@ -1104,7 +1104,14 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.quantity) {
         const qT = it.quantityExact ? qtyExact(qty) : qtyRound(qty);
         const rawQ = it.formulas && it.formulas.quantity;
-        const fxQ = rawQ ? fctx.cellFormula(rawQ, rawQty, { item: it, field: "quantity" }) : null;
+        // Tự kiểm theo số THÔ trước; SL tham chiếu SL hàng khác ("=E3") thì bộ tự kiểm đọc ô được tham
+        // chiếu theo số ĐÃ làm tròn (đúng số Excel thấy ở ô đó) nên lệch số thô → thử lại theo SL đã làm
+        // tròn qT: ô bọc ROUND(…,1) nên kết quả Excel khớp qT là tệp đúng. Không có bước này thì "Chi phí
+        // thi công =E3" thành số chết 5,6 (kiểm trên dev, báo giá #248).
+        const fxQ = rawQ
+          ? (fctx.cellFormula(rawQ, rawQty, { item: it, field: "quantity" })
+            ?? (it.quantityExact ? null : fctx.cellFormula(rawQ, qT, { item: it, field: "quantity" })))
+          : null;
         const qCell = ws.getCell(`${cols.quantity}${r}`);
         if (fxQ) qCell.value = { formula: it.quantityExact ? fxQ : `ROUND(${fxQ},1)`, result: qT };
         else qCell.value = qT;
