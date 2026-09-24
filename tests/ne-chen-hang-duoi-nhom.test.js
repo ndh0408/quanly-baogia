@@ -194,3 +194,45 @@ describe("L49 (đợt 3): hàng chèn dưới NHÓM mà để trống STT", () =
     }
   });
 });
+
+// ── Phản biện đợt 3 — biến thể dưới NHÓM CON bản BANNER ──────────────────────────────────────────
+// Bản sửa trên giữ luật "nền nhóm con + STT trống = nhóm con" cho MỌI mẫu. Ở bản BANNER thì khác: nhóm
+// con do app xuất LUÔN có nhãn ở ô STT (src/excel.ts: `label || String(++subNo)`), còn mục vốn không đánh
+// số. Hàng khách chèn ngay dưới "Nhóm con A1" (mang nền nhóm con) để trống STT, đủ ĐVT + SL + Đơn Giá thường
+// vẫn nạp thành NHÓM CON: Đơn Giá ép 0, SL 2 thành hệ số nhân các mục bên dưới — tổng 1.200.000 thay vì
+// 1.600.000, không cảnh báo dòng. Nhóm con mẫu THƯỜNG vốn để trống STT nên vẫn giữ luật cũ (bài trên).
+describe("L49 (phản biện đợt 3): hàng chèn dưới NHÓM CON bản BANNER để trống STT", () => {
+  const CA = [];
+  for (const code of ["clofull_banner", "gn_banner"]) for (const boA1 of [false, true]) CA.push([code, boA1]);
+  it.each(CA)("%s · bỏ mã A1=%s → là HẠNG MỤC, có cảnh báo tại dòng, tổng đúng", async (code, boA1) => {
+    const muc = [
+      { kind: "section", name: "NHÓM A", quantity: 1 },
+      { kind: "subsection", name: "Nhóm con A1", unit: "bộ", quantity: 1 },
+      { kind: "item", name: "Hạng mục mới", unit: "cái", quantity: 2, unitPrice: 500000 },
+      { kind: "item", name: "Bàn", unit: "cái", quantity: 4, unitPrice: 150000 },
+    ];
+    const { wb, ws, c, hang } = await moTep(code, muc);
+    if (boA1) ws.getCell("A1").value = null;
+    const rCon = hang("Nhóm con A1"), r = hang("Hạng mục mới");
+    expect(r).toBe(rCon + 1);
+    // Tiền đề: nhóm con banner đánh số; hàng chèn chép định dạng hàng nhóm con, STT trống.
+    expect(String(ws.getCell(`${c.stt}${rCon}`).value)).toMatch(/^\d+$/);
+    for (const col of Object.values(c)) ws.getCell(`${col}${r}`).style = JSON.parse(JSON.stringify(ws.getCell(`${col}${rCon}`).style));
+    ws.getCell(`${c.stt}${r}`).value = "";
+    const cfg = TEMPLATE_CONFIGS[code].items;
+    expect(String(ws.getCell(`${c.name}${r}`).fill?.fgColor?.argb).toUpperCase()).toBe(String(cfg.subFill || "FFC9D9EF").toUpperCase());
+    const sheet = await doc(wb);
+    const moi = sheet.items.find((i) => i.name === "Hạng mục mới");
+    expect(moi.kind, "hàng chèn STT trống bị nạp thành nhóm con").toBe("item");
+    expect(moi).toMatchObject({ quantity: 2, unitPrice: 500000 });
+    expect((moi.warn || []).join(" | ")).toMatch(/tô màu nhóm.*STT trống/);
+    expect(sheet.items.map((i) => i.kind)).toEqual(["section", "subsection", "item", "item"]);
+    expect(sheet.items[1].warn).toBeUndefined();
+    expect(computeSubtotal(sheet)).toBe(1000000 + 600000);
+    const { wb: wbGoc } = await moTep(code, muc);
+    if (boA1) wbGoc.worksheets[0].getCell("A1").value = null;
+    const goc = await doc(wbGoc);
+    expect(sheet.numberSubs).toBe(goc.numberSubs);
+    expect(sheet.templateCode).toBe(goc.templateCode);
+  });
+});

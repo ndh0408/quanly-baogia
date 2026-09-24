@@ -628,15 +628,18 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // Chỉ để màu THUA khi đủ cả bốn: STT là số + ĐVT + SL + Đơn Giá thường (không phải tổng các dòng
     // dưới — xem dangHangMuc). Nhóm thật của app CÓ THỂ mang STT số (nhãn tự đặt "1"/"2") và có ĐVT +
     // SL, nhưng khi đó Đơn Giá của nó là công thức gom các dòng dưới (Thành Tiền mục con, hoặc Đơn Giá
-    // nhóm con ở bản BANNER) nên không đủ bốn. Nhóm con bản BANNER (đánh số) thì màu luôn thắng: khách
-    // gõ số đè Đơn Giá nhóm con là ca có thật — xem chú thích FILL_SECTION ở đầu tệp.
+    // nhóm con ở bản BANNER) nên không đủ bốn. Nhóm con bản BANNER (đánh số) CÓ STT thì màu luôn thắng:
+    // khách gõ số đè Đơn Giá nhóm con là ca có thật — xem chú thích FILL_SECTION ở đầu tệp.
     // Nền nhóm CHÍNH còn nhận cả STT TRỐNG (soát toàn diện đợt 3): mẫu Banner mục vốn không đánh số nên
     // khách chèn hàng hay để trống STT, mà nhóm chính do app xuất LUÔN có nhãn ở ô STT (sectionLetter
-    // hoặc nhãn tự đặt — src/excel.ts). Nền nhóm CON thì không: nhóm con mẫu thường vốn để trống STT, và
-    // khách gõ số đè Đơn Giá của nó (đủ bốn điều kiện) vẫn phải là nhóm con.
+    // hoặc nhãn tự đặt — src/excel.ts). Nền nhóm CON mẫu thường thì không: nhóm con mẫu thường vốn để
+    // trống STT, và khách gõ số đè Đơn Giá của nó (đủ bốn điều kiện) vẫn phải là nhóm con. Nhưng bản
+    // BANNER (đánh số nhóm con) thì nhóm con app xuất LUÔN có STT (`label || String(++subNo)`), nên nền
+    // nhóm con + STT TRỐNG + đủ hình dạng hạng mục là hàng chèn — mục Banner vốn không đánh số (phản biện
+    // đợt 3: "Hạng mục mới | cái | 2 | 500.000" dưới "Nhóm con A1" từng nạp thành nhóm con, tổng hụt).
     const sttSo = /^\d+$/.test(stt);
     const mauNhomMaLaHangMuc = dangHangMuc(r) && (FILL_SUB.has(fill)
-      ? sttSo && !effectiveNumberSubs
+      ? effectiveNumberSubs ? stt === "" : sttSo
       : FILL_SECTION.has(fill) && (sttSo || stt === ""));
 
     const prevKind = raws.length ? raws[raws.length - 1].kind : null;
