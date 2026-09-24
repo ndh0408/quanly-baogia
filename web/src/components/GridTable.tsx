@@ -1746,6 +1746,10 @@ function GridTableInner(props: GridTableProps) {
       commitCell(i, f, ae!.value, !daGoO(i, f)); recomputeAll();
       // Ctrl/⌘+Enter (Excel): đang gõ + chọn VÙNG → điền nội dung vào TOÀN vùng; còn lại →
       // CHỐT nội dung nhưng Ở LẠI ô (tiện nhìn kết quả).
+      // Ở lại ô thì mốc Esc (escVal/escSo/escLoi) và mốc hoàn tác của phiên phải theo nội dung VỪA
+      // CHỐT — syncActiveCell, như dán/điền. Bỏ bước này thì F2 → Esc (kể cả không gõ) thấy model lệch
+      // mốc lúc vào ô → commitCell(escVal CŨ) đè giá trị vừa chốt, rồi dropMark bỏ luôn mốc hoàn tác của
+      // phiên Ctrl+Enter → Ctrl+Z/Ctrl+Y không lấy lại được (soát toàn diện đợt 4, phản biện).
       if (ctrl) {
         const rcFill = rectOf(selRef.current);
         if (editing && rcFill && (rcFill.r0 !== rcFill.r1 || rcFill.c0 !== rcFill.c1)) {
@@ -1753,10 +1757,10 @@ function GridTableInner(props: GridTableProps) {
           const m = editUndoRef.current;
           if (!(m && m.i === i && m.f === f)) pushUndo();   // phiên gõ đã có mốc thì snapshot cũ phủ đủ
           for (let r = rcFill.r0; r <= rcFill.r1; r++) { if (items[r]?.kind === "info") continue; for (let c = rcFill.c0; c <= rcFill.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; commitCell(r, FIELDS[c], raw); } }   // GRID-15: bỏ cột STT (ô tính)
-          recomputeAll(); onChange(); lockCell(ae); paintSel();   // giữ nguyên vùng chọn như Excel
+          recomputeAll(); onChange(); syncActiveCell(); lockCell(ae); paintSel();   // giữ nguyên vùng chọn như Excel
           return;
         }
-        onChange(); lockCell(ae); selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); return;
+        onChange(); syncActiveCell(); lockCell(ae); selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); return;
       }
       // Đang chọn VÙNG nhiều ô → Enter chạy VÒNG TRONG vùng (xuống, hết cột thì sang cột kế;
       // Shift+Enter đi ngược lại) — Excel.
