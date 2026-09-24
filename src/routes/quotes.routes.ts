@@ -246,7 +246,7 @@ router.put(
     // Kiểm theo QUYỀN, không theo chuỗi role. `quote:hn:fill` cấp được per-user (trang Phân quyền)
     // và chính nó là cờ bật view lược: GET /:id trả `presentQuoteForAccountHn` cho BẤT KỲ ai có
     // quyền này, còn React SPA cũng nhận diện bằng `me.permissions.includes("quote:hn:fill")`
-    // (web/src/components/Shell.tsx:355). Nếu ở đây vẫn so `role === "account_hn"` thì một manager
+    // (web/src/components/Shell.tsx, hằng `isAccountHn`). Nếu ở đây vẫn so `role === "account_hn"` thì một manager
     // được cấp riêng quote:hn:fill sẽ: nhận editor CHỈ có phần HN, nhưng KHÔNG bị chặn ở PUT /:id —
     // bấm Lưu là gửi payload thiếu toàn bộ sheet báo giá chính và XOÁ TRẮNG báo giá.
     // Xem tests/hn-guard-by-permission.test.js.

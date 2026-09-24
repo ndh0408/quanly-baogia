@@ -992,7 +992,7 @@ nay chỉ còn đúng một nửa:
 ### Cái gì VẪN CÒN HỞ
 
 1. **`addImages` — chỗ pushUndo DUY NHẤT trong 19 chỗ không có cổng**
-   (`web/src/components/GridTable.tsx:1653`). Lý do đo được, không phải phỏng đoán:
+   (`web/src/components/GridTable.tsx`, hàm `addImages`). Lý do đo được, không phải phỏng đoán:
    `fileToImg` (`web/src/components/GridTable.tsx`, hàm `fileToImg`) chờ `im.onload` của `new Image()`
    với `src` là data-URL rồi vẽ vào canvas. jsdom KHÔNG giải mã ảnh nên `onload` không bao
    giờ bắn và promise treo vĩnh viễn. Giả lập được thì cũng chỉ là giả lập chính hàm mình
@@ -1038,7 +1038,7 @@ nay chỉ còn đúng một nửa:
 | Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1167-1168` |
 | Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx` (grep `dangGoIME(e)`) |
 | `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx` (grep `dropMark()`) |
-| `addImages` — **chỗ duy nhất chưa có cổng** | `web/src/components/GridTable.tsx:1653` |
+| `addImages` — **chỗ duy nhất chưa có cổng** | `web/src/components/GridTable.tsx` (grep `const addImages`) |
 
 Mỗi dòng ghi ĐỦ đường dẫn, không phải `:257` trần — `npm run check:refs` chỉ kiểm được số
 dòng khi tên file nằm CÙNG DÒNG với nó.
