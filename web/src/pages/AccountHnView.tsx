@@ -265,6 +265,19 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
         // báo lỗi, giữ nguyên màn hình để người dùng chép phần đang gõ.
         if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
         const khoaXd = khoaNhapRef.current + ":xungdot";
+        // Đợt 4 (như QuoteEditor): khoá ':xungdot' CÒN bản từ lần xung đột TRƯỚC mà người dùng đã chọn GIỮ —
+        // máy chỉ giữ được MỘT bản, ghi thẳng là đè im lặng giá gõ trước xung đột đầu. Hỏi; Hủy (mặc định của
+        // hộp danger) = giữ bản cũ, phần đang gõ ở nguyên trên màn và KHÔNG tải lại (như khi không ghi được).
+        const xdCu = docBanNhap(khoaXd, meId);
+        if (xdCu) {
+          const thay = await confirmModal(
+            "Đã có một bản giữ lại từ lần xung đột trước",
+            `Lúc ${new Date(xdCu.luuLuc).toLocaleString("vi-VN")} bạn đã có một bản giá Hà Nội được giữ lại sau lần xung đột trước (chưa mở lại). Máy này chỉ giữ được MỘT bản như vậy. Thay nó bằng phần bạn đang gõ bây giờ? Hủy thì bản cũ được giữ nguyên, còn phần đang gõ KHÔNG được giữ trên máy này.`,
+            { danger: true, confirmText: "Thay bằng bản đang gõ" },
+          );
+          if (!songRef.current) return;
+          if (!thay) { toast(`${ex.message}. Bạn đã chọn giữ bản cũ — phần đang gõ KHÔNG được giữ trên máy này, hãy chép nó trước khi tải lại trang.`, "error"); return; }
+        }
         const kq = ghiBanNhap(khoaXd, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
         if (kq !== "da-ghi" && kq !== "da-ghi-bo-anh") {
           toast(`${ex.message}. Trình duyệt không giữ được bản tạm trên máy này — hãy chép phần đang gõ trước khi tải lại trang.`, "error");

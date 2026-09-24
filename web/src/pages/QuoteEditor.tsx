@@ -843,13 +843,27 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // lúc đó là dẫn người dùng thẳng tới mất trắng khi tải lại.
         if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
         const khoaXd = khoaNhapRef.current && qRef.current ? khoaNhapRef.current + ":xungdot" : null;
-        const kq = khoaXd ? ghiBanNhap(khoaXd, qRef.current, baseNhapRef.current, meIdRef.current) : "khong-ghi-duoc";
+        // Đợt 4: khoá ':xungdot' CÒN một bản từ lần xung đột TRƯỚC — người dùng đã chọn GIỮ nó (hộp hứa "lần
+        // mở sau sẽ hỏi lại"), hoặc chưa được hỏi vì đã khôi phục bản nháp thường. Máy chỉ giữ được MỘT bản:
+        // ghi thẳng là đè im lặng phần soạn trước xung đột đầu. Hỏi; Hủy (mặc định của hộp danger) = giữ bản
+        // cũ, phần đang soạn vẫn nằm trên màn hình và hộp dưới nói thật là nó KHÔNG được giữ.
+        const xdCu = khoaXd ? docBanNhap(khoaXd, meIdRef.current) : null;
+        let giuBanCu = false;
+        if (xdCu) {
+          giuBanCu = !(await confirmModal(
+            "Đã có một bản giữ lại từ lần xung đột trước",
+            `Lúc ${new Date(xdCu.luuLuc).toLocaleString("vi-VN")} bạn đã có một bản soạn được giữ lại sau lần xung đột trước (chưa mở lại). Máy này chỉ giữ được MỘT bản như vậy. Thay nó bằng phần bạn đang soạn bây giờ? Hủy thì bản cũ được giữ nguyên, còn phần đang soạn KHÔNG được giữ trên máy này.`,
+            { danger: true, confirmText: "Thay bằng bản đang soạn" },
+          ));
+          if (!songRef.current) return false;   // hộp treo sau khi đã rời báo giá này — như dưới
+        }
+        const kq = khoaXd && !giuBanCu ? ghiBanNhap(khoaXd, qRef.current, baseNhapRef.current, meIdRef.current) : "khong-ghi-duoc";
         const giuDuoc = kq === "da-ghi" || kq === "da-ghi-bo-anh";
         const reload = await confirmModal(
           "Báo giá đã bị người khác sửa",
           giuDuoc
             ? `Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Tải lại để xem bản mới nhất — phần bạn đang soạn được GIỮ LẠI trên máy này${kq === "da-ghi-bo-anh" ? " (KHÔNG kèm ảnh trong các dòng)" : ""}, và sau khi tải lại bạn sẽ được hỏi có mở lại để chép / ghi đè không. Tải lại ngay?`
-            : "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất (báo giá quá lớn hoặc trình duyệt không cho giữ bản tạm trên máy) — hãy chép phần cần giữ trước. Tải lại ngay?",
+            : `Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất (${giuBanCu ? "bạn đã chọn giữ bản cũ từ lần xung đột trước" : "báo giá quá lớn hoặc trình duyệt không cho giữ bản tạm trên máy"}) — hãy chép phần cần giữ trước. Tải lại ngay?`,
           { danger: true, confirmText: "Tải lại bản mới" }
         );
         // L62: hộp treo, trả lời sau khi đã rời báo giá này → đừng reload / hạ cờ của trang đang đứng.

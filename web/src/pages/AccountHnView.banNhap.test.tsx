@@ -346,6 +346,39 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     expect((window as Window & { __editorDirty?: boolean }).__editorDirty).toBe(false);
   });
 
+  // Đợt 4: bản ':xungdot' đã GIỮ (Hủy, Hủy) bị nhánh 409 lần hai ghi đè im lặng — cùng khoá; Hủy ở hộp 409 còn
+  // xoá luôn bản mới → mất trắng phần giá gõ trước xung đột đầu.
+  async function giuXdRoi409LanHai() {
+    ghiXd();                                                         // bản đã giữ: 6.600.000
+    confirmMock().mockImplementationOnce(async () => false).mockImplementationOnce(async () => false);   // lúc mở: Hủy, Hủy → giữ
+    await mo();
+    confirmMock().mockClear();
+    goGia("7000000");
+    await cho(250);
+    h.saveHn = async () => { throw new ApiError("Phần Hà Nội vừa được lưu ở nơi khác", 409, null); };
+  }
+
+  it("đợt 4: 409 lần hai, giữ bản cũ (Hủy ở hộp hỏi thay) → bản đã giữ còn NGUYÊN, không tải lại, phần đang gõ còn trên màn", async () => {
+    await giuXdRoi409LanHai();
+    h.confirm = false;                                               // Hủy ở mọi hộp
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(giaTrongNhap(KHOA + ":xungdot"), "bản đã giữ bị đè / bị xoá").toBe(6_600_000);
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Đã có một bản giữ lại từ lần xung đột trước"]);
+    expect(host!.textContent).toContain("7.000.000");
+    expect((ui.toast as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0])).join(" | ")).toMatch(/chép/);
+  });
+
+  it("đợt 4: 409 lần hai, chọn 'Thay bằng bản đang gõ' → hỏi tải lại; bản giữ lại là giá đang gõ", async () => {
+    await giuXdRoi409LanHai();
+    h.confirm = false;                                               // sau đó: Hủy "Mở bản của tôi", Hủy "Bỏ bản?" → giữ
+    confirmMock().mockImplementationOnce(async () => true).mockImplementationOnce(async () => true);    // Thay, Tải lại
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0]).slice(0, 2)).toEqual(["Đã có một bản giữ lại từ lần xung đột trước", "Phần Hà Nội đã thay đổi ở nơi khác"]);
+    expect(giaTrongNhap(KHOA + ":xungdot")).toBe(7_000_000);
+  });
+
   it("X1 đợt 3: đã khôi phục bản nháp thường (bản ':xungdot' chưa hỏi) → Lưu KHÔNG hỏi bản ':xungdot' giữa chừng", async () => {
     await phien1GiuXdRoiGo();
     await mo();                                                      // Khôi phục bản nháp thường

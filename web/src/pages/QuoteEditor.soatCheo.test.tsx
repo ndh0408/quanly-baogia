@@ -62,6 +62,7 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 import { QuoteEditorPage, vanTayMain } from "./QuoteEditor";
 import { ApiError } from "../lib/api";
 import * as ui from "../lib/ui";
+import { khoaBanNhap, docBanNhap } from "../lib/localDraft";
 
 const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all"] };
 type WinDirty = Window & { __editorDirty?: boolean };
@@ -275,6 +276,38 @@ describe("app#13 — Hủy ở hộp 'Mở bản của tôi' không được xo�
     await moEditor();
     expect(oTenKhach().value).toBe("Khách CỦA TÔI");
     expect(coKhoaXd()).toBe(false);
+  });
+});
+
+// Đợt 4: người dùng đã GIỮ bản ':xungdot' (Hủy ở "Mở bản của tôi", Hủy ở "Bỏ bản của bạn?" — hộp hứa "lần
+// mở sau sẽ hỏi lại"). Gặp 409 lần hai trong cùng phiên thì nhánh 409 ghi thẳng vào CÙNG khoá → bản đã giữ
+// bị đè im lặng; Hủy ở hộp 409 còn xoá luôn bản mới → mất trắng phần soạn trước xung đột đầu.
+describe("đợt 4 — 409 lần hai không được đè im lặng bản ':xungdot' đã giữ", () => {
+  const tenTrongXd = () => (docBanNhap(khoaBanNhap(11, 1) + ":xungdot", 1)?.quote as { toCompany?: string } | undefined)?.toCompany;
+  async function giuXdRoi409LanHai(traLoi: boolean[]) {
+    await xungDotRoiTaiLai();                                        // bản giữ lại: "Khách CỦA TÔI"
+    h.hang = [false, false];                                         // Hủy, Hủy → GIỮ
+    await moEditor();
+    expect(tenTrongXd()).toBe("Khách CỦA TÔI");
+    confirmMock().mockClear();
+    goTenKhach("Khách LẦN HAI");
+    h.updateQuote.mockImplementationOnce(async () => { throw new ApiError("xung đột", 409, {}); });
+    h.hang = traLoi;
+    await bam(nut("Lưu"));
+  }
+
+  it("giữ bản cũ (Hủy ở hộp hỏi thay) rồi Hủy ở hộp 409 → bản đã giữ còn NGUYÊN, hộp 409 không hứa giữ phần đang soạn", async () => {
+    await giuXdRoi409LanHai([false, false]);
+    expect(tenTrongXd(), "bản đã giữ bị đè / bị xoá").toBe("Khách CỦA TÔI");
+    expect(confirmMock().mock.calls.map((c) => c[0])[0], "đè bản đã giữ mà không hỏi").toBe("Đã có một bản giữ lại từ lần xung đột trước");
+    expect(loiHop("Báo giá đã bị người khác sửa")).not.toMatch(/GIỮ LẠI/);
+    expect(oTenKhach().value, "phần đang soạn vẫn trên màn hình").toBe("Khách LẦN HAI");
+  });
+
+  it("chọn 'Thay bằng bản đang soạn' rồi Tải lại → bản giữ lại là phần đang soạn", async () => {
+    await giuXdRoi409LanHai([true, true]);
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Đã có một bản giữ lại từ lần xung đột trước", "Báo giá đã bị người khác sửa"]);
+    expect(tenTrongXd()).toBe("Khách LẦN HAI");
   });
 });
 
