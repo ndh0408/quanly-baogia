@@ -43,6 +43,32 @@ describe("L52: hàng tiêu đề gộp dọc 2 hàng", () => {
     expect(s.warnings.join(" | ")).toMatch(/Đơn Giá.*nhiều cột con/);
   });
 
+  // Soát toàn diện đợt 3: luật trên chỉ nhìn ô NGAY DƯỚI tiêu đề cột tiền. Tiêu đề gộp ngang chỉ để
+  // TRANG TRÍ (F3:G3) mà hàng dưới là dòng chữ gộp cả bảng, hay dòng nhóm có chữ ở cột đó, cũng bị báo
+  // "Tiêu đề nhiều tầng … chỉ đọc cột con đầu tiên “* Thông tin chương trình: …”" — cảnh báo sai.
+  it("tiêu đề gộp ngang TRANG TRÍ + hàng dưới là dòng chữ gộp cả bảng → KHÔNG cảnh báo nhiều tầng", async () => {
+    const s = await doc((ws) => {
+      ws.getRow(3).values = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "", "Ghi chú"];
+      ws.mergeCells("F3:G3");
+      ws.getCell("A4").value = "* Thông tin chương trình: Khai trương cửa hàng";
+      ws.mergeCells("A4:H4");
+      ws.getRow(5).values = [1, "Backdrop", "m2", 12, 250000, 3000000, "", ""];
+    });
+    expect(s.items.map((i) => i.name)).toContain("Backdrop");
+    expect(s.warnings.join(" | ")).not.toMatch(/nhiều tầng|nhiều cột con/);
+  });
+
+  it("tiêu đề gộp ngang TRANG TRÍ + hàng dưới là dòng NHÓM có chữ ở cột tiền → KHÔNG cảnh báo nhiều tầng", async () => {
+    const s = await doc((ws) => {
+      ws.getRow(3).values = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "", "Ghi chú"];
+      ws.mergeCells("F3:G3");
+      ws.getRow(4).values = ["A", "PHẦN DỰNG", "", "", "", "Theo thực tế", "", ""];
+      ws.getRow(5).values = [1, "Backdrop", "m2", 12, 250000, 3000000, "", ""];
+    });
+    expect(s.items.map((i) => i.name)).toEqual(["PHẦN DỰNG", "Backdrop"]);
+    expect(s.warnings.join(" | ")).not.toMatch(/nhiều tầng|nhiều cột con/);
+  });
+
   it("tiêu đề MỘT hàng bình thường: không cảnh báo tiêu đề nhiều tầng, không bỏ dòng nào", async () => {
     const s = await doc((ws) => {
       ws.getRow(3).values = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"];

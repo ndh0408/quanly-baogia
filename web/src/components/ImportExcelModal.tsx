@@ -14,6 +14,8 @@ import { addrFields, autoTargetIndexes, giuTruongChiApp, letterOfField, NEW_IMPO
 const MAX_ROWS_PER_SHEET = 1000;
 
 type TargetMode = "replace" | "append" | "skip";
+/** Tên vài hàng để người dùng biết hàng NÀO (danh sách dài thì cắt, kèm số còn lại). */
+const tenVaiHang = (ten: string[]) => ten.slice(0, 3).map((t) => `“${t.slice(0, 40)}”`).join(", ") + (ten.length > 3 ? ` và ${ten.length - 3} hàng khác` : "");
 /** targetIndex = NEW_SHEET → tạo THÊM sheet mới trong báo giá (file nhiều sheet hơn báo giá). */
 export const NEW_SHEET = NEW_IMPORT_SHEET;
 type SheetPlan = { targetIndex: number; mode: TargetMode };
@@ -117,7 +119,7 @@ export function ImportExcelModal({
     // đối chiếu nói đúng thứ sẽ xảy ra.
     const giu = plan.mode !== "append" && target ? giuTruongChiApp(before, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote }) : null;
     const after = plan.mode === "append" ? [...before, ...conv.items] : (giu?.items ?? conv.items);
-    const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0;
+    const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0, tienDaTraDoi = giu?.tienDaTraDoi ?? [];
     const beforeTotal = M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
     const effectiveGroupSubtotal = plan.mode === "append" ? !!target?.groupSubtotal : !!fs.groupSubtotal;
     const afterTotal = M.sheetSubtotalGrouped(after, usesDays, effectiveGroupSubtotal);
@@ -141,7 +143,7 @@ export function ImportExcelModal({
     return {
       fs, plan, target, targetTemplate, templateMismatch, isNew, usesDays, addrDetail, showDetail, detailDropped, columnMoves,
       before, after, beforeTotal, afterTotal, importedTotal, fileTotal, moneyDelta, moneyMismatch,
-      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat,
+      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat, tienDaTraDoi,
     };
   }, [usable, plans, active, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId]);
 
@@ -174,6 +176,7 @@ export function ImportExcelModal({
     const out: ImportApplyPayload["plans"] = [];
     let totals: ImportApplyPayload["totals"];
     let moneyRisk = 0, formulaRisk = 0, templateRisk = 0, rowRisk = 0, sheetRisk = 0, anhRisk = 0, trangThaiRisk = 0;
+    const tienDaTraRisk: string[] = [];
     usable.forEach((fs, i) => {
       const plan = plans[i];
       if (!plan || plan.mode === "skip") return;
@@ -194,6 +197,9 @@ export function ImportExcelModal({
       anhRisk += giu?.anhMat ?? 0;
       // Bảng HN: hàng đã duyệt / đã thanh toán không còn trong tệp → mất dấu duyệt, cờ đã trả, ảnh chứng từ.
       trangThaiRisk += giu?.trangThaiMat ?? 0;
+      // Bảng HN: hàng đã thanh toán bị tệp đổi số tiền → máy chủ từ chối CẢ lần Lưu nếu người dùng không có
+      // quyền thanh toán (reconcileExtraPayments). Modal không biết quyền → nói điều kiện ra, không đoán.
+      tienDaTraRisk.push(...(giu?.tienDaTraDoi ?? []));
       out.push({
         file: fs, targetIndex: plan.targetIndex, mode: plan.mode, templateId: tplId, items: giu?.items ?? conv.items,
         // Chế độ "Nối" thì KHÔNG đụng Discount của sheet đích: khối tổng trong file là của riêng
@@ -227,6 +233,7 @@ export function ImportExcelModal({
       effectiveRemovals.length ? `${effectiveRemovals.length} sheet hiện có sẽ bị xóa` : "",
       anhRisk ? `${anhRisk} ảnh hạng mục ở sheet đích sẽ bị xoá (dòng có ảnh không còn trong file)` : "",
       trangThaiRisk ? `${trangThaiRisk} hàng đã duyệt / đã thanh toán ở sheet đích sẽ bị xoá (mất dấu duyệt, thanh toán và ảnh chứng từ)` : "",
+      tienDaTraRisk.length ? `${tienDaTraRisk.length} hàng đã thanh toán bị đổi số tiền (${tenVaiHang(tienDaTraRisk)}) — nếu bạn không có quyền thanh toán, lần Lưu sẽ bị từ chối` : "",
     ].filter(Boolean);
     if (risks.length && !(await confirmModal(
       "Nạp khi vẫn còn điểm cần kiểm tra?",
@@ -382,7 +389,7 @@ export function ImportExcelModal({
                       <small>{view.fileTotal == null ? "Không tìm thấy dòng Tổng cộng trong file" : `Excel ${M.fmtMoney(view.fileTotal)} · sau nạp ${M.fmtMoney(view.importedTotal)}`}</small>
                     </div>
                   </div>
-                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0 || view.trangThaiMat > 0) && (
+                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0 || view.trangThaiMat > 0 || view.tienDaTraDoi.length > 0) && (
                     <ul className="import-warn">
                       {view.templateMismatch && <li>
                         Bạn đang đưa file dạng <strong>{view.fs.templateName || view.fs.templateCode}</strong> vào sheet dùng <strong>{view.targetTemplate?.name}</strong>. Hãy chọn đúng sheet đích để nhóm và số thứ tự không đổi kiểu.
@@ -396,6 +403,9 @@ export function ImportExcelModal({
                       </li>}
                       {view.trangThaiMat > 0 && <li>
                         <strong>{view.trangThaiMat} hàng đã duyệt / đã thanh toán sẽ bị xoá</strong> cùng các dòng không còn trong file — mất luôn dấu duyệt, thanh toán và ảnh chứng từ. Dòng còn khớp thì giữ nguyên trạng thái.
+                      </li>}
+                      {view.tienDaTraDoi.length > 0 && <li>
+                        <strong>{view.tienDaTraDoi.length} hàng đã thanh toán bị đổi số tiền</strong> ({tenVaiHang(view.tienDaTraDoi)}) — file sửa số lượng / đơn giá / số ngày của hàng đã đánh dấu ĐÃ TRẢ. Nếu bạn không có quyền thanh toán, lần Lưu sẽ bị TỪ CHỐI: nhờ người phụ trách thanh toán bỏ đánh dấu trước, hoặc sửa lại số trong file.
                       </li>}
                       {view.detailDropped > 0 && <li>
                         <strong>{view.detailDropped} dòng trong file có cột “Chi Tiết”</strong>, nhưng mẫu <strong>{view.targetTemplate?.name || "của sheet đích"}</strong> không có cột đó — phần nội dung ấy sẽ KHÔNG được nạp. Muốn giữ thì chọn sheet đích dùng mẫu có cột Chi Tiết (các mẫu Colorfull).

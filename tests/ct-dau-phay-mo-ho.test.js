@@ -16,12 +16,19 @@ const CHUAN_HOA = [
   ["SUM(1,5)", "SUM(1,5)"], ["INT(F3*1,5)", "INT(F3*1,5)"], ["E3*1,5", "E3*1,5"],
   ["ROUND(F1*0,5)", null], ["ROUND(1,5*2)", null], ["MIN(F2*1000,500000)", null], ["PRODUCT(-500000,20%)", null],
   ["SUM(F1,F2*1,5)", null], ["F1,5", null], ["F1.5", null], ["(F1,F2)", null],
+  // Đợt 3 (cong-thuc[3]): công thức kiểu Việt (có ";") thì ",5" đứng ĐẦU một số (sau toán tử / "(" / ";")
+  // là thập phân viết tắt 0,5 — trước đây bị đổi thành dấu tách → "ROUND(F1*;5;0)" → null.
+  ["ROUND(F1*,5;0)", "ROUND(F1*,5;0)"], ["SUM(F1;,5)", "SUM(F1;,5)"], ["ROUND(-,5*F1;0)", "ROUND(-,5*F1;0)"],
 ];
 const RA_SO = [
   ["=ROUND(SUM(F1,F2);-3)", 115000], ["=SUM(F1,F2;100)", 115100], ["=F1*1,5", 87000], ["=ROUND(SUM(F1;F2)*1,1;-3)", 127000],
   ["=SUM(2x1,5)", 3], ["=INT(3x1,5)", 4], ["=2x1,5", 3],
   ["=ROUND(F3*0,5;0)", 525000], ["=ROUND(E2*63000,-3)", 554000], ["=ROUND(E2*63000,0)", 554400], ["=ROUND(F1*1,1,-3)", 64000], ["=ROUND(G3,0)", 1235],
   ["=SUM(1,5)", 1.5], ["=SUM(1,25)", 1.25], ["=SUM(F3*1,5)", 1575000],
+  // CÓ CHỦ ĐÍCH (L34, đợt 3 ghi rõ): "=SUM(1,2)" là 1,2 theo quy ước Việt — mơ hồ thật với SUM(1;2) kiểu
+  // Anh, nhưng đổi đi là hỏng ca Việt hợp lệ "SUM(1,5)" = 1,5. Không đổi.
+  ["=SUM(1,2)", 1.2],
+  ["=ROUND(F1*,5;0)", 29000], ["=SUM(F1;,5)", 58000.5], ["=ROUND(-,5*F1;0)", -29000], ["=F1*,5", 29000],
 ];
 const RA_NULL = [
   "=F1,5", "=F1.5", "=(F1,F2)", "=SUM((F1,F2))", "=F1,F2",
@@ -52,6 +59,8 @@ describe("translateFormula — không bao giờ ghi 'G12.G13' / 'G12.5' / công 
     ["=SUM(2x1,5)", "SUM(2*1.5)"],
     ["=ROUND(F1*1,1,-3)", "ROUND(G12*1.1,-3)"],
     ["=ROUND(E2*63000,0)", "ROUND(F13*63000,0)"],
+    ["=SUM(1,2)", "SUM(1.2)"],
+    ["=ROUND(F1*,5;0)", "ROUND(G12*.5,0)"],
   ])("%s → %s", (fx, ra) => expect(translateFormula(fx, ctx)).toBe(ra));
   it.each(RA_NULL)("%s → null (ghi số)", (fx) => expect(translateFormula(fx, ctx)).toBeNull());
 });

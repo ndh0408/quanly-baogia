@@ -63,3 +63,26 @@ describe("L48 (bảng HN): Thay toàn bộ giữ rid + trạng thái duyệt/tha
     expect(r.trangThaiMat).toBe(0);
   });
 });
+
+// Soát toàn diện đợt 3 (L48, phần máy chủ từ chối): rid đi theo dòng khớp nên máy chủ nhận ra hàng ĐÃ
+// TRẢ — tệp đổi SL / Đơn Giá / Số Ngày của hàng đó thì người không có quyền thanh toán bị từ chối CẢ lần
+// Lưu (400, reconcileExtraPayments). Xem trước phải đếm được để nói ra TRƯỚC khi nạp.
+describe("L48 (bảng HN): đếm hàng ĐÃ THANH TOÁN bị tệp đổi số tiền", () => {
+  it("hàng đã trả bị đổi Đơn Giá → đếm 1; hàng chưa trả đổi giá, hàng đã trả giữ nguyên số → không đếm", () => {
+    const tep: ImportedItem[] = [
+      { kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 260000, row: 7 },   // r-1 đã trả: 250.000 → 260.000
+      { kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 320000, row: 8 },   // r-2 chưa trả
+    ];
+    const r = giuTruongChiApp(truoc(), toGridItems(tep, OPTS).items, { giuGhiChuNoiBo: true });
+    expect(r.tienDaTraDoi).toEqual(["Backdrop"]);
+    const giuSo = giuTruongChiApp(truoc(), toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true });
+    expect(giuSo.tienDaTraDoi).toEqual([]);
+  });
+
+  it("đổi SỐ LƯỢNG hàng đã trả cũng đếm; hàng cũ không ghi số tiền (bản trước chuẩn hoá) thì không — khớp máy chủ", () => {
+    const tep: ImportedItem[] = [{ kind: "item", name: "Backdrop", unit: "m2", quantity: 3, unitPrice: 250000, row: 7 }];
+    expect(giuTruongChiApp(truoc(), toGridItems(tep, OPTS).items, { giuGhiChuNoiBo: true }).tienDaTraDoi).toEqual(["Backdrop"]);
+    const cuKhongSo = [{ kind: "item", name: "Backdrop", unit: "m2", rid: "r-9", paid: true }] as unknown as M.Item[];
+    expect(giuTruongChiApp(cuKhongSo, toGridItems(tep, OPTS).items, { giuGhiChuNoiBo: true }).tienDaTraDoi).toEqual([]);
+  });
+});

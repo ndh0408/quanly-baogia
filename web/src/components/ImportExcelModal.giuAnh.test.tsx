@@ -108,3 +108,30 @@ describe("L48 (bảng HN): Thay toàn bộ không được âm thầm vứt rid 
     expect(html).toMatch(/1 hàng đã duyệt \/ đã thanh toán sẽ bị xoá/);
   });
 });
+
+// Soát toàn diện đợt 3: tệp đổi số tiền của hàng ĐÃ THANH TOÁN (rid đi theo dòng khớp) → người không có
+// quyền thanh toán bị máy chủ từ chối CẢ lần Lưu (400). Trước đây xem trước và hộp xác nhận im lặng.
+describe("L48 (bảng HN): hàng đã thanh toán bị tệp đổi số tiền được báo trước khi nạp", () => {
+  it("xem trước + hộp xác nhận nói tên hàng và rằng lần Lưu sẽ bị từ chối nếu không có quyền thanh toán", async () => {
+    const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
+    const { payload, html } = await napTep([
+      hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1" }),
+      hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2", paid: true }),
+    ]);
+    expect(payload, "không nạp").toBeTruthy();
+    // Số liệu vẫn theo TỆP — không âm thầm nuốt thay đổi; chỉ NÓI RA.
+    expect(payload!.plans[0].items[1].unitPrice).toBe(320000);
+    expect(loiXacNhan.join(" | ")).toMatch(/1 hàng đã thanh toán bị đổi số tiền.*từ chối/);
+    expect(html).toMatch(/1 hàng đã thanh toán bị đổi số tiền/);
+    expect(html).toMatch(/Standee/);
+  });
+
+  it("hàng đã thanh toán giữ nguyên số → không cảnh báo", async () => {
+    const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
+    await napTep([
+      hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", paid: true }),
+      hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2" }),
+    ]);
+    expect(loiXacNhan.join(" | ")).not.toMatch(/đã thanh toán bị đổi/);
+  });
+});

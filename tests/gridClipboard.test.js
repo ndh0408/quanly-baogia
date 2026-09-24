@@ -328,6 +328,26 @@ describe("suyQuyUocSo / parseTheoQuyUoc — quy ước số của cả khối", 
     expect(parseTheoQuyUoc("250,000.00", "us")).toBe(250000);
     expect(parseTheoQuyUoc("(1.500.000)", "vn")).toBe(-1500000);
   });
+  // Soát toàn diện đợt 3 (L51): dấu nghìn chỉ là dấu nghìn khi nhóm sau nó đúng 3 chữ số. Bản trước bỏ
+  // mọi "." ở quy ước VN → "0.5" = 5, "1.5" = 15 (và đối xứng "0,5" = 5 ở quy ước US). Bộ nhập Excel
+  // gọi thẳng hàm này (không qua khopQuyUoc như lưới) nên đọc sai tiền 10 lần.
+  it("parseTheoQuyUoc: MỘT dấu nghìn mà nhóm sau không đủ 3 chữ số → là dấu thập phân", () => {
+    expect(parseTheoQuyUoc("0.5", "vn")).toBe(0.5);
+    expect(parseTheoQuyUoc("1.5", "vn")).toBe(1.5);
+    expect(parseTheoQuyUoc("2.25", "vn")).toBe(2.25);
+    expect(parseTheoQuyUoc("-0.5", "vn")).toBe(-0.5);
+    expect(parseTheoQuyUoc("(1.5)", "vn")).toBe(-1.5);
+    expect(parseTheoQuyUoc("0,5", "us")).toBe(0.5);
+    expect(parseTheoQuyUoc("12,25", "us")).toBe(12.25);
+    // Nhóm đủ 3 chữ số vẫn là nghìn như cũ
+    expect(parseTheoQuyUoc("1.500", "vn")).toBe(1500);
+    expect(parseTheoQuyUoc("1.500.000,5", "vn")).toBe(1500000.5);
+    expect(parseTheoQuyUoc("1,500", "us")).toBe(1500);
+  });
+  it("suyQuyUocSo: '0.5' / '1.5' không phải tín hiệu quy ước (kể cả ở cột tiền)", () => {
+    expect(suyQuyUocSo([["0.5", "1.5"]], tien([1]))).toBeNull();
+    expect(suyQuyUocSo([["0,5", "1,5"]], tien([1]))).toBeNull();
+  });
   it("reconstructExportRows: khối VN có giá '95.000' → SL '1.500' là 1500; khối không tín hiệu → '13.524' vẫn thập phân", () => {
     const R = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
     const N = new Set(["quantity", "unitPrice", "days"]);
@@ -428,6 +448,33 @@ describe("số âm kiểu kế toán '(…)' — GRID-13", () => {
   it("dấu trừ thường vẫn như cũ", () => { expect(parseLooseNumber("-1.500.000")).toBe(-1500000); expect(parseLooseDecimal("-2,5")).toBeCloseTo(-2.5); });
   it("ngoặc KHÔNG bao trọn giá trị thì không đảo dấu", () => expect(parseLooseNumber("1.500 (VAT)")).toBe(1500));
   it("'()' rỗng → 0", () => expect(parseLooseNumber("()")).toBe(0));
+  // Soát toàn diện đợt 3: chuỗi MỞ bằng "(" và ĐÓNG bằng ")" chưa chắc là số âm kế toán — hai chú thích
+  // hai đầu "(Tạm tính) 500.000 (chưa VAT)" bị đọc thành −500.000, không cảnh báo. Chỉ nhận ngoặc kế toán
+  // khi phần TRONG ngoặc là số thuần (chữ số, dấu tách, ký hiệu tiền, %).
+  it("ngoặc bao CHỮ ở hai đầu không phải số âm: '(Tạm tính) 500.000 (chưa VAT)' → 500000", () => {
+    expect(parseLooseNumber("(Tạm tính) 500.000 (chưa VAT)")).toBe(500000);
+    expect(parseLooseDecimal("(tạm) 2,5 (chưa chốt)")).toBeCloseTo(2.5);
+    expect(parseTheoQuyUoc("(Tạm tính) 500.000 (chưa VAT)", "vn")).toBe(500000);
+    expect(suyQuyUocSo([["(Tạm tính) 1.500 (chưa VAT)"]], () => true)).toBeNull();
+  });
+  it("ngoặc kế toán THẬT vẫn là số âm, kể cả kèm ký hiệu tiền / %", () => {
+    expect(parseLooseNumber("(500.000 VNĐ)")).toBe(-500000);
+    expect(parseLooseNumber("( 1.500.000 )")).toBe(-1500000);
+    expect(parseLooseNumber("($1,500.00)")).toBe(-1500);
+    expect(parseLooseNumber("(10%)")).toBeCloseTo(-0.1);
+  });
+  // Phản biện đợt 3: danh sách ký hiệu tiền được gỡ trước khi xét "số thuần" thiếu chữ "đồng" và "US$" —
+  // "(1.500.000 đồng)" (định dạng âm có chữ đồng trong ngoặc) từng đọc +1.500.000 (trước bản sửa là âm).
+  it("ngoặc kế toán kèm chữ 'đồng' / 'dong' / 'US$' vẫn là số âm", () => {
+    expect(parseLooseNumber("(1.500.000 đồng)")).toBe(-1500000);
+    expect(parseLooseNumber("(1.500.000 Đồng)")).toBe(-1500000);
+    expect(parseLooseNumber("(1.500.000 dong)")).toBe(-1500000);
+    expect(parseLooseNumber("(US$1,500)")).toBe(-1500);
+    expect(parseLooseDecimal("(2,5 đồng)")).toBeCloseTo(-2.5);
+    expect(parseTheoQuyUoc("(1.500.000 đồng)", "vn")).toBe(-1500000);
+    // Chữ khác trong ngoặc vẫn không phải số âm.
+    expect(parseLooseNumber("(Tạm tính) 500.000 (chưa VAT)")).toBe(500000);
+  });
 });
 
 describe("GN KHÔNG NGÀY — nhóm con STT TRỐNG (kể cả có ĐVT/giá); Banner nhóm con ĐÁNH SỐ", () => {
@@ -664,5 +711,57 @@ describe("adjustRefsForRowEdit (chèn/xoá hàng)", () => {
   it("không phải công thức thì giữ nguyên", () => {
     expect(adjustRefsForRowEdit("Chi phí thi công", 5, 1)).toBe("Chi phí thi công");
     expect(adjustRefsForRowEdit("=2*3", 5, 1)).toBe("=2*3");
+  });
+});
+
+// Soát toàn diện đợt 3 (L17): bộ lọc ký tự [^\d.,-] bỏ CHỮ nhưng GIỮ chữ số của cụm "m2", "3m5W", "x2"
+// rồi ghép vào số. Ô "m2" lệch cột rơi vào SL đọc thành 2; "12 m2" thành 122; giá "95.000đ/m2" thành
+// 95,0002. Cụm có chữ cái ĐỨNG TRƯỚC chữ số là tên / đơn vị / kích thước — không phải số.
+describe("chữ số dính sau chữ cái không được nhặt làm số — L17 (đợt 3)", () => {
+  it("parseLooseDecimal: 'm2' / '3m5W' / '2x3' → 0; '12 m2' → 12; đơn vị đứng SAU số vẫn giữ số", () => {
+    expect(parseLooseDecimal("m2")).toBe(0);
+    expect(parseLooseDecimal("3m5W")).toBe(0);
+    expect(parseLooseDecimal("2x3")).toBe(0);
+    expect(parseLooseDecimal("12 m2")).toBe(12);
+    expect(parseLooseDecimal("3,5 m2")).toBeCloseTo(3.5);
+    expect(parseLooseDecimal("1.5kg")).toBeCloseTo(1.5);
+    expect(parseLooseDecimal("10 bộ")).toBe(10);
+    expect(parseLooseDecimal("10bộ")).toBe(10);
+  });
+  it("parseLooseNumber: giá '95.000đ/m2' → 95000 (không phải 95,0002); 'm2' → 0", () => {
+    expect(parseLooseNumber("95.000đ/m2")).toBe(95000);
+    expect(parseLooseNumber("50.000 /m2")).toBe(50000);
+    expect(parseLooseNumber("95.000đ")).toBe(95000);
+    expect(parseLooseNumber("m2")).toBe(0);
+  });
+  it("đường quy ước khối (khopQuyUoc → parseTheoQuyUoc) cũng vậy", () => {
+    expect(khopQuyUoc("m2", "vn")).toBe(false);
+    expect(parseTheoQuyUoc("12 m2", "vn")).toBe(12);
+    expect(parseTheoQuyUoc("1.500.000đ/m2", "vn")).toBe(1500000);
+  });
+  // Phản biện đợt 3: bỏ CẢ cụm có chữ đứng trước số thì cả tiền tố hợp lệ ĐẦU ô cũng mất — SL "x2" (2 lần),
+  // giá có mã tiền viết liền "VNĐ1.500.000" / "đ1.500" / "USD1,500" đọc 0 (trước bản sửa L17 đọc đúng số).
+  it("tiền tố 'x' / mã tiền viết LIỀN trước số ở ĐẦU ô vẫn đọc số", () => {
+    expect(parseLooseDecimal("x2")).toBe(2);
+    expect(parseLooseDecimal("X2")).toBe(2);
+    expect(parseLooseDecimal("x1,5")).toBeCloseTo(1.5);
+    expect(parseLooseNumber("VNĐ1.500.000")).toBe(1500000);
+    expect(parseLooseNumber("VND95.000")).toBe(95000);
+    expect(parseLooseNumber("đ1.500")).toBe(1500);
+    expect(parseLooseNumber("USD1,500")).toBe(1500);
+    expect(parseLooseNumber("(VND1.500.000)")).toBe(-1500000);
+    expect(khopQuyUoc("VNĐ1.500.000", "vn")).toBe(true);
+    expect(parseTheoQuyUoc("VNĐ1.500.000", "vn")).toBe(1500000);
+    // Luật L17 giữ nguyên: tiền tố chỉ ở ĐẦU ô, phần sau phải là số; còn lại vẫn bỏ cả cụm.
+    expect(parseLooseDecimal("m2")).toBe(0);
+    expect(parseLooseDecimal("2x3")).toBe(0);
+    expect(parseLooseDecimal("x3m5")).toBe(0);
+    expect(parseLooseDecimal("xe2")).toBe(0);
+    expect(parseLooseDecimal("3 x2")).toBe(3);
+  });
+  it("reconstructExportRows: khối lệch cột, 'm2' rơi vào ô SL → SL 0, không phải 2", () => {
+    const R = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+    const [a] = reconstructExportRows([["1", "Vách", "", "", "m2", "95000", ""]], R, new Set(["quantity", "unitPrice", "days"]));
+    expect(a.quantity).toBe(0);
   });
 });

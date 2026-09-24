@@ -145,3 +145,94 @@ describe("L49 (hồi quy): nhóm chính bản BANNER nhãn số + ĐVT + SL + nh
     expect(computeSubtotal(sheet)).toBe(200000 + 500000 + 900000);
   });
 });
+
+// ── Soát toàn diện đợt 3 — biến thể STT TRỐNG ──────────────────────────────────────────────────
+// Bản sửa trên đòi STT là SỐ. Nhưng ở mẫu Banner mục vốn KHÔNG đánh số (STT trống), và ở mọi mẫu khách
+// chèn hàng tự nhiên hay để trống STT: "'' | Hạng mục mới | cái | 2 | 500.000" dưới NHÓM A (mang nền
+// nhóm) vẫn nạp thành NHÓM — Đơn Giá ép 0, SL 2 thành hệ số nhân các mục bên dưới, không cảnh báo dòng.
+// Nhóm CHÍNH do app xuất luôn có nhãn ở ô STT (sectionLetter hoặc nhãn tự đặt — src/excel.ts), nên nền
+// nhóm chính + STT trống + đủ hình dạng hạng mục là hàng chèn. Nền NHÓM CON thì giữ luật STT số: nhóm con
+// mẫu thường vốn để trống STT, khách gõ số đè Đơn Giá của nó vẫn phải là nhóm con.
+describe("L49 (đợt 3): hàng chèn dưới NHÓM mà để trống STT", () => {
+  const CA = [];
+  for (const code of ["clofull_decor", "clofull_banner", "gn_banner", "marico_decor"]) for (const boA1 of [false, true]) CA.push([code, boA1]);
+  it.each(CA)("%s · bỏ mã A1=%s → là HẠNG MỤC, có cảnh báo tại dòng, tổng đúng", async (code, boA1) => {
+    // Dựng hàng mới NGAY từ tệp app xuất rồi chép định dạng hàng nhóm bên trên (đúng "Format Same As
+    // Above"), thay vì ws.insertRow: ExcelJS chèn hàng KHÔNG dời tham chiếu trong công thức như Excel
+    // thật, nên `=SUM(H16:H16)` của nhóm con banner trỏ về chính nó và kịch bản thành ca khác hẳn.
+    const muc = [MUC[0], { kind: "item", name: "Hạng mục mới", unit: "cái", quantity: 2, unitPrice: 500000 }, ...MUC.slice(1)];
+    const { wb, ws, c, hang } = await moTep(code, muc);
+    if (boA1) ws.getCell("A1").value = null;
+    const rNhom = hang("NHÓM A"), r = hang("Hạng mục mới");
+    expect(r).toBe(rNhom + 1);
+    for (const col of Object.values(c)) ws.getCell(`${col}${r}`).style = JSON.parse(JSON.stringify(ws.getCell(`${col}${rNhom}`).style));
+    ws.getCell(`${c.stt}${r}`).value = "";
+    const cfg = TEMPLATE_CONFIGS[code].items;
+    expect(String(ws.getCell(`${c.name}${r}`).fill?.fgColor?.argb).toUpperCase()).toBe(String(cfg.sectionFill || "FFFAE9DB").toUpperCase());
+    const sheet = await doc(wb);
+    const moi = sheet.items.find((i) => i.name === "Hạng mục mới");
+    expect(moi.kind, "hàng chèn STT trống bị nạp thành nhóm").toBe("item");
+    expect(moi).toMatchObject({ quantity: 2, unitPrice: 500000 });
+    expect((moi.warn || []).join(" | ")).toMatch(/tô màu nhóm/);
+    expect(sheet.items.map((i) => i.kind)).toEqual(["section", "item", "item", "item", "subsection", "item"]);
+    expect(computeSubtotal(sheet)).toBe(1000000 + 500000 + 900000 + 600000);
+    const { wb: wbGoc } = await moTep(code);
+    if (boA1) wbGoc.worksheets[0].getCell("A1").value = null;
+    const goc = await doc(wbGoc);
+    expect(sheet.numberSubs).toBe(goc.numberSubs);
+    expect(sheet.templateCode).toBe(goc.templateCode);
+  });
+
+  it("nhóm con mẫu THƯỜNG (STT trống) bị khách gõ số đè Đơn Giá vẫn là NHÓM CON", async () => {
+    for (const code of ["clofull_decor", "marico_decor"]) {
+      const { wb, ws, c, hang } = await moTep(code);
+      const r = hang("Nhóm con A1");
+      expect(String(ws.getCell(`${c.stt}${r}`).value ?? ""), `${code}: nhóm con mẫu thường để trống STT`).toBe("");
+      ws.getCell(`${c.unitPrice}${r}`).value = 600000;   // phá =SUM
+      const sheet = await doc(wb);
+      expect(sheet.items.map((i) => i.kind), code).toEqual(["section", "item", "item", "subsection", "item"]);
+    }
+  });
+});
+
+// ── Phản biện đợt 3 — biến thể dưới NHÓM CON bản BANNER ──────────────────────────────────────────
+// Bản sửa trên giữ luật "nền nhóm con + STT trống = nhóm con" cho MỌI mẫu. Ở bản BANNER thì khác: nhóm
+// con do app xuất LUÔN có nhãn ở ô STT (src/excel.ts: `label || String(++subNo)`), còn mục vốn không đánh
+// số. Hàng khách chèn ngay dưới "Nhóm con A1" (mang nền nhóm con) để trống STT, đủ ĐVT + SL + Đơn Giá thường
+// vẫn nạp thành NHÓM CON: Đơn Giá ép 0, SL 2 thành hệ số nhân các mục bên dưới — tổng 1.200.000 thay vì
+// 1.600.000, không cảnh báo dòng. Nhóm con mẫu THƯỜNG vốn để trống STT nên vẫn giữ luật cũ (bài trên).
+describe("L49 (phản biện đợt 3): hàng chèn dưới NHÓM CON bản BANNER để trống STT", () => {
+  const CA = [];
+  for (const code of ["clofull_banner", "gn_banner"]) for (const boA1 of [false, true]) CA.push([code, boA1]);
+  it.each(CA)("%s · bỏ mã A1=%s → là HẠNG MỤC, có cảnh báo tại dòng, tổng đúng", async (code, boA1) => {
+    const muc = [
+      { kind: "section", name: "NHÓM A", quantity: 1 },
+      { kind: "subsection", name: "Nhóm con A1", unit: "bộ", quantity: 1 },
+      { kind: "item", name: "Hạng mục mới", unit: "cái", quantity: 2, unitPrice: 500000 },
+      { kind: "item", name: "Bàn", unit: "cái", quantity: 4, unitPrice: 150000 },
+    ];
+    const { wb, ws, c, hang } = await moTep(code, muc);
+    if (boA1) ws.getCell("A1").value = null;
+    const rCon = hang("Nhóm con A1"), r = hang("Hạng mục mới");
+    expect(r).toBe(rCon + 1);
+    // Tiền đề: nhóm con banner đánh số; hàng chèn chép định dạng hàng nhóm con, STT trống.
+    expect(String(ws.getCell(`${c.stt}${rCon}`).value)).toMatch(/^\d+$/);
+    for (const col of Object.values(c)) ws.getCell(`${col}${r}`).style = JSON.parse(JSON.stringify(ws.getCell(`${col}${rCon}`).style));
+    ws.getCell(`${c.stt}${r}`).value = "";
+    const cfg = TEMPLATE_CONFIGS[code].items;
+    expect(String(ws.getCell(`${c.name}${r}`).fill?.fgColor?.argb).toUpperCase()).toBe(String(cfg.subFill || "FFC9D9EF").toUpperCase());
+    const sheet = await doc(wb);
+    const moi = sheet.items.find((i) => i.name === "Hạng mục mới");
+    expect(moi.kind, "hàng chèn STT trống bị nạp thành nhóm con").toBe("item");
+    expect(moi).toMatchObject({ quantity: 2, unitPrice: 500000 });
+    expect((moi.warn || []).join(" | ")).toMatch(/tô màu nhóm.*STT trống/);
+    expect(sheet.items.map((i) => i.kind)).toEqual(["section", "subsection", "item", "item"]);
+    expect(sheet.items[1].warn).toBeUndefined();
+    expect(computeSubtotal(sheet)).toBe(1000000 + 600000);
+    const { wb: wbGoc } = await moTep(code, muc);
+    if (boA1) wbGoc.worksheets[0].getCell("A1").value = null;
+    const goc = await doc(wbGoc);
+    expect(sheet.numberSubs).toBe(goc.numberSubs);
+    expect(sheet.templateCode).toBe(goc.templateCode);
+  });
+});

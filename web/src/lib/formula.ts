@@ -135,6 +135,11 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
  *         Anh (L34): phần sau có từ 4 chữ số hoặc tận cùng bằng 0 ("MIN(F2*1000,500000)",
  *         "PRODUCT(-500000,20%)"), hoặc công thức đã có dấu phẩy khác vừa được đổi thành ";". Khi đó
  *         cũng là mơ hồ → null. Bản cũ đọc "MIN(F2*1000,500000)" thành F2*1000,5 → 1.050.525.000.
+ *         "=SUM(1,2)" vì thế là 1,2 — CÓ CHỦ ĐÍCH: mơ hồ thật với SUM(1;2) kiểu Anh, nhưng đổi đi là
+ *         hỏng ca Việt hợp lệ "SUM(1,5)" = 1,5 (chốt bằng test ở tests/ct-dau-phay-mo-ho.test.js).
+ *   • Công thức đã có ";" mà "," đứng ĐẦU một số (sau toán tử / "(" / ";": "ROUND(F1*,5;0)") → thập
+ *     phân viết tắt 0,5 như ngoài hàm ("=F1*,5"), không phải dấu tách (soát toàn diện đợt 3 — bản sửa
+ *     L29 đổi nó thành ";" nên công thức từng tính đúng ra null).
  * null = "công thức không đọc được": lưới tô ĐỎ khi gõ, còn công thức ĐÃ LƯU thì recomputeAll giữ
  * nguyên số đang có, lúc xuất Excel ghi số — không bao giờ âm thầm ra một con số khác.
  *
@@ -158,7 +163,9 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
       const ds = k.phay.map((i) => {
         const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
         const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
-        return { i, sau, soSo: soTruoc && /^\d/.test(sau) };
+        // Kiểu Việt: "," đứng ĐẦU một số (sau toán tử / "(" / ";") là thập phân viết tắt — ",5" = 0,5.
+        const dauSoViet = kieuViet && /(^|[-+*/(;])$/.test(truoc);
+        return { i, sau, soSo: (soTruoc || dauSoViet) && /^\d/.test(sau) };
       });
       const chac = ds.filter((p) => !p.soSo), soSo = ds.filter((p) => p.soSo);
       for (const p of chac) { out[p.i] = ";"; daDoi = true; }
@@ -215,6 +222,8 @@ function rutGonHam(s: string): string | null {
   }
   return s;
 }
+/** Hàm mà Excel BỎ QUA đối số rỗng (không coi là 0) — xem goiHam. BẢN SAO ở src/quoteFormula.ts. */
+const HAM_BO_DOI_SO_RONG = new Set(["PRODUCT"]);
 /** Kết quả MỘT lời gọi hàm (đối số đã là số/biểu thức số) dưới dạng chuỗi, lỗi → "NaN". */
 function goiHam(ten: string, trong: string): string {
   const fn = FORMULA_FNS[ten.toUpperCase()];
@@ -227,9 +236,19 @@ function goiHam(ten: string, trong: string): string {
   }
   doiSo.push(trong.slice(dau));
   // Đối số KHÔNG đọc được (vd "123.45,2") → cả công thức lỗi, không lọc bỏ im lặng rồi tính tiếp
-  // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ). Đối số rỗng ("SUM()") bỏ qua.
+  // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ).
+  // Đối số RỖNG giữa các dấu tách ("MIN(F1;)", "ROUND(;2)") là 0 như Excel. Bản trước BỎ nó: app ra
+  // MIN = 58.000, AVERAGE = 58.000, ROUND(;2) = 2 trong khi Excel ra 0 / 29.000 / 0 — bộ tự kiểm máy chủ
+  // bỏ y như vậy nên tệp vẫn ghi công thức và Excel tính ra số khác app / PDF (soát toàn diện đợt 3).
+  // RIÊNG PRODUCT thì Excel BỎ QUA đối số rỗng (Excel 16 đo qua COM: PRODUCT(A1,) = A1, PRODUCT(A1,,A2) =
+  // A1·A2), còn không sót số nào ("PRODUCT(;)") thì ra 0 — coi rỗng là 0 thì PRODUCT(F1;) ra 0 trong khi
+  // tệp ghi "PRODUCT(G12,)" và Excel ra 58.000 (phản biện đợt 3, 7b).
+  // Lời gọi không có đối số nào ("SUM()") giữ như cũ: danh sách rỗng.
   let hong = false;
-  const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  const khongDoiSo = doiSo.length === 1 && doiSo[0].trim() === "";
+  let ds = khongDoiSo ? [] : doiSo;
+  if (!khongDoiSo && HAM_BO_DOI_SO_RONG.has(ten.toUpperCase())) { const con = ds.filter((a) => a.trim() !== ""); ds = con.length ? con : ["0"]; }
+  const vals = ds.map((a) => (a.trim() === "" ? 0 : evalArith(a))).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
   if (hong) return "NaN";
   const r = fn(vals);
   // BỌC NGOẶC (L37): trả chuỗi trần thì kết quả dính vào chữ số đứng cạnh — "=2SUM(F2;F3)" thành
@@ -244,18 +263,21 @@ function daiNguyenDoiSo(ca: string, viTri: number, dai: number): boolean {
   const truoc = ca.slice(0, viTri).replace(/\s+$/, "").slice(-1), sau = ca.slice(viTri + dai).replace(/^\s+/, "").charAt(0);
   return (truoc === "" || truoc === "(" || truoc === ";") && (sau === "" || sau === ")" || sau === ";");
 }
-/** Trần số ô khi tự bung một dải (cùng trần MAX_REF_ROWS của bộ tự kiểm ở src/quoteFormula.ts). */
+/** Trần TỔNG số ô mà MỘT lần evalFormula được bung ra qua mọi dải — CỘNG DỒN như evalBudget /
+ *  MAX_REF_ROWS của bộ tự kiểm ở src/quoteFormula.ts. Bản trước kiểm TỪNG dải: "=SUM(F1:F20000;…)" 150
+ *  dải vượt bảng (1.505 ký tự, lưu được) bung 3 triệu ô mỗi lần gọi (đo 809 ms), mà lưới gọi nhiều lượt
+ *  mỗi phím gõ / mỗi lần tính lại → đứng hình cho mọi người mở báo giá đó (soát toàn diện đợt 3). */
 const TRAN_O_BUNG = 20_000;
 const soCot = (L: string) => { let n = 0; for (const ch of L.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
 const chuCot = (n: number) => { let s = "", x = n + 1; while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); } return s; };
 /** Bung dải "F1:F50" thành từng ô qua refs.cell (cột A,B,C… liên tiếp như sơ đồ địa chỉ của lưới).
- *  null = dải vượt trần → cả công thức lỗi, không bung hàng triệu ô ra bộ nhớ. */
-function bungDai(a: string, b: string, refs: FormulaRefs): number[] | null {
+ *  null = dải vượt phần ngân sách còn lại (`tran`) → cả công thức lỗi, không bung hàng triệu ô ra bộ nhớ. */
+function bungDai(a: string, b: string, refs: FormulaRefs, tran: number): number[] | null {
   const pa = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(a), pb = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(b);
   if (!pa || !pb) return [];
   const c0 = Math.min(soCot(pa[1]), soCot(pb[1])), c1 = Math.max(soCot(pa[1]), soCot(pb[1]));
   const r0 = Math.min(Number(pa[2]), Number(pb[2])), r1 = Math.max(Number(pa[2]), Number(pb[2]));
-  if ((c1 - c0 + 1) * (r1 - r0 + 1) > TRAN_O_BUNG) return null;
+  if ((c1 - c0 + 1) * (r1 - r0 + 1) > tran) return null;
   const out: number[] = [];
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) { const v = refs.cell(chuCot(c) + r); out.push(v === null || v === undefined || isNaN(v) ? 0 : v); }
   return out;
@@ -275,7 +297,9 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
     // với số web đã lưu) không lệch. Đừng thêm luật dấu phẩy riêng ở đây mà không thêm ở máy chủ.
     // $ chỉ có ý nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
     let daiLoi = false;
+    let nganSach = TRAN_O_BUNG;   // cộng dồn qua MỌI dải của công thức này (dải trong bảng lẫn dải phải bung)
     s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (m, a, b, viTri: number, ca: string) => {
+      if (daiLoi) return "0";   // đã hỏng: khỏi giải tiếp các dải sau
       // Dải phải là NGUYÊN MỘT đối số (hoặc cả công thức): "SUM(F1:F3*2)" / "SUM(-F1:F3)" bung ra thành
       // SUM(a;b;c*2) — nghĩa khác hẳn, còn Excel ra #VALUE! (hoặc mảng) → tệp lệch app.
       if (!daiNguyenDoiSo(ca, viTri, m.length)) { daiLoi = true; return "0"; }
@@ -283,8 +307,8 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
       // bản cũ thay cả dải bằng "0": mất cả tổng mà ô không đỏ, còn Excel / bộ tự kiểm máy chủ ra
       // 115.000 (L33). Khi đó bung dải qua refs.cell: ô ngoài bảng = 0 y như ô trống Excel và y như
       // tham chiếu ô đơn ("=F1+F9").
-      const list = refs.range(a, b) ?? bungDai(a, b, refs);
-      if (list === null) { daiLoi = true; return "0"; }
+      const list = refs.range(a, b) ?? bungDai(a, b, refs, nganSach);
+      if (list === null || (nganSach -= list.length) < 0) { daiLoi = true; return "0"; }
       return list.length ? list.join(";") : "0";
     });
     if (daiLoi) return null;

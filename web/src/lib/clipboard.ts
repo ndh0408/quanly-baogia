@@ -43,11 +43,17 @@ export function cellsToHTML(matrix: string[][]): string {
 // Số âm kiểu KẾ TOÁN: Excel để định dạng Accounting hiện "(1.500.000)" thay vì "-1.500.000". Bộ lọc
 // ký tự bên dưới bỏ ngoặc nên trước đây số âm bị dán ra DƯƠNG — dòng giảm giá (đơn giá âm) thành
 // dòng cộng thêm, tổng lệch gấp đôi khoản giảm. Nhận ra ngoặc bao TRỌN giá trị thì đảo dấu.
+// Phần TRONG ngoặc phải là SỐ thuần (chữ số, dấu tách, ký hiệu tiền, %): "(Tạm tính) 500.000 (chưa VAT)"
+// cũng mở "(" đóng ")" nhưng là hai chú thích — bản trước đọc thành −500.000, hạng mục thành khoản TRỪ
+// mà không cảnh báo (soát toàn diện đợt 3). Chữ tiền được gỡ trước khi xét gồm cả "đồng" / "dong" / "US$":
+// thiếu chúng thì "(1.500.000 đồng)" bị coi là chú thích, đọc +1.500.000 (phản biện đợt 3). PHẢI khớp bản
+// port ở src/excelImport.ts.
 const AM_KE_TOAN = /^\((.*)\)$/;
+const SO_TRONG_NGOAC = /^[\s\d.,%-]*\d[\s\d.,%-]*$/;
 const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
   const t = String(s).trim().replace(/\s*[₫đ$]$|^[₫đ$]\s*/gi, "").trim();
   const m = AM_KE_TOAN.exec(t);
-  return m ? { s: m[1], am: true } : { s: String(s), am: false };
+  return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
 // PHẦN TRĂM (soát toàn diện L15): Excel/Sheets chép ô định dạng % dưới dạng CHỮ "10%" (giá trị gốc
@@ -60,13 +66,24 @@ const chia100 = (n: number) => Number((n / 100).toPrecision(12));   // 12,5 / 10
 /** Ô là một số phần trăm ("10%", "(12,5%)") — nơi gọi cần biết để giữ đủ số lẻ (xem GridTable pasteCellVal). */
 export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? "")).s) != null;
 
+// CHỮ SỐ DÍNH SAU CHỮ CÁI (soát toàn diện đợt 3, L17): bộ lọc ký tự [^\d.,-] của các hàm đọc số bỏ
+// CHỮ nhưng GIỮ chữ số của cụm "m2", "3m5W", "2x3" rồi ghép vào số — ô "m2" lệch cột rơi vào SL đọc 2,
+// SL "12 m2" đọc 122, giá "95.000đ/m2" đọc 95,0002. Cụm có chữ cái ĐỨNG TRƯỚC chữ số là tên / đơn vị /
+// kích thước, không phải số → bỏ CẢ cụm trước khi lọc ("12m2" = 0: không đoán). Chữ đứng SAU số
+// ("95.000đ", "1.5kg", "10bộ") vẫn là đơn vị, số giữ nguyên. Ngoại lệ: tiền tố "x" (SL "x2" = 2 lần) và mã
+// tiền viết LIỀN ("VNĐ1.500.000", "đ1.500", "USD1,500") ở ĐẦU ô được gỡ trước — bỏ cả cụm thì chúng đọc 0
+// trong khi trước bản sửa L17 đọc đúng số (phản biện đợt 3). Chỉ ở đầu ô: "3 x2" vẫn là 3, "2x3" / "x3m5"
+// vẫn bỏ. PHẢI khớp bản port ở src/excelImport.ts.
+const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
+const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
+
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
 // "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.
 export function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
-  s = String(s).trim().replace(/[^\d.,-]/g, "");
+  s = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!s || s === "-") return 0;
   if (s.includes(",") && s.includes(".")) {
     s = s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
@@ -87,7 +104,7 @@ export function parseLooseDecimal(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
   const dots = (str.match(/\./g) || []).length, commas = (str.match(/,/g) || []).length;
@@ -143,7 +160,7 @@ export function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boole
 // giá "250.000" là khối từ máy locale VN, nơi "2.675" đúng là hai nghìn sáu trăm bảy lăm.
 // Phần CHỮ SỐ + DẤU của một ô (bỏ ngoặc kế toán, ký hiệu tiền, chữ, dấu trừ đầu) — đúng phần mà
 // parseTheoQuyUoc / parseLooseDecimal thật sự đọc, để khuôn được kiểm trên chính thứ sẽ được đọc.
-const loiSo = (s: string) => tachNgoacKeToan(String(s ?? "").trim()).s.trim().replace(/[^\d.,-]/g, "").replace(/^-/, "");
+const loiSo = (s: string) => boCumChuSo(tachNgoacKeToan(String(s ?? "").trim()).s).trim().replace(/[^\d.,-]/g, "").replace(/^-/, "");
 export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
   const t = loiSo(s);
   return qu === "vn"
@@ -152,14 +169,21 @@ export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
 }
 
 /** Đọc số theo quy ước ĐÃ BIẾT của khối (xem suyQuyUocSo): bỏ dấu nghìn, đổi dấu thập phân thành ".".
- *  Chỉ gọi cho ô đã qua khopQuyUoc — ô lệch khuôn mà đọc ép theo quy ước thì ra số sai cả chục lần. */
+ *  Lưới chỉ gọi cho ô đã qua khopQuyUoc — ô lệch khuôn mà đọc ép theo quy ước thì ra số sai cả chục lần.
+ *  Bộ nhập Excel (src/excelImport.ts) gọi THẲNG, không qua khopQuyUoc, nên hàm tự giữ luật khuôn cho ca
+ *  hay gặp nhất: đúng MỘT dấu nghìn mà nhóm sau nó không đủ 3 chữ số ("0.5", "1.5", "2.25" ở quy ước VN;
+ *  "0,5" ở US) thì dấu đó là THẬP PHÂN, y như lưới đọc ô lệch khuôn. Bản trước bỏ mọi "." → SL "0.5"
+ *  thành 5, tiền sai 10 lần (soát toàn diện đợt 3, L51). Nhóm đủ 3 chữ số ("1.500") vẫn là nghìn. */
 export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
-  str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
+  const nhom = str.split(nghin);
+  if (nhom.length === 2 && !str.includes(thapPhan) && nhom[1].length !== 3) str = nhom.join(".");
+  else str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
   return Number(str) || 0;
 }
 

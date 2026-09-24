@@ -163,7 +163,9 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
       const ds = k.phay.map((i) => {
         const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
         const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
-        return { i, sau, soSo: soTruoc && /^\d/.test(sau) };
+        // Kiểu Việt: "," đứng ĐẦU một số (sau toán tử / "(" / ";") là thập phân viết tắt — ",5" = 0,5.
+        const dauSoViet = kieuViet && /(^|[-+*/(;])$/.test(truoc);
+        return { i, sau, soSo: (soTruoc || dauSoViet) && /^\d/.test(sau) };
       });
       const chac = ds.filter((p) => !p.soSo), soSo = ds.filter((p) => p.soSo);
       for (const p of chac) { out[p.i] = ";"; daDoi = true; }
@@ -216,6 +218,8 @@ function rutGonHam(s: string): string | null {
   }
   return s;
 }
+/** Hàm mà Excel BỎ QUA đối số rỗng (không coi là 0) — y hệt HAM_BO_DOI_SO_RONG ở web/src/lib/formula.ts. */
+const HAM_BO_DOI_SO_RONG = new Set(["PRODUCT"]);
 function goiHam(ten: string, trong: string): string {
   const fn = FORMULA_FNS[ten.toUpperCase()];
   if (!fn) return "NaN";
@@ -227,9 +231,15 @@ function goiHam(ten: string, trong: string): string {
   }
   doiSo.push(trong.slice(dau));
   // Đối số KHÔNG đọc được → cả công thức lỗi (GRID-03), y hệt web: không lọc bỏ im lặng rồi tính
-  // tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
+  // tiếp trên phần còn lại. Đối số RỖNG giữa các dấu tách ("MIN(F1;)") là 0 như Excel, y hệt web — bản
+  // trước bỏ nó nên tự kiểm khớp số lưới (58.000) và tệp ghi "MIN(G12,)" mà Excel ra 0 (soát toàn diện
+  // đợt 3). Riêng PRODUCT Excel BỎ QUA đối số rỗng, không sót số nào thì ra 0 — y hệt web (phản biện
+  // đợt 3, 7b). Lời gọi không có đối số nào ("SUM()") giữ như cũ.
   let hong = false;
-  const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  const khongDoiSo = doiSo.length === 1 && doiSo[0].trim() === "";
+  let ds = khongDoiSo ? [] : doiSo;
+  if (!khongDoiSo && HAM_BO_DOI_SO_RONG.has(ten.toUpperCase())) { const con = ds.filter((a) => a.trim() !== ""); ds = con.length ? con : ["0"]; }
+  const vals = ds.map((a) => (a.trim() === "" ? 0 : evalArith(a))).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
   if (hong) return "NaN";
   const r = fn(vals);
   // Bọc ngoặc như web (L37): "=2SUM(F2;F3)" không còn ghép thành 21.113.000 mà là lỗi.
