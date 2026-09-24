@@ -317,14 +317,26 @@ export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] 
  *                      → từ chối cả lần lưu, hỏng TO chứ không âm thầm). Cờ mang theo để màn hình khỏi
  *                      nói sai trước khi Lưu, và để người CÓ quyền không vô tình bỏ dấu đã trả.
  * `trangThaiMat` = số hàng đã duyệt / đã thanh toán KHÔNG ghép được (sẽ mất cùng dòng) — hộp xác nhận nói ra.
+ * `tienDaTraDoi` = tên các hàng ĐÃ THANH TOÁN ghép được mà tệp đổi SL / Đơn Giá / Số Ngày (soát toàn diện
+ *   đợt 3). rid đi theo nên máy chủ nhận ra hàng đã trả, và người không có quyền thanh toán bị TỪ CHỐI cả
+ *   lần Lưu (400). KHÔNG âm thầm giữ số cũ — người nạp có thể chính là người có quyền, và nuốt thay đổi là
+ *   đúng thứ reconcileExtraPayments đã chọn tránh; chỉ NÓI RA trước khi nạp.
  */
 const TRUONG_TRANG_THAI = ["rid", "approved", "approvedAt", "approvedBy", "paid", "paidAt", "paidById", "hasPaidProof"] as const;
 const coTrangThai = (it: Record<string, unknown>) => !!(it.approved || it.paid || it.hasPaidProof || it.paidAt);
+/** Dấu vân tay SỐ TIỀN của một hàng — PHẢI khớp `soTienHang` (src/services/quoteService.ts), nơi máy
+ *  chủ so hàng đã trả. `null` = hàng KHÔNG ghi số tiền (bản trước chuẩn hoá) → máy chủ không so. */
+const soTienHang = (it: Record<string, unknown>): string | null => {
+  const q = it.quantity, dg = it.unitPrice;
+  if (q == null && dg == null) return null;
+  return `${Number(q) || 0}|${Number(dg) || 0}|${it.days != null ? Number(it.days) : ""}`;
+};
 
-export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number } {
+export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; tienDaTraDoi: string[] } {
   type ItemApp = M.Item & { productId?: unknown } & Record<string, unknown>;
   const items = after.slice();
   const daGhep = new Set<number>();
+  const tienDaTraDoi: string[] = [];
   for (const [i, j] of ghepDong(before, after)) {
     daGhep.add(i);
     const cu = before[i] as ItemApp, moi = { ...items[j] } as ItemApp;
@@ -334,6 +346,8 @@ export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGh
     if (typeof cu.rid === "string" && cu.rid && moi.rid == null) {
       const nguon = cu as Record<string, unknown>, dich = moi as Record<string, unknown>;
       for (const k of TRUONG_TRANG_THAI) if (nguon[k] !== undefined) dich[k] = nguon[k];
+      const tienCu = soTienHang(nguon);
+      if (nguon.paid && tienCu !== null && tienCu !== soTienHang(dich)) tienDaTraDoi.push(String(cu.name || "").trim() || "(không tên)");
     }
     items[j] = moi;
   }
@@ -343,7 +357,7 @@ export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGh
     anhMat += cu.images?.length || 0;
     if (coTrangThai(cu as ItemApp)) trangThaiMat++;
   });
-  return { items, anhMat, trangThaiMat };
+  return { items, anhMat, trangThaiMat, tienDaTraDoi };
 }
 
 /** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */
