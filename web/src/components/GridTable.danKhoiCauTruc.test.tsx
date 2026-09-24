@@ -216,6 +216,37 @@ describe("L13 — dán khối KHÔNG phủ nguyên hàng lên hàng NHÓM: giữ
     expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm", "item:X", "item:X"]);
     expect({ u: items[1].unit, q: items[1].quantity, p: items[1].unitPrice }, "tên hạng mục rơi vào ô SL").toEqual({ u: "m2", q: 2, p: 150000 });
   });
+
+  // Soát toàn diện đợt 3 (hồi quy do 235374f): bản 667191b ép MỌI khối về Hạng Mục nên hai ca dưới đúng;
+  // 235374f giữ cột đang chọn cho mọi khối trừ khối trong app bắt đầu từ Hạng Mục.
+  it("khối NGOÀI có cột đầu là chữ 'Banner ⇥ m2 ⇥ 2 ⇥ 100.000' dán vào ô SL của nhóm: vào từ Hạng Mục", () => {
+    const items = [nhom({ name: "Nhóm" })];
+    const o = moLuoi(items);
+    vao(o(0, "quantity"));
+    dan("Banner\tm2\t2\t100.000\r\nStandee\tcái\t1\t50.000\r\n");
+    expect(items.map((x) => x.kind)).toEqual(["section", "item", "item"]);
+    expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice], "chữ 'Banner' đọc thành SL 0, 'm2' thành ĐG 2").toEqual(["Banner", "m2", 2, 100000]);
+    expect([items[2].name, items[2].unit, items[2].quantity, items[2].unitPrice]).toEqual(["Standee", "cái", 1, 50000]);
+  });
+
+  it("khối trong app bắt đầu từ ĐVT (ĐVT → ĐG) dán vào ô SL của nhóm: vào đúng cột nguồn", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", unit: "m2", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "unit")); moRong("ArrowRight", 2);
+    const kho = chep();
+    vao(o(0, "quantity"));
+    dan(kho);
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm", "item:", "item:X"]);
+    expect({ u: items[1].unit, q: items[1].quantity, p: items[1].unitPrice, g: items[1].notes }, "ĐVT rơi vào SL, ĐG vào Ghi chú").toEqual({ u: "m2", q: 2, p: 150000, g: "" });
+  });
+
+  it("khối ngoài CHỮ dán vào ô Ghi chú của nhóm vẫn vào Ghi chú (cột chữ đang chọn được giữ)", () => {
+    const items = [nhom({ name: "Nhóm" })];
+    const o = moLuoi(items);
+    vao(o(0, "notes"));
+    dan("Giao trước 5h\r\nKèm VAT\r\n");
+    expect([items[1].name, items[1].notes, items[2].notes]).toEqual(["", "Giao trước 5h", "Kèm VAT"]);
+  });
 });
 
 describe("L18 — dán khối bắt đầu ở DÒNG THÔNG TIN: số vừa dán phải hiện và vào tổng", () => {

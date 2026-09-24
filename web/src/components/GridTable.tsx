@@ -1482,7 +1482,18 @@ function GridTableInner(props: GridTableProps) {
       // Hạng Mục ở đầu onPaste; khối nguyên hàng ghép theo tên trường nên không phụ thuộc startCol.
       // Riêng khối trong app BẮT ĐẦU từ Hạng Mục thì vẫn vào từ Hạng Mục (phản biện L13): giữ cột SL thì
       // tên rơi vào SL (đọc ra 0), ĐVT/SL/ĐG lệch sang phải — hàng chèn mới nên chỉ có một đích hợp lý.
-      if (internal?.fields?.[0] === "name") startCol = COL_NAME;
+      // Mở rộng cho MỌI khối trong app (soát toàn diện đợt 3): hàng chèn mới thì cột NGUỒN là đích hợp lý
+      // duy nhất — khối ĐVT → ĐG dán vào ô SL từng ra SL 2 (đọc từ "m2"), ĐG 2, Ghi chú "150000". Hàng
+      // nhóm không có ô ĐG/Số Ngày để chọn, nên cũng không có "cố ý lệch cột" nào để giữ.
+      const fDau = internal?.fields?.[0];
+      if (fDau && FIELDS.includes(fDau) && !RO_FIELDS.has(fDau)) startCol = FIELDS.indexOf(fDau);
+      // Khối NGOÀI mà cột đầu đa phần là CHỮ ("Banner ⇥ m2 ⇥ 2 ⇥ 100.000") dán vào ô SỐ của nhóm → vào từ
+      // Hạng Mục, như bản trước L13: giữ cột SL thì "Banner" đọc ra 0, "m2" thành ĐG 2, cột cuối rơi khỏi
+      // bảng. Khối số ("SL ⇥ ĐG") vẫn giữ cột đang chọn; chọn ô CHỮ (ĐVT / Ghi chú) cũng giữ.
+      else if (!internal && NUMERIC.has(FIELDS[startCol])) {
+        const cot0 = rows.map((r) => String(r[0] ?? "").trim()).filter(Boolean);
+        if (cot0.length && cot0.filter((s) => /\p{L}/u.test(s)).length * 2 > cot0.length) startCol = COL_NAME;
+      }
       startRow += 1;
     }
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
