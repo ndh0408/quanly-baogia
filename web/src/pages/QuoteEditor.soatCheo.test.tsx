@@ -170,6 +170,19 @@ describe("app#11 — duyệt HN khi dirty không được nuốt lượt lưu c�
     expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt).toBe(MOC_CU);
   });
 
+  // Đợt 3 (kẽ hở X2, cùng vân tay): account phụ lưu bảng nội bộ qua ghiVungNoiBoDuocGiao — id trang giữ
+  // nguyên, chỉ extraTables đổi. vanTayMain không gồm extraTables thì tưởng không ai lưu, nhận mốc mới.
+  it("account phụ lưu bảng nội bộ (id trang giữ nguyên) trước khi duyệt HN → vẫn giữ mốc CŨ", async () => {
+    const noiBo = (gia: number) => [{ category: "hcm", name: "HCM", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Xe", unit: "chuyến", quantity: 1, unitPrice: gia, rid: "e1" }] }];
+    h.getQuote.mockImplementationOnce(async () => baoGia({ sheets: [trang(101, { extraTables: noiBo(1000) })] }));
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "approved", updatedAt: "2026-09-21T05:00:00.000Z", sheets: [trang(101, { extraTables: noiBo(9000) })] }));
+    await bam(nut("✓ Duyệt"));
+    await bam(nut("Lưu"));
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt).toBe(MOC_CU);
+  });
+
   it("đối chứng: không ai khác lưu (chỉ phần HN đổi) → nhận mốc MỚI như FE-01b", async () => {
     await moEditor();
     goTenKhach("Khách MỚI");

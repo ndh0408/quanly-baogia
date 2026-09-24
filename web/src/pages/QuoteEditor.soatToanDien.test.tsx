@@ -454,6 +454,26 @@ describe("X2 — nhận mốc updatedAt sau khi tích thanh toán chỉ khi khô
     expect(await luuRoiDocMoc()).toBe(MOC_TT);
   });
 
+  // Đợt 3 — kẽ hở X2: vanTayMain không gồm extraTables. Account phụ (phạm vi riêng) lưu bảng nội bộ đi qua
+  // ghiVungNoiBoDuocGiao: chỉ ghi extraTables, GIỮ id trang, bump updatedAt → cả hai vân tay vẫn trùng và
+  // mốc mới (tích thanh toán đến sau) nuốt luôn lượt lưu của người kia.
+  const noiBo = (over: Record<string, unknown> = {}) => [{ category: "hcm", name: "HCM", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Xe", unit: "chuyến", quantity: 1, unitPrice: 1000, rid: "e1", approved: true, paid: false, hasPaidProof: false, ...over }] }];
+  it("account phụ lưu bảng nội bộ chen vào (id trang giữ nguyên, chỉ extraTables đổi) → vẫn gửi mốc CŨ", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo(), sheets: [trang(101, { extraTables: noiBo() })] }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true }), updatedAt: MOC_TT, sheets: [trang(101, { extraTables: noiBo({ unitPrice: 9000 }) })] }));
+    await tichThanhToan();
+    expect(await luuRoiDocMoc(), "mốc mới nuốt lượt lưu bảng nội bộ của account phụ").toBe(MOC_CU);
+  });
+
+  it("đối chứng: bảng nội bộ chỉ đổi trường THANH TOÁN (paid / paidAt / paidById / hasPaidProof) → nhận mốc MỚI", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo(), sheets: [trang(101, { extraTables: noiBo() })] }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true }), updatedAt: MOC_TT, sheets: [trang(101, { extraTables: noiBo({ paid: true, paidAt: MOC_TT, paidById: 3, hasPaidProof: true }) })] }));
+    await tichThanhToan();
+    expect(await luuRoiDocMoc()).toBe(MOC_TT);
+  });
+
   // Báo giá CŨ lưu quoteDate là thời điểm đầy đủ (excel#10): đường nạp đổi nó sang ngày VN (+7h, qua ngày
   // khi ≥17:00 UTC). Vân tay lúc nạp mà tính SAU bước đó thì ra 14/06, còn bản GET kiểm tra cắt ra 13/06 →
   // lần nào cũng tưởng người khác đã lưu, không nhận mốc, lần Lưu kế tự đâm 409.

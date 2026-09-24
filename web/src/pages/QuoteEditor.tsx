@@ -112,9 +112,34 @@ export const vanTayMain = (q: unknown): string => {
     id: s.id ?? null, templateId: s.templateId ?? null, name: s.name ?? "", discount: Number(s.discount) || 0,
     groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
     items: (s.items || []).map((it) => ({ ...it, _k: undefined })),
+    noiBo: noiDungBangNoiBo(s.extraTables),
   }));
   return JSON.stringify({ dau, trang });
 };
+
+/**
+ * Đợt 3 (kẽ hở X2) — NỘI DUNG bảng nội bộ của một trang, cho vanTayMain. Account phụ (phạm vi riêng) lưu
+ * bảng nội bộ qua ghiVungNoiBoDuocGiao (src/services/quoteService.ts): chỉ ghi `extraTables`, GIỮ id
+ * trang, bump updatedAt. Thiếu phần này thì lượt lưu đó không làm vân tay đổi, và mốc mới (tích thanh
+ * toán / duyệt HN đến sau) nuốt luôn nó — lần Lưu kế đè im lặng bảng người kia vừa lưu.
+ * Bỏ đúng các trường route /pay được đổi (`paid*`, `hasPaidProof`) cùng `rid`, `_k`: người khác tích
+ * thanh toán KHÔNG làm nó đổi. GIỮ `approved` — không có route nào đổi nó ngoài đường Lưu, nên nó đổi là
+ * đã có người lưu chen (chặt hơn vanTayHnNoiDung, nơi duyệt HN ở cấp báo giá).
+ */
+function noiDungBangNoiBo(ts: unknown) {
+  type Hang = Record<string, unknown>;
+  type Bang = { category?: unknown; name?: unknown; templateId?: unknown; groupSubtotal?: unknown; items?: Hang[] };
+  return (Array.isArray(ts) ? ts as Bang[] : []).map((t) => ({
+    category: t?.category ?? null, name: t?.name ? String(t.name).trim() : null,
+    templateId: t?.templateId != null ? Number(t.templateId) : null, groupSubtotal: !!t?.groupSubtotal,
+    items: (t?.items || []).map((it) => ({
+      kind: it?.kind ?? null, label: it?.label ?? null, name: String(it?.name || "").trim(), detail: it?.detail ?? null,
+      unit: it?.unit ?? null, quantity: Number(it?.quantity) || 0, quantityExact: !!it?.quantityExact,
+      unitPrice: Number(it?.unitPrice) || 0, days: it?.days != null ? Number(it.days) : null, notes: it?.notes ?? null,
+      formulas: it?.formulas ?? null, approved: !!it?.approved,
+    })),
+  }));
+}
 
 /**
  * X2 — VÂN TAY NỘI DUNG BẢNG HÀ NỘI của một bản máy chủ: chỉ phần người dùng GÕ (tên, mẫu, nhóm, hạng
