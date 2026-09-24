@@ -480,15 +480,21 @@ describe("ẩn tạm / hiện lại", () => {
   });
 });
 
-describe("nhãn chân menu", () => {
-  it("có mã commit + giờ → 'Phiên bản 9dd30dc' / 'Cập nhật 24/09 lúc 14:00' (giờ máy người xem)", () => {
+describe("nhãn chân menu — SỐ phiên bản, không bao giờ hiện dãy chữ", () => {
+  it("có số + giờ → 'Phiên bản 1.2.3' / 'Cập nhật 24/09 lúc 14:00' (giờ máy người xem)", () => {
     const luc = new Date(2026, 8, 24, 14, 0).toISOString();
-    expect(nhanPhienBan({ banGiaoDien: "index-X", sha: "9dd30dc", capNhatLuc: luc }, "index-X")).toEqual({ dong1: "Phiên bản 9dd30dc", dong2: "Cập nhật 24/09 lúc 14:00" });
+    expect(nhanPhienBan({ banGiaoDien: "index-X", sha: "9dd30dc", capNhatLuc: luc, so: "1.2.3", banThu: false })).toEqual({ dong1: "Phiên bản 1.2.3", dong2: "Cập nhật 24/09 lúc 14:00" });
   });
-  it("chưa có mã commit (chạy từ cây làm việc) → dùng mã tệp giao diện, không hiện giờ", () => {
-    expect(nhanPhienBan({ banGiaoDien: "index-X", sha: null, capNhatLuc: null }, "index-CuAAA111")).toEqual({ dong1: "Phiên bản CuAAA111", dong2: null });
+  it("bản trên dev → 'Phiên bản 1.3.0 · bản thử'", () => {
+    expect(nhanPhienBan({ banGiaoDien: "index-X", sha: "9dd30dc", capNhatLuc: null, so: "1.3.0", banThu: true }).dong1).toBe("Phiên bản 1.3.0 · bản thử");
   });
-  it("dev chạy vite (không biết gì) → 'Bản đang phát triển'", () => {
-    expect(nhanPhienBan(null, null).dong1).toBe("Bản đang phát triển");
+  it("chưa có số (chạy cục bộ / bản dựng không qua deploy.sh) → 'Bản đang phát triển' — KHÔNG lôi mã commit hay mã tệp ra", () => {
+    const n = nhanPhienBan({ banGiaoDien: "index-BVwnOoE_", sha: "9dd30dc", capNhatLuc: null, so: null });
+    expect(n.dong1).toBe("Bản đang phát triển");
+    expect(n.dong1).not.toMatch(/9dd30dc|BVwnOoE_/);
+    expect(nhanPhienBan(null).dong1).toBe("Bản đang phát triển");
+  });
+  it("số sai dạng (không phải X.Y.Z) → coi như chưa có", () => {
+    expect(nhanPhienBan({ banGiaoDien: null, sha: null, capNhatLuc: null, so: "abc<script>" }).dong1).toBe("Bản đang phát triển");
   });
 });

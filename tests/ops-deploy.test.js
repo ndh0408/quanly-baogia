@@ -45,6 +45,7 @@ exit 0
 `;
 
 const STUB_GIT = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$STUB_DIR/git.log"
 case "$1" in
   rev-parse) echo ${SHA}; exit 0;;
   status) printf '%s' "\${STUB_GIT_BAN:-}"; exit 0;;
@@ -99,7 +100,8 @@ function chay(args, env = {}, { dau = true } = {}) {
   });
   const log = existsSync(join(stub, "ssh.log")) ? readFileSync(join(stub, "ssh.log"), "utf8") : "";
   const curl = existsSync(join(stub, "curl.log")) ? readFileSync(join(stub, "curl.log"), "utf8") : "";
-  return { code: r.status, out: `${r.stdout}${r.stderr}`, log, curl };
+  const git = existsSync(join(stub, "git.log")) ? readFileSync(join(stub, "git.log"), "utf8") : "";
+  return { code: r.status, out: `${r.stdout}${r.stderr}`, log, curl, git };
 }
 
 describe("INFRA-04 — cổng [0/6]: chỉ ship commit đã qua npm run verify", () => {
@@ -417,5 +419,40 @@ describe("ops#10 — kéo ảnh phụ thuộc (minio quay.io) TRƯỚC migrate, 
     expect(r.out).toMatch(/KÉO ẢNH PHỤ THUỘC HỎNG/);
     expect(r.out).not.toMatch(/MIGRATE HỎNG/);
     expect(r.log).not.toMatch(/prisma migrate deploy/);
+  });
+});
+
+// ── SỐ PHIÊN BẢN CHO NGƯỜI DÙNG (scripts/phien-ban.mjs, chủ repo 2026-09-25) ─────────────────────────
+// Chân menu hiện "Phiên bản 1.2.3". deploy.sh prod gắn tag vX.Y.Z bằng `git` CỦA SHELL (giả được ở đây —
+// scripts/phien-ban.mjs chỉ ĐỌC git: trên Windows Node gọi git THẬT, để nó gắn là test gắn tag thật vào
+// repo), deploy xong mới đẩy tag, hỏng thì gỡ. Số được NỐI vào public/.phien-ban trên máy chủ.
+describe("số phiên bản", () => {
+  it("prod thành công → gắn tag vX.Y.Z, ghi so=/kenh=chinh vào .phien-ban, đẩy tag lên GitHub, sổ phát hành có số", () => {
+    const r = chay(["prod"], { DEPLOY_BO_QUA_KIEM_PUBLIC: "1" });
+    expect(r.code, r.out).toBe(0);
+    const tag = /tag -a (v\d+\.\d+\.\d+) /.exec(r.git)?.[1];
+    expect(tag, `không gắn tag — git.log:\n${r.git}`).toBeTruthy();
+    expect(r.log).toMatch(new RegExp(`printf 'so=%s\\\\nkenh=%s\\\\n' '${tag.slice(1).replace(/\./g, "\\.")}' 'chinh' >> .*public/\\.phien-ban`));
+    expect(r.git).toContain(`push origin ${tag}`);
+    expect(r.git, "deploy thành công mà gỡ tag").not.toContain(`tag -d ${tag}`);
+    expect(r.log).toContain(`"phien_ban":"%s"`);
+    expect(r.out).toContain(`(phiên bản ${tag.slice(1)})`);
+  });
+
+  it("prod HỎNG sau khi gắn tag (kiểm sức khoẻ đỏ) → GỠ tag, không đẩy lên GitHub", () => {
+    const r = chay(["prod"], { DEPLOY_BO_QUA_KIEM_PUBLIC: "1", STUB_READYZ: "hong" });
+    expect(r.code).not.toBe(0);
+    const tag = /tag -a (v\d+\.\d+\.\d+) /.exec(r.git)?.[1];
+    expect(tag, r.git).toBeTruthy();
+    expect(r.git).toContain(`tag -d ${tag}`);
+    expect(r.git).not.toContain(`push origin ${tag}`);
+  });
+
+  it("staging → KHÔNG gắn tag, ghi kenh=thu (chân menu: '… · bản thử')", () => {
+    const r = chay(["staging"], { DEPLOY_BO_QUA_KIEM_PUBLIC: "1" });
+    expect(r.code, r.out).toBe(0);
+    expect(r.git).not.toMatch(/tag -a/);
+    expect(r.git).not.toMatch(/push origin v/);
+    expect(r.log).toMatch(/printf 'so=%s\\nkenh=%s\\n' '\d+\.\d+\.\d+' 'thu' >> .*public\/\.phien-ban/);
   });
 });

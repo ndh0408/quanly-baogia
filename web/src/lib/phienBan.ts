@@ -25,7 +25,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { soLenhGhiDangBay, isPreviewMode } from "./api";
 
-export type PhienBanMayChu = { banGiaoDien: string | null; sha: string | null; capNhatLuc: string | null };
+export type PhienBanMayChu = { banGiaoDien: string | null; sha: string | null; capNhatLuc: string | null; so?: string | null; banThu?: boolean };
 export type TrangThai = {
   cuaToi: string | null;          // bản giao diện trang này đang chạy
   mayChu: PhienBanMayChu | null;  // lần hỏi THÀNH CÔNG gần nhất
@@ -322,13 +322,17 @@ export function batDauTheoDoi(win: Window = window, doc: Document = document): (
   return () => { daChay = false; win.clearInterval(t); doc.removeEventListener("visibilitychange", onVis); win.removeEventListener("online", hoiNeuCan); };
 }
 
-/** "Phiên bản 9dd30dc · 24/09 14:00" — null trường nào thì bỏ phần đó. */
-export function nhanPhienBan(mayChu: PhienBanMayChu | null, cuaToi: string | null): { dong1: string; dong2: string | null } {
-  const ma = mayChu?.sha || (cuaToi ? cuaToi.replace(/^index-/, "") : null);
+/**
+ * "Phiên bản 1.2.3" / "Cập nhật 25/09 lúc 14:00". Chỉ hiện SỐ phiên bản — KHÔNG bao giờ hiện mã commit
+ * hay mã tệp ("9dd30dc", "BVwnOoE_"): người dùng không hiểu mấy dãy chữ đó (chủ repo 2026-09-25). Chưa có
+ * số (chạy cục bộ, bản dựng không qua deploy.sh) → "Bản đang phát triển".
+ */
+export function nhanPhienBan(mayChu: PhienBanMayChu | null): { dong1: string; dong2: string | null } {
   const luc = mayChu?.capNhatLuc ? new Date(mayChu.capNhatLuc) : null;
   const p = (n: number) => String(n).padStart(2, "0");
   const dong2 = luc && !Number.isNaN(luc.getTime())
     ? `Cập nhật ${p(luc.getDate())}/${p(luc.getMonth() + 1)} lúc ${p(luc.getHours())}:${p(luc.getMinutes())}`
     : null;
-  return { dong1: ma ? `Phiên bản ${ma}` : "Bản đang phát triển", dong2 };
+  const so = mayChu?.so && /^\d+\.\d+\.\d+$/.test(mayChu.so) ? mayChu.so : null;
+  return { dong1: so ? `Phiên bản ${so}${mayChu?.banThu ? " · bản thử" : ""}` : "Bản đang phát triển", dong2 };
 }

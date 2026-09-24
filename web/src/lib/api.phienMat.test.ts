@@ -79,10 +79,10 @@ describe("thuLaiTruyVan — không thử lại lỗi đăng nhập / quyền", (
   it("401/403 → không thử lại; lỗi khác → thử lại đúng 1 lần như cũ", async () => {
     const { ApiError } = await import("./api");
     const { thuLaiTruyVan } = await import("./query");
-    expect(thuLaiTruyVan(0, new ApiError("x", 401))).toBe(false);
-    expect(thuLaiTruyVan(0, new ApiError("x", 403))).toBe(false);
-    expect(thuLaiTruyVan(0, new ApiError("x", 500))).toBe(true);
+    expect(thuLaiTruyVan(0, new ApiError("x", 401, {}))).toBe(false);
+    expect(thuLaiTruyVan(0, new ApiError("x", 403, {}))).toBe(false);
+    expect(thuLaiTruyVan(0, new ApiError("x", 500, {}))).toBe(true);
     expect(thuLaiTruyVan(0, new TypeError("Failed to fetch"))).toBe(true);
-    expect(thuLaiTruyVan(1, new ApiError("x", 500))).toBe(false);
+    expect(thuLaiTruyVan(1, new ApiError("x", 500, {}))).toBe(false);
   });
 });

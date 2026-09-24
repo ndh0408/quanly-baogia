@@ -160,6 +160,26 @@ hình service không đổi, nó kết luận "không có gì để làm" và th
 `--force-recreate` ở bước [5/6] và đối chiếu ở [5c/6] cùng vá lỗi này; bước [6/6] verify `/livez`
 KHÔNG bắt được ca đó vì app cũ vẫn trả 200.
 
+### Số phiên bản cho người dùng (1.2.3)
+
+Chân menu hiện `Phiên bản 1.2.3 · Cập nhật 25/09 lúc 14:00` (dải "Có bản mới" cũng nói số) — không
+hiện mã commit, người dùng không hiểu mấy dãy chữ đó (chủ repo 2026-09-25). Quy tắc
+(`scripts/phien-ban.mjs`):
+
+| Số | Tăng khi | Ví dụ |
+|---|---|---|
+| Cuối | lần phát hành chỉ **sửa lỗi / chỉnh nhỏ** (commit `fix:`, `docs:`, `chore:`…) | 1.2.3 → 1.2.4 |
+| Giữa | lần phát hành có **tính năng mới** (ít nhất một commit `feat:`) — số cuối về 0 | 1.2.4 → 1.3.0 |
+| Đầu | thay đổi **lớn** làm đổi cách mọi người làm việc — **chủ repo quyết**, không tự tăng | 1.3.0 → 2.0.0 |
+
+- Số tăng **một lần mỗi lần phát hành lên production**, không theo từng commit.
+- Mốc là tag git `vX.Y.Z`: `deploy.sh prod` tự tính số, gắn tag cho commit sắp ship, deploy xong đẩy
+  tag lên GitHub, deploy hỏng thì gỡ tag. Số đầu: `PHIEN_BAN_LON=1 bash deploy.sh prod`.
+- Dev (`deploy.sh staging`) hiện số **sẽ** phát hành kèm "bản thử" và không gắn tag.
+- Xem trước số kế tiếp: `node scripts/phien-ban.mjs` (in tag trước, số kế tiếp, số tính năng / sửa).
+- Số được `deploy.sh` nối vào `public/.phien-ban` trên máy chủ (`so=` / `kenh=`) ngay sau khi ship;
+  bản dựng không qua `deploy.sh` (chạy cục bộ, `IMAGE_REF`) hiện "Bản đang phát triển".
+
 ## Diễn tập thay đổi postgres/redis
 
 Bước 5 **chỉ** `docker compose up -d --force-recreate app worker` — nó không bao giờ dựng lại

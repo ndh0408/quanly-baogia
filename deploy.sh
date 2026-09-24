@@ -312,6 +312,40 @@ else
   echo "   ⚠️  chưa gắn được :rollback (lượt deploy đầu?) — lùi bằng tag <tên>:<git-sha> trong RELEASES.log"
 fi
 
+# ── SỐ PHIÊN BẢN CHO NGƯỜI DÙNG (scripts/phien-ban.mjs, chủ repo 2026-09-25) ─────────────────────
+# Chân menu hiện "Phiên bản 1.2.3" thay cho mã commit. Production: gắn tag vX.Y.Z cho commit sắp ship
+# (số tính từ các commit kể từ tag trước — quy tắc ở đầu scripts/phien-ban.mjs), deploy xong mới đẩy tag
+# lên GitHub, deploy hỏng thì GỠ tag (bẫy EXIT dưới). Staging: số SẼ phát hành, kèm "bản thử".
+# ĐƯỢC THÌ TỐT, HỎNG THÌ BỎ QUA: không tính được số thì deploy vẫn chạy, chân menu chỉ thiếu số.
+PB_SO=""; PB_KENH=thu; PB_TAG_MOI=""; PB_XONG=""
+PB_JS="$(dirname "$0")/scripts/phien-ban.mjs"
+PB_SO=$(node "$PB_JS" --so "$REF" 2>/dev/null || true)
+[[ "$PB_SO" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || PB_SO=""
+if [ "$TARGET" = prod ]; then
+  PB_KENH=chinh
+  # Script chỉ ĐỌC git; gắn tag ở đây bằng `git` của shell (xem đầu scripts/phien-ban.mjs vì sao).
+  if [ -n "$PB_SO" ] && [ "$(node "$PB_JS" --da-gan "$REF" 2>/dev/null || echo 1)" = 0 ]; then
+    # Ghi chú qua TỆP, không qua ống: ống + pipefail thì node viết ghi chú hỏng (hoặc git không đọc hết
+    # stdin) là cả lệnh gắn tag bị coi là hỏng dù tag đã gắn.
+    PB_GHI="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/phien-ban-$$.txt")"
+    node "$PB_JS" --ghi-chu "$REF" > "$PB_GHI" 2>/dev/null || printf 'Phiên bản %s\n' "$PB_SO" > "$PB_GHI"
+    if git tag -a "v$PB_SO" "$SHA" -F "$PB_GHI" >/dev/null 2>&1; then
+      PB_TAG_MOI="v$PB_SO"
+    else
+      echo "   ⚠️  chưa gắn được tag v$PB_SO (đã có tag cùng tên?) — deploy vẫn tiếp tục"
+    fi
+    rm -f "$PB_GHI"
+  fi
+fi
+go_tag_neu_hong() {
+  if [ -n "$PB_TAG_MOI" ] && [ -z "$PB_XONG" ]; then
+    git tag -d "$PB_TAG_MOI" >/dev/null 2>&1 && echo "   (gỡ tag $PB_TAG_MOI — deploy không xong)"
+  fi
+  return 0
+}
+trap go_tag_neu_hong EXIT
+if [ -n "$PB_SO" ]; then echo "   phiên bản cho người dùng: $PB_SO${PB_TAG_MOI:+ (tag mới $PB_TAG_MOI)}$([ "$PB_KENH" = thu ] && echo ' — bản thử')"; fi
+
 echo "▶ [2/6] Ship tracked files"
 git archive --format=tar.gz "$REF" | ssh "$SSH" "tar xzf - -C $DIR"
 # tar KHÔNG XOÁ file cũ, nên $DIR tích lại mọi file từng được ship. Ba kiểu rác, và cả ba đều đã
@@ -355,6 +389,13 @@ git ls-tree -r --name-only "$REF" -- src shared web/src prisma templates public 
   comm -13 .tracked-src.txt .onvm-src.txt | while read -r f; do rm -f \"\$f\" && echo \"  gỡ mồ côi \$f\"; done; \
   find prisma/migrations -mindepth 1 -type d -empty -delete 2>/dev/null; \
   rm -f .tracked-src.txt .onvm-src.txt; true"
+
+# Số phiên bản: NỐI vào public/.phien-ban vừa ship (git archive đã điền mã commit + giờ ở dòng đầu;
+# tệp được theo dõi nên bước dọn mồ côi ngay trên giữ nó). Image dựng từ $DIR nên mang theo tệp này.
+if [ -n "$PB_SO" ]; then
+  ssh "$SSH" "printf 'so=%s\\nkenh=%s\\n' '$PB_SO' '$PB_KENH' >> $DIR/public/.phien-ban" \
+    || echo "   ⚠️  chưa ghi được số phiên bản — chân menu sẽ không hiện số (deploy vẫn tiếp tục)"
+fi
 
 # ── [2c/6] BỘ SAO LƯU TRÊN HOST CÓ KHỚP REPO KHÔNG (audit 2026-09-22, INFRA-06) ───────────
 # Đo trên production: /opt/quanly/backup-db.sh KHÁC md5 với repo và chỉ có 2/5 timer — mọi bản vá
@@ -553,7 +594,7 @@ REL=$(ssh "$SSH" "cd $DIR && \
         \"SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1\" 2>/dev/null || echo unknown) && \
   DG=\$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}local:{{.Id}}{{end}}' $IMAGE 2>/dev/null || echo unknown) && \
   TS=\$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
-  LINE=\$(printf '{\"ts\":\"%s\",\"target\":\"%s\",\"sha\":\"%s\",\"migration\":\"%s\",\"image\":\"%s\",\"image_tag\":\"%s\",\"khan_cap\":\"%s\"}' \"\$TS\" '$TARGET' '$SHA' \"\$MIG\" \"\$DG\" '$IMAGE_SHA' '$KHAN_CAP_SACH') && \
+  LINE=\$(printf '{\"ts\":\"%s\",\"target\":\"%s\",\"sha\":\"%s\",\"migration\":\"%s\",\"image\":\"%s\",\"image_tag\":\"%s\",\"khan_cap\":\"%s\",\"phien_ban\":\"%s\"}' \"\$TS\" '$TARGET' '$SHA' \"\$MIG\" \"\$DG\" '$IMAGE_SHA' '$KHAN_CAP_SACH' '$PB_SO') && \
   printf '%s\n' \"\$LINE\" >> RELEASES.log && printf '%s' \"\$LINE\"")
 echo "   $REL"
 
@@ -598,5 +639,10 @@ if ! kiem_sau_khi_thay; then
   exit 1
 fi
 echo
-echo "✅ $TARGET now running $SHA  →  $URL"
+PB_XONG=1
+if [ -n "$PB_TAG_MOI" ]; then
+  if git push origin "$PB_TAG_MOI" >/dev/null 2>&1; then echo "   🏷  $PB_TAG_MOI đã đẩy lên GitHub"
+  else echo "   ⚠️  chưa đẩy được tag $PB_TAG_MOI lên GitHub — chạy tay: git push origin $PB_TAG_MOI"; fi
+fi
+echo "✅ $TARGET now running $SHA${PB_SO:+ (phiên bản $PB_SO)}  →  $URL"
 in_duong_lui

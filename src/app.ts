@@ -342,8 +342,8 @@ export function createApp() {
   // PHIÊN BẢN ĐANG PHÁT (src/phienBan.ts) — web hỏi định kỳ để báo "Có bản mới" sau deploy. Công khai
   // (trang đăng nhập cũng cần biết) và đặt TRƯỚC cổng phiên bên dưới: đi qua phiên thì mỗi lần hỏi (5
   // phút/tab) lại làm mới cookie rolling → tab bỏ quên KHÔNG BAO GIỜ hết phiên. Vẫn nằm sau apiLimiter.
-  // Chỉ trả tên tệp giao diện (vốn đã công khai trong index.html) + mã commit rút gọn và giờ commit
-  // (repo công khai) — không gì khác (bỏ giờ khởi động tiến trình: soát 2026-09-24).
+  // Chỉ trả tên tệp giao diện (vốn đã công khai trong index.html), số phiên bản, mã commit rút gọn và
+  // giờ commit (repo công khai) — không gì khác (bỏ giờ khởi động tiến trình: soát 2026-09-24).
   app.get("/api/phien-ban", (_req: Request, res: Response) => {
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json(phienBanHienTai());

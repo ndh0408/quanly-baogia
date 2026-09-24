@@ -91,7 +91,7 @@ export function ThongBaoBanMoi() {
         {hoi ? (
           <span><b>{CAU_HOI[hoi][0]}</b> {CAU_HOI[hoi][1]}</span>
         ) : (
-          <span>Hệ thống vừa được cập nhật.{dd && CAU_DO[dd] ? " " + CAU_DO[dd] : ""}</span>
+          <span>Hệ thống vừa được cập nhật{s.mayChu?.so ? ` lên phiên bản ${s.mayChu.so}` : ""}.{dd && CAU_DO[dd] ? " " + CAU_DO[dd] : ""}</span>
         )}
       </div>
       <div className="tbbm-nut">
@@ -119,7 +119,7 @@ export function ThongBaoBanMoi() {
 export function PhienBanChanMenu() {
   const s = usePhienBan();
   const [dangKiem, setDangKiem] = useState(false);
-  const { dong1, dong2 } = nhanPhienBan(s.coBanMoi ? null : s.mayChu, s.cuaToi);
+  const { dong1, dong2 } = nhanPhienBan(s.coBanMoi ? null : s.mayChu);
   const kiem = async () => {
     setDangKiem(true);
     const co = await kiemTraBanMoi();

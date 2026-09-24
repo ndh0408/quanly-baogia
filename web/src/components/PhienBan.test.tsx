@@ -24,7 +24,7 @@ let hop: HTMLDivElement | null = null;
 const ve = (el: ReactElement) => { hop = document.createElement("div"); document.body.appendChild(hop); root = createRoot(hop); act(() => root!.render(el)); };
 const nut = (chu: string) => [...hop!.querySelectorAll("button")].find((b) => b.textContent?.includes(chu)) as HTMLButtonElement | undefined;
 const dai = () => hop!.querySelector('[data-testid="thong-bao-ban-moi"]');
-const BAN_MOI = { coBanMoi: true, cuaToi: "index-Cu", mayChu: { banGiaoDien: "index-Moi", sha: "9dd30dc", capNhatLuc: null } };
+const BAN_MOI = { coBanMoi: true, cuaToi: "index-Cu", mayChu: { banGiaoDien: "index-Moi", sha: "9dd30dc", capNhatLuc: null, so: "1.3.0", banThu: false } };
 /** Có bản mới + trang đang mở tự khai "tải lại an toàn" (như Danh sách báo giá). */
 const banMoiTrangAnToan = () => { _datLai(BAN_MOI); dangKyTrangAnToan(); };
 
@@ -40,7 +40,7 @@ describe("dải thông báo bản mới", () => {
   it("có bản mới, trang an toàn, không dở gì → 'Tải bản mới' tải ngay", async () => {
     act(() => banMoiTrangAnToan());
     ve(<ThongBaoBanMoi />);
-    expect(dai()?.textContent).toContain("Hệ thống vừa được cập nhật.");
+    expect(dai()?.textContent).toContain("Hệ thống vừa được cập nhật lên phiên bản 1.3.0.");
     await act(async () => { nut("Tải bản mới")!.click(); });
     expect(h.taiBanMoi).toHaveBeenCalledTimes(1);
   });
@@ -48,7 +48,7 @@ describe("dải thông báo bản mới", () => {
   it("trang KHÔNG tự khai an toàn (wizard, Phân quyền, Hồ sơ…) → không nhắc gì thêm, nhưng bấm thì HỎI (Tải luôn / Hủy)", async () => {
     act(() => _datLai(BAN_MOI));
     ve(<ThongBaoBanMoi />);
-    expect(dai()?.textContent?.trim()).toMatch(/Hệ thống vừa được cập nhật\.\s*Tải bản mới/);
+    expect(dai()?.textContent?.trim(), "không kèm câu nhắc nào — chỉ báo có bản mới").toMatch(/Hệ thống vừa được cập nhật lên phiên bản 1\.3\.0\.\s*Tải bản mới/);
     act(() => nut("Tải bản mới")!.click());
     expect(h.taiBanMoi).not.toHaveBeenCalled();
     expect(dai()?.textContent).toContain("có thể còn phần đang nhập chưa lưu");
@@ -208,10 +208,11 @@ describe("dải thông báo bản mới", () => {
 });
 
 describe("chân menu", () => {
-  it("cùng bản → 'Phiên bản <mã commit>'; có bản mới → 'Bạn đang dùng bản CŨ'", () => {
-    act(() => _datLai({ cuaToi: "index-Moi", mayChu: { banGiaoDien: "index-Moi", sha: "9dd30dc", capNhatLuc: null } }));
+  it("cùng bản → 'Phiên bản 1.2.3' (số, không phải mã commit); có bản mới → 'Bạn đang dùng bản CŨ'", () => {
+    act(() => _datLai({ cuaToi: "index-Moi", mayChu: { banGiaoDien: "index-Moi", sha: "9dd30dc", capNhatLuc: null, so: "1.2.3", banThu: false } }));
     ve(<PhienBanChanMenu />);
-    expect(hop!.textContent).toContain("Phiên bản 9dd30dc");
+    expect(hop!.textContent).toContain("Phiên bản 1.2.3");
+    expect(hop!.textContent).not.toContain("9dd30dc");
     expect(nut("Kiểm tra bản mới")).toBeDefined();
     act(() => _datLai(BAN_MOI));
     expect(hop!.textContent).toContain("Bạn đang dùng bản CŨ");

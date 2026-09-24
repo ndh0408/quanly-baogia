@@ -20,8 +20,10 @@ import { fileURLToPath } from "node:url";
 
 export type PhienBan = {
   banGiaoDien: string | null;
-  sha: string | null;
+  sha: string | null;          // chỉ để tra cứu khi cần hỗ trợ — web KHÔNG hiện cho người dùng
   capNhatLuc: string | null;
+  so: string | null;           // số phiên bản cho người dùng "1.2.3" (deploy.sh ghi — scripts/phien-ban.mjs)
+  banThu: boolean;             // bản trên dev (staging): hiện kèm "bản thử"
 };
 
 const GOC_MAC_DINH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -36,6 +38,8 @@ export function docPhienBan(goc: string = GOC_MAC_DINH): PhienBan {
 
   let sha: string | null = null;
   let capNhatLuc: string | null = null;
+  let so: string | null = null;
+  let banThu = false;
   try {
     // TỆP CHẤM (.phien-ban): express.static mặc định bỏ qua dotfile → không bị phục vụ công khai ở
     // /phien-ban.txt kèm mã commit ĐẦY ĐỦ và cache `immutable` 1 năm (soát 2026-09-24). Web chỉ cần
@@ -43,9 +47,12 @@ export function docPhienBan(goc: string = GOC_MAC_DINH): PhienBan {
     const t = fs.readFileSync(path.join(goc, "public", ".phien-ban"), "utf8").trim();
     const m = /^([0-9a-f]{7,40})\s+(\S+)/.exec(t);
     if (m && !Number.isNaN(Date.parse(m[2]))) { sha = m[1].slice(0, 7); capNhatLuc = m[2]; }
+    // Dòng deploy.sh NỐI thêm sau khi ship: `so=1.2.3` + `kenh=chinh|thu`. Chỉ nhận đúng dạng số ba phần.
+    so = /^so=(\d+\.\d+\.\d+)\s*$/m.exec(t)?.[1] ?? null;
+    banThu = /^kenh=thu\s*$/m.test(t);
   } catch { /* thiếu tệp → không có số để hiện */ }
 
-  return { banGiaoDien, sha, capNhatLuc };
+  return { banGiaoDien, sha, capNhatLuc, so, banThu };
 }
 
 // Mỗi tab hỏi 5 phút một lần; đọc đĩa mỗi lượt là thừa, nhưng cũng không giữ mãi — dev cục bộ build lại

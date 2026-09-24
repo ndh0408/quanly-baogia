@@ -33,7 +33,21 @@ describe("docPhienBan", () => {
     expect(pb.banGiaoDien).toBe("index-BVwnOoE_");
     expect(pb.sha).toBe("9dd30dc");
     expect(pb.capNhatLuc).toBe("2026-09-24T13:40:12+07:00");
-    expect(Object.keys(pb).sort(), "không trả gì ngoài ba trường này (soát 2026-09-24: bỏ giờ khởi động tiến trình)").toEqual(["banGiaoDien", "capNhatLuc", "sha"]);
+    expect(Object.keys(pb).sort(), "không trả gì ngoài các trường này (soát 2026-09-24: bỏ giờ khởi động tiến trình)").toEqual(["banGiaoDien", "banThu", "capNhatLuc", "sha", "so"]);
+    expect(pb.so, "chưa qua deploy.sh → chưa có số").toBeNull();
+  });
+
+  it("deploy.sh NỐI số phiên bản vào tệp (so=… / kenh=…) → đọc ra số cho người dùng + cờ bản thử", () => {
+    fs.writeFileSync(path.join(goc, "public", ".phien-ban"), "9dd30dc17584bf3cc5771d2c11dfa44b25eaa2e0 2026-09-24T13:40:12+07:00\nso=1.3.0\nkenh=thu\n");
+    let pb = docPhienBan(goc);
+    expect(pb.so).toBe("1.3.0");
+    expect(pb.banThu).toBe(true);
+    expect(pb.sha, "mã commit vẫn đọc được (tra cứu hỗ trợ), chỉ web không hiện").toBe("9dd30dc");
+    fs.writeFileSync(path.join(goc, "public", ".phien-ban"), "9dd30dc17584bf3cc5771d2c11dfa44b25eaa2e0 2026-09-24T13:40:12+07:00\nso=1.3.0\nkenh=chinh\n");
+    pb = docPhienBan(goc);
+    expect(pb.banThu).toBe(false);
+    fs.writeFileSync(path.join(goc, "public", ".phien-ban"), "9dd30dc17584bf3cc5771d2c11dfa44b25eaa2e0 2026-09-24T13:40:12+07:00\nso=1.3<script>\n");
+    expect(docPhienBan(goc).so, "chỉ nhận đúng dạng X.Y.Z").toBeNull();
   });
 
   it("tệp còn nguyên $Format:…$ (chạy từ cây làm việc) → sha/giờ null, KHÔNG bịa", () => {
