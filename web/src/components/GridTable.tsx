@@ -965,6 +965,11 @@ function GridTableInner(props: GridTableProps) {
     el.style.left = r.left + "px"; el.style.top = (r.bottom + 2) + "px"; el.style.minWidth = Math.max(120, r.width) + "px"; el.classList.remove("hidden");
   };
   useEffect(() => () => closeAuto(), []);   // dọn dropdown khi gỡ lưới
+  // Lưới CÒN GẮN + mảng items đang vẽ — cho hộp hỏi bất đồng bộ (confirmModal gắn thẳng vào <body>, sống
+  // ngoài vòng đời React) kiểm lại trước khi thực thi (soát toàn diện đợt 3 L61).
+  const conGanRef = useRef(false);
+  useEffect(() => { conGanRef.current = true; return () => { conGanRef.current = false; }; }, []);
+  const itemsNayRef = useRef(items); itemsNayRef.current = items;
 
   // ── copy / cut / fill ──────────────────────────────────────────────────────────
   // ô số copy giá trị THÔ (US, không gom nghìn) để Excel nhận; công thức copy nguyên "=…".
@@ -1763,7 +1768,10 @@ function GridTableInner(props: GridTableProps) {
         const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1;
         const xoaNgay = () => { pushUndo(); cancelCut(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); };
         // Nhiều hàng (vd Ctrl+A rồi Ctrl+- định thu nhỏ trang) → hỏi trước, như hộp Delete của Excel.
-        if (n > 1) void confirmModal("Xóa nhiều hàng", `Xóa ${n} hàng đang chọn? (Ctrl+Z hoàn tác được)`, { danger: true, confirmText: `Xóa ${n} hàng` }).then((ok) => { if (ok) xoaNgay(); });
+        // Hộp còn treo mà lưới đã gỡ (rời trình soạn, đổi báo giá/sheet) hay đã nhận mảng items MỚI (nạp
+        // lại sau Lưu) thì xác nhận KHÔNG làm gì: closure cũ sẽ xoá hàng trên mảng cũ rồi gọi onChange →
+        // mark() của trình soạn — cờ "chưa lưu" bật trên trang mới, bản nháp báo giá cũ được hẹn ghi (L61).
+        if (n > 1) { const itemsLucMo = items; void confirmModal("Xóa nhiều hàng", `Xóa ${n} hàng đang chọn? (Ctrl+Z hoàn tác được)`, { danger: true, confirmText: `Xóa ${n} hàng` }).then((ok) => { if (ok && conGanRef.current && itemsNayRef.current === itemsLucMo) xoaNgay(); }); }
         else xoaNgay();
       }
       else { pushUndo(); cancelCut(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
