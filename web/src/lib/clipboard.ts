@@ -370,9 +370,13 @@ export function looksLikeExportPaste(matrix: string[][], startCol: number, field
   // và các cột sau có dữ liệu. Thiếu chúng thì danh sách tên 1–2 chữ cái — cỡ áo "S⏎M⏎L⏎XL" dán từ
   // Zalo, khối "S ⇥ ⇥ cái ⇥ 10 ⇥ 50.000" — bị coi là bản xuất: cột 1 thành STT, mọi hàng thành NHÓM
   // rỗng tên, ĐVT/SL/ĐG lệch cột.
+  // Ngoại lệ (phản biện L16): khối CHỈ gồm hàng nhóm ("A | Nhóm 1", "B | Nhóm 2") chép từ bản xuất thì
+  // không có hàng nào như (2). Nhận nó khi MỌI hàng là chữ nhóm IN HOA kèm tên ở cột 2, và khối dài hơn
+  // số cột nhập (cột STT thừa) — cỡ áo "S | Áo thun" hai cột không lọt, vì thiếu cột thừa.
   if (maxCols < 2) return false;
   const coHangMuc = matrix.some((r) => /^\d*$/.test((r[0] || "").trim()) && r.slice(1).some((c) => String(c ?? "").trim() !== ""));
-  if (!coHangMuc) return false;
+  const chiHangNhom = maxCols > fieldCount && matrix.every((r) => /^[A-Z]{1,2}$/.test((r[0] || "").trim()) && String(r[1] ?? "").trim() !== "");
+  if (!coHangMuc && !chiHangNhom) return false;
   // maxCols > fieldCount: có cột STT thừa (Windows giữ cột rỗng cuối). NHƯNG Excel cho Mac hay BỎ
   // cột rỗng cuối → maxCols == fieldCount; khi đó dựa vào: khối NHIỀU DÒNG + có chữ nhóm A/B (rất khó
   // trùng với dán dữ liệu thường) → vẫn coi là báo giá app xuất ra.

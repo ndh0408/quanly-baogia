@@ -254,4 +254,22 @@ describe("L16 — danh sách tên 1–2 chữ cái (S/M/L/XL) không bị hiểu
     dan("A\tHCM\t\t\t\t95,000\t\t\r\n1\tHallway\tPP\tm2\t1\t95,000\t95,000\t\r\n");
     expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:HCM", "item:Hallway"]);
   });
+
+  it("khối CHỈ gồm hàng nhóm chép từ file app xuất (A | Nhóm 1, B | Nhóm 2, đủ cột) vẫn dựng lại thành nhóm", () => {
+    // Phản biện L16: điều kiện "có hàng STT trống/số" loại mất ca này — 'A'/'B' rơi vào Hạng Mục,
+    // tên nhóm sang cột kế bên. Bản xuất (7 cột: STT…Ghi Chú) dài hơn số cột nhập (5) → có cột STT thừa.
+    const items = [mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("A\tNhóm 1\t\t\t\t\t\r\nB\tNhóm 2\t\t2\t\t\t\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm 1", "section:Nhóm 2"]);
+  });
+
+  it("hai cột 'cỡ ⇥ tên' ngắn (S | Áo thun, M | Áo thun) KHÔNG bị coi là các nhóm", () => {
+    const items = [mk({}), mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("S\tÁo thun\r\nM\tÁo thun\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}:${x.unit}`)).toEqual(["item:S:Áo thun", "item:M:Áo thun"]);
+  });
 });
