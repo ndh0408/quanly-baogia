@@ -528,6 +528,9 @@ function GridTableInner(props: GridTableProps) {
   // Ô THAM CHIẾU HỎNG (`_fxWarn`) cũng không tính lại — giữ số đang có, như ô vòng lặp: công thức
   // gốc trỏ sai chỗ, tính nó chỉ lặng lẽ lấy số của hàng khác (xoá hàng A thì C "=E1" ăn SL của B)
   // trong khi Excel báo #REF!.
+  // Công thức ở cột SỐ mà KHÔNG tính được (null: mơ hồ dấu phẩy, khoảng trắng giữa số, dải sai chỗ,
+  // chia 0…) → GIỮ số đang có nhưng tô ĐỎ (GRID-03, như commitCell). Bản trước chỉ `continue`: công thức
+  // ĐÃ LƯU nay trả null đứng im với số cũ khi ô đầu vào đổi, không một dấu hiệu gì (soát toàn diện đợt 3).
   const recomputeAll = () => {
     if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
     const vong = oVongLap();
@@ -535,10 +538,29 @@ function GridTableInner(props: GridTableProps) {
     for (let pass = 0; pass < Math.max(8, soFx + 1); pass++) {
       let ch = false;
       const tn = tinhTongNhom();
-      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) continue; /* GRID-03: công thức lỗi giữ nguyên cờ đỏ do commitCell đặt */ ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f)) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
   };
+  /* ── MỞ LƯỚI: CÔNG THỨC ĐÃ LƯU KHÔNG TÍNH ĐƯỢC PHẢI ĐỎ NGAY (soát toàn diện đợt 3) ──────────────
+     Cờ đỏ chỉ sống trong phiên (zod máy chủ bỏ `_fxLoi`), còn lúc dựng lưới KHÔNG chạy recomputeAll —
+     tính lại là ghi đè số đã lưu (số theo bộ làm tròn/đọc dấu phẩy cũ, chờ quyết riêng). Nên mở lại báo
+     giá có "=ROUND(F1*0,5)" (nay mơ hồ → null) là ô trắng tinh, số đứng im tới khi người dùng sửa chính
+     ô đó. Mỗi khi nhận mảng items MỚI (mở/đổi sheet, nạp lại sau Lưu) soát MỘT lượt chỉ để BẬT cờ, cùng
+     luật recomputeAll: vòng lặp · lỗi tính ở cột số. Không ghi số, không gỡ cờ nào. Chạy ngay trong lượt
+     vẽ (trước khi dựng dòng) để ô đỏ từ khung hình đầu; lặp lại thì vô hại (chỉ bật cờ). */
+  const batCoCongThucLoi = () => {
+    if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
+    const vong = oVongLap(); const tn = tinhTongNhom();
+    for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; for (const f in it.formulas) {
+      if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; }
+      if (coThamChieuHong(it, f)) continue;
+      fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn));
+      if (fxVongRef.current || (v === null && NUMERIC.has(f))) datCoVong(i, f);
+    } }
+  };
+  const daSoatFxRef = useRef<ItemK[] | null>(null);
+  if (daSoatFxRef.current !== items) { daSoatFxRef.current = items; batCoCongThucLoi(); }
   const peekFx = (fx: string, val: string) => toast(`Công thức: ${fx}  =  ${val}`, "info");
 
   // Ctrl+Enter / điền vùng gọi commitCell cho cả trăm ô — chỉ báo MỘT lần mỗi nhịp.
@@ -550,9 +572,11 @@ function GridTableInner(props: GridTableProps) {
   // rồi tính lại công thức gốc, C "=E1" (A đã xoá) lặng lẽ ăn SL của B chỉ vì con trỏ đi ngang, dù
   // toast dán Excel còn bảo người dùng "bấm vào kiểm tra". Chuỗi không đổi thì giữ cờ và giữ số,
   // không tính lại. Có GÕ (kể cả gõ lại y nguyên) thì nơi gọi không bật cờ này → chốt như thường.
+  // Ô đỏ vì LỖI TÍNH (`_fxLoi`: công thức đã lưu nay trả null, vòng lặp) cũng vậy: đi ngang qua mà chốt
+  // lại thì nhánh GRID-03 ghi 0 đè số đã lưu — bấm vào "=ROUND(F1*0,5)" (525.000) rồi bấm ra là mất tiền.
   const commitCell = (i: number, f: string, raw: string, giuCoHong = false) => {
     const it = items[i] as Record<string, unknown>; raw = String(raw);
-    if (giuCoHong && coThamChieuHong(it, f) && raw.trim() === (it.formulas as Record<string, string> | undefined)?.[f]) return;
+    if (giuCoHong && (coThamChieuHong(it, f) || (it as CoDo)._fxLoi?.[f]) && raw.trim() === (it.formulas as Record<string, string> | undefined)?.[f]) return;
     // Người dùng đã sửa ô → bỏ cờ "tham chiếu hỏng / công thức Excel chưa dịch được" và cờ lỗi tính
     // cũ của ô này; công thức mới hỏng thì các nhánh dưới bật lại cờ lỗi tính.
     const daDo = !!((it as CoDo)._fxWarn?.[f] || (it as CoDo)._fxLoi?.[f]);   // đã đỏ từ trước (rời ô một công thức lỗi cũ) → không báo lại
