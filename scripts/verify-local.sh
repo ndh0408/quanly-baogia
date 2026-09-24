@@ -205,9 +205,7 @@ do_toast() {
         // mà không đưa manh mối, và tôi đã mất một lượt verify vì nó.
         console.error("    (không bài nào ĐỎ — file hỏng lúc NẠP, thông điệp ở cấp suite:)");
         for (const r of d.testResults) {
-          if (r.message) console.error("      " + String(r.message).split("
-").slice(0, 12).join("
-      "));
+          if (r.message) console.error("      " + String(r.message).split("\n").slice(0, 12).join("\n      "));
           if (r.status && r.status !== "passed") console.error("      suite " + (r.name || "?") + " → " + r.status);
         }
       }

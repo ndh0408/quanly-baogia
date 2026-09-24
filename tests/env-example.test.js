@@ -82,8 +82,12 @@ describe(".env.example ↔ src/config.ts", () => {
     // Nạp config trong tiến trình con với môi trường TRẦN — process.env của vitest đã bị setup.js
     // và người chạy đặt thêm biến, đọc ở đây sẽ ra giá trị của môi trường chứ không phải mặc định.
     const { execFileSync } = require("node:child_process");
+    // DOTENV_CONFIG_PATH trỏ vào tệp KHÔNG tồn tại: src/config.ts mở đầu bằng `import "dotenv/config"`,
+    // nên thiếu dòng này thì tiến trình con nạp `.env` của cây đang chạy. Worktree không có `.env` → xanh;
+    // cây chính (D:\QuanLY có `.env` dev với 127.0.0.1/us-east-1) → đỏ oan ở verify (2026-09-24).
     const env = { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, NODE_ENV: "development",
-      DATABASE_URL: "postgresql://a:b@127.0.0.1:5432/x", SESSION_SECRET: "x".repeat(40) };
+      DATABASE_URL: "postgresql://a:b@127.0.0.1:5432/x", SESSION_SECRET: "x".repeat(40),
+      DOTENV_CONFIG_PATH: require("node:path").join(require("node:os").tmpdir(), `khong-co-env-${process.pid}`) };
     const out = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e",
       "const { config } = await import('./src/config.ts'); process.stdout.write(JSON.stringify(config));"],
     { cwd: ROOT, env, encoding: "utf8" });
