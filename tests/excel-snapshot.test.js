@@ -156,12 +156,24 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // chốt bằng ảnh chụp: cùng màu hàng nhóm Colorfull). Giá trị, định dạng số, chữ đậm giữ nguyên.
       //
       // ── ĐỔI CÓ CHỦ Ý NHƯNG HASH KHÔNG ĐỔI: 2026-09-24 (chiều cao hàng, soát toàn diện đợt 3) ──
-      // Bản chụp này KHÔNG chụp chiều cao hàng, nên đợt nới chiều cao dưới đây không làm đổi hash nào.
-      // Đã so TOÀN BỘ chiều cao hàng + giá trị/căn lề/cỡ chữ từng ô của 72 sheet (6 mẫu × có/không
-      // cột ảnh × tiêu đề ngắn/dài) trước và sau: khác ĐÚNG hai loại hàng, không ô nào đổi —
-      //   · GN (marico_decor / unibenfood / gn_banner), hàng 7 tiêu đề một dòng: 17,5 → 18,75pt;
-      //   · Colorfull (cả ba mẫu), hàng 4 tiêu đề cột: 25 → 34,5pt ("THÀNH TIỀN" xuống hai dòng).
-      // Chốt riêng cho hai thay đổi đó: tests/xl-cao-hang-tieu-de-cot.test.js.
+      // Bản chụp này KHÔNG chụp chiều cao hàng (cũng không chụp căn lề), nên đợt nới chiều cao dưới
+      // đây không làm đổi hash nào. Không ô nào đổi giá trị; chiều cao hàng đổi theo từng commit:
+      //   · 1d — so TOÀN BỘ chiều cao hàng + giá trị/căn lề/cỡ chữ từng ô của 72 sheet (6 mẫu ×
+      //     có/không cột ảnh × tiêu đề ngắn/dài) trước và sau RIÊNG commit này: khác đúng hai loại
+      //     hàng, không ô nào đổi —
+      //       GN (marico_decor / unibenfood / gn_banner), hàng 7 tiêu đề một dòng: 17,5 → 18,75pt;
+      //       Colorfull (cả ba mẫu), hàng 4 tiêu đề cột: 25 → 34,5pt ("THÀNH TIỀN" xuống hai dòng).
+      //     Chốt riêng: tests/xl-cao-hang-tieu-de-cot.test.js.
+      //   · 1b — ô chữ cỡ 12 của Colorfull tính 15,75pt mỗi dòng: hàng 3 khối "Kính gửi" và hàng 5
+      //     dải thông tin chương trình (khi có chữ) cao thêm.
+      //   · 1a (chữ tổ hợp NFD hết tính gấp đôi) và 1c (tiêu đề sát ngưỡng một dòng không còn bật
+      //     wrap) — chỉ đổi hàng có loại chữ đó; fixture ở đây không có.
+      // Tính CẢ ĐỢT (gốc 2f591e0 → sau đợt 3), các fixture ở đây đổi: GN hàng 7 (mọi fixture GN) và
+      // `clf` HAI hàng — hàng 3 "Kính gửi" 78 → 81,75pt (1b) và hàng 4 25 → 34,5pt (1d).
+      //
+      // ── ĐỔI CÓ CHỦ Ý NHƯNG HASH KHÔNG ĐỔI: 2026-09-24 (soát toàn diện đợt 4 d4-excel 1) ──
+      // HE_SO_TIEU_DE nâng lên (cỡ 14: 1,045 · cỡ 18: 1,025): chỉ tiêu đề DÀI sát ngưỡng đổi căn lề
+      // (wrap) và chiều cao hàng tiêu đề. Tiêu đề các fixture ở đây ngắn nên không đổi gì.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

@@ -203,12 +203,21 @@ const HE_SO_AN_TOAN = 1.05;   // biên cho máy khác DPI/bản Excel khác — 
 // ── HỆ SỐ RIÊNG CHO TIÊU ĐỀ CỠ LỚN (L44) ─────────────────────────────────────────────────────
 // Bảng trên đo ở cỡ 11 rồi nhân theo tỉ lệ cỡ chữ; ở cỡ 14/18 đậm nó ƯỚC LỐ vài phần trăm (nét
 // chữ cỡ 11 bị hint rộng ra), nên 1,05 làm tiêu đề bật wrap khi Excel vẫn vừa một dòng — hàng tiêu
-// đề nới gấp đôi mà chỉ chứa một dòng chữ. Đo Excel thật: 104 chuỗi × 8 vùng gộp tiêu đề (4 mẫu,
-// có/không cột ảnh) = 832 ca, mỗi ca đặt ô tạm rộng ĐÚNG số px của vùng gộp, bật wrap rồi AutoFit.
-// Hệ số NHỎ NHẤT mà mọi ca Excel cần hai dòng vẫn được bật wrap: cỡ 14 → 1,014; cỡ 18 → 0,98.
-// Chọn chừa ~2% trên đó: 1,035 và 1,0 — số ca wrap sớm giảm từ 23 xuống 10 (trên 292 ca một
-// dòng), 0 ca cắt chữ. Cỡ chưa đo giữ HE_SO_AN_TOAN.
-const HE_SO_TIEU_DE: Record<number, number> = { 14: 1.035, 18: 1.0 };
+// đề nới gấp đôi mà chỉ chứa một dòng chữ. Nhưng độ lố KHÔNG đều giữa các câu, nên hệ số riêng chỉ
+// được hạ tới mức vẫn chừa biên trên ca Excel KHÓ NHẤT. Đo Excel thật (mỗi ca đặt ô tạm rộng ĐÚNG
+// số px của vùng gộp, bật wrap, AutoFit rồi đọc số dòng):
+//   · 832 ca (104 chuỗi × 8 vùng gộp tiêu đề: 4 mẫu, có/không cột ảnh) — chỉ dò kỹ ngưỡng 1→2
+//     dòng: tới hạn cỡ 14 → 1,014; cỡ 18 → 0,98. Hệ số cũ 1,035 / 1,0 đặt theo số này.
+//   · 1896 ca (237 tiền tố cắt ở MỌI ranh giới từ, 40–260 ký tự × 8 vùng gộp, phủ 1–4 dòng; soát
+//     toàn diện đợt 4): ràng buộc thật nằm ở ngưỡng 2→3 dòng — cỡ 14 → 1,0233; cỡ 18 → 1,0006. Tức
+//     1,0 ở cỡ 18 CẮT CHỮ thật (clofull_decor + cột ảnh, câu 206 ký tự: app ước 2 dòng, Excel vẽ
+//     3), còn 1,035 ở cỡ 14 chỉ còn biên ~1%.
+// Chọn chừa ≥ 2% trên tới hạn mới: cỡ 14 → 1,045 (biên 2,1%), cỡ 18 → 1,025 (biên 2,4%). Trên bộ
+// 1896 ca: 0 ca cắt chữ; tiêu đề một dòng bị bật wrap sớm 14/262 ở cỡ 14 và 16/246 ở cỡ 18 (dùng
+// 1,05 thì 15 và 23). Cỡ 14 gần như hết lợi vì độ lố ở cỡ đó dao động rộng — muốn hơn thì phải đo
+// bảng bề rộng riêng cho TNR 14/18 đậm. Cỡ chưa đo giữ HE_SO_AN_TOAN. Các ca sát ngưỡng và biên 2%
+// được chốt ở tests/xl-tieu-de-dai-xuong-dong.test.js.
+export const HE_SO_TIEU_DE: Readonly<Record<number, number>> = { 14: 1.045, 18: 1.025 };
 const PX_MOI_DON_VI_COT = 7;  // 1 đơn vị bề rộng cột = chữ số '0' của font mặc định (Calibri 11 / Arial 10)
 // Bề rộng LƯU trong .xlsx (thứ ExcelJS đọc/ghi) ĐÃ GỒM 5px đệm của Excel: cột lưu 38 rộng đúng
 // 266px, còn Excel hiển thị "37,29". Phần chữ dùng được = 7 × bề rộng lưu − 5px đệm − 3px biên.
@@ -793,8 +802,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // 67pt trong khi `toBlockFormat` sinh 5 dòng cỡ 12pt ⇒ cần ≈75pt, nên DÒNG EMAIL BỊ CẮT ngay cả
   // khi mọi trường đều ngắn. Cùng đúng lớp lỗi "xuống hàng bị che" đã chữa cho hàng hạng mục.
   // GN không khai `toBlockCell`/`infoBannerCell` nên không đi qua đây.
-  const beRongVungGop = (addr: string): number | null => {
-    const vung = ((ws.model?.merges || []) as string[]).find((r) => r.startsWith(`${addr}:`));
+  // `dsGop`: danh sách vùng gộp đã lấy sẵn. Đọc `ws.model` là DỰNG LẠI model cả sheet (O(số ô)), nên
+  // vòng đo nhiều ô liền nhau (hàng tiêu đề cột) lấy một lần rồi truyền vào, không đọc lại mỗi ô.
+  const beRongVungGop = (addr: string, dsGop?: string[]): number | null => {
+    const vung = (dsGop ?? ((ws.model?.merges || []) as string[])).find((r) => r.startsWith(`${addr}:`));
     const m = vung && /^([A-Z]+)\d+:([A-Z]+)\d+$/.exec(vung);
     if (!m || m[1].length > 1 || m[2].length > 1) return null;
     let tong = 0;
@@ -1570,7 +1581,10 @@ ${ghiChu}`, null, beRongVungGop(oChinh), fGC);
   // GN (33pt, chữ 10) đã đủ nên giữ nguyên. Đặt cuối cùng, sau mọi bước đổi nhãn/gộp ô/cột ảnh.
   if (itemsCfg.headerRow) {
     const hr = itemsCfg.headerRow;
-    const gop = ((ws.model?.merges || []) as string[]).map((m) => /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m)).filter(Boolean) as RegExpExecArray[];
+    // Lấy danh sách vùng gộp MỘT lần cho cả vòng (soát toàn diện đợt 4): trước đây mỗi ô bật wrap còn
+    // gọi `beRongVungGop` tự đọc lại `ws.model` — thêm 2–5 lần dựng model cả sheet mỗi sheet.
+    const dsGop = (ws.model?.merges || []) as string[];
+    const gop = dsGop.map((m) => /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m)).filter(Boolean) as RegExpExecArray[];
     let can = 0;
     for (const L of new Set([...Object.values(cols) as string[], ...(imgCol ? [imgCol] : [])])) {
       const ci = colLetterToIdx(L);
@@ -1583,7 +1597,7 @@ ${ghiChu}`, null, beRongVungGop(oChinh), fGC);
         const chu = typeof v === "string" ? v : Array.isArray(v?.richText) ? v.richText.map((x: any) => x.text).join("") : "";
         if (!chu.trim()) continue;
         const f = fontDo(`${L}${hr}`);
-        const soDong = o.alignment?.wrapText ? wrapLines(chu, L, beRongVungGop(`${L}${hr}`), f) : 1;
+        const soDong = o.alignment?.wrapText ? wrapLines(chu, L, beRongVungGop(`${L}${hr}`, dsGop), f) : 1;
         can = Math.max(can, soDong > 1 ? soDong * caoMotDongPt(f.co) + 3 : caoMotDongPt(f.co));
       } catch { /* bỏ qua ô lạ */ }
     }
