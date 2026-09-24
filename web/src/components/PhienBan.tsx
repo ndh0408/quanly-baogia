@@ -78,8 +78,7 @@ export function ThongBaoBanMoi() {
     const bayGio = dangDo();
     if (bayGio !== "chua-luu") { if (bayGio) setHoi(bayGio); else void tai(); return; }
     setDangLuu(true);
-    let daLuu = false;
-    try { daLuu = await luuRoiBao(); } finally { setDangLuu(false); }
+    const daLuu = await luuRoiBao().finally(() => setDangLuu(false));
     if (daLuu) { void tai(); return; }
     toast("Chưa lưu được — xem thông báo lỗi trên màn hình, sửa rồi bấm Tải bản mới lại", "error");
     setHoi(null);
