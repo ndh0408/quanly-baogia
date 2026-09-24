@@ -373,9 +373,17 @@ export function looksLikeExportPaste(matrix: string[][], startCol: number, field
   // Ngoại lệ (phản biện L16): khối CHỈ gồm hàng nhóm ("A | Nhóm 1", "B | Nhóm 2") chép từ bản xuất thì
   // không có hàng nào như (2). Nhận nó khi MỌI hàng là chữ nhóm IN HOA kèm tên ở cột 2, và khối dài hơn
   // số cột nhập (cột STT thừa) — cỡ áo "S | Áo thun" hai cột không lọt, vì thiếu cột thừa.
+  // Chữ nhóm còn phải LIÊN TIẾP (A→B→C, hay C→D→E khi chép giữa bản xuất) đúng như bản xuất tự đánh
+  // (sectionLetter): danh sách cỡ áo ĐỦ cột "S | Áo thun | cái | 10 | 50.000 | 500.000 | x" (M, L…) dài
+  // hơn số cột nhập nên từng lọt, mọi hàng thành NHÓM (soát toàn diện đợt 3). Xét nội dung cột không
+  // phân biệt được — hàng nhóm của bản xuất cũng có ĐVT/SL/ĐG.
   if (maxCols < 2) return false;
   const coHangMuc = matrix.some((r) => /^\d*$/.test((r[0] || "").trim()) && r.slice(1).some((c) => String(c ?? "").trim() !== ""));
-  const chiHangNhom = maxCols > fieldCount && matrix.every((r) => /^[A-Z]{1,2}$/.test((r[0] || "").trim()) && String(r[1] ?? "").trim() !== "");
+  const soCuaChu = (s: string) => { let n = 0; for (const ch of s) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
+  const chiHangNhom = maxCols > fieldCount && matrix.every((r, k) => {
+    const chu = (r[0] || "").trim();
+    return /^[A-Z]{1,2}$/.test(chu) && String(r[1] ?? "").trim() !== "" && (k === 0 || soCuaChu(chu) === soCuaChu((matrix[k - 1][0] || "").trim()) + 1);
+  });
   if (!coHangMuc && !chiHangNhom) return false;
   // maxCols > fieldCount: có cột STT thừa (Windows giữ cột rỗng cuối). NHƯNG Excel cho Mac hay BỎ
   // cột rỗng cuối → maxCols == fieldCount; khi đó dựa vào: khối NHIỀU DÒNG + có chữ nhóm A/B (rất khó

@@ -316,4 +316,26 @@ describe("L16 — danh sách tên 1–2 chữ cái (S/M/L/XL) không bị hiểu
     dan("S\tÁo thun\r\nM\tÁo thun\r\n");
     expect(items.map((x) => `${x.kind}:${x.name}:${x.unit}`)).toEqual(["item:S:Áo thun", "item:M:Áo thun"]);
   });
+
+  // Soát toàn diện đợt 3 (hồi quy do 689cfc4): ngoại lệ "khối chỉ gồm hàng nhóm" nhận cả danh sách cỡ áo
+  // ĐỦ cột (dài hơn số cột nhập) — mọi hàng thành NHÓM 'Áo thun', ĐG 0.
+  it.each([
+    ["7 cột (có TT + ghi chú)", "S\tÁo thun\tcái\t10\t50.000\t500.000\tx\r\nM\tÁo thun\tcái\t12\t50.000\t600.000\tx\r\nL\tÁo thun\tcái\t8\t55.000\t440.000\tx\r\n"],
+    ["6 cột (không TT)", "S\tÁo thun\tcái\t10\t50.000\tx\r\nM\tÁo thun\tcái\t12\t50.000\tx\r\nL\tÁo thun\tcái\t8\t55.000\tx\r\n"],
+  ])("danh sách cỡ áo có tên ở cột 2, %s: vẫn là HẠNG MỤC, không thành nhóm", (_ten, khoi) => {
+    const items = [mk({}), mk({}), mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan(khoi);
+    expect(items.map((x) => x.kind), "mọi hàng thành NHÓM").toEqual(["item", "item", "item"]);
+    expect(items.map((x) => x.name)).toEqual(["S", "M", "L"]);
+  });
+
+  it("khối chỉ gồm hàng nhóm bắt đầu giữa bản xuất (C | D | E, liên tiếp) vẫn dựng lại thành nhóm", () => {
+    const items = [mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("C\tNhóm 3\t\t\t\t\t\r\nD\tNhóm 4\t\t\t\t\t\r\nE\tNhóm 5\t\t\t\t\t\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm 3", "section:Nhóm 4", "section:Nhóm 5"]);
+  });
 });
