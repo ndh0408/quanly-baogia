@@ -237,10 +237,14 @@ const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "")
 
 // Ô CHỮ ở cột số mà ĐỌC RA 0 (PORT chuKhongRaSo, soát toàn diện đợt 4): sau L17 "ĐG1.500.000", "SL12",
 // "12m2" đọc 0 mà không có cảnh báo dòng nào — tệp không có cột Thành Tiền thì Đơn Giá về 0 không ai thấy.
-// Số 0 viết bằng chữ ("0", "0đ", "(0)") và gạch kế toán ("-") không phải lỗi → không báo.
+// Còn chữ số KHÁC 0 mà đọc ra 0 (khoảng giá "1.500.000 - 2.000.000" → NaN → 0) cũng báo. Số 0 viết bằng chữ
+// ("0", "0đ", "(0)") và gạch kế toán ("-") không phải lỗi → không báo.
 const chuKhongRaSo = (s: string, n: number): boolean => {
   const t = String(s ?? "").trim();
-  if (!t || n || /\d/.test(boCumChuSo(tachNgoacKeToan(t).s))) return false;
+  if (!t || n) return false;
+  const conLai = boCumChuSo(tachNgoacKeToan(t).s);
+  if (/[1-9]/.test(conLai)) return true;
+  if (/\d/.test(conLai)) return false;
   return t.replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€\s().,\-–—−]/gi, "") !== "";
 };
 

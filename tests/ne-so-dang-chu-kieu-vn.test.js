@@ -225,6 +225,22 @@ describe("đợt 4 việc 1: ô CHỮ ở cột số đọc ra 0 phải có cả
     expect(ns.warn?.join(" | ")).toMatch(/Số Ngày.*cả tuần.*không đọc được số/);
   });
 
+  // Phản biện đợt 4: bản đầu miễn cảnh báo cho mọi ô còn sót MỘT chữ số BẤT KỲ sau bước bỏ cụm, trong khi ý định
+  // chỉ là "số 0 viết bằng chữ". Khoảng giá đọc NaN → 0 mà vẫn im lặng — đúng lớp "Đơn Giá về 0 không ai thấy".
+  //   ĐÃ ĐO (2721ffb, tệp không cột Thành Tiền): "1.500.000 - 2.000.000" → unitPrice 0, warn undefined;
+  //   "1,2,3.4.5" → 0, warn undefined.
+  it("còn chữ số KHÁC 0 mà đọc ra 0 ('1.500.000 - 2.000.000', '1,2,3.4.5') → cảnh báo; chỉ còn chữ số 0 thì không", async () => {
+    const khoang = ["1.500.000 - 2.000.000", "1,2,3.4.5"];
+    const so0 = ["0.000", "-0", "0 (tặng)", "ĐG: 0", "0%", "0 m2"];
+    const s = await tep([...khoang, ...so0].map((g, k) => [String(k + 1), `Mục ${k + 1}`, "cái", "1", g]), HDR5);
+    expect(s.items.map((i) => i.unitPrice)).toEqual([...khoang, ...so0].map(() => 0));
+    khoang.forEach((g, k) => expect(s.items[k].warn?.join(" | "), g).toMatch(/Đơn Giá.*không đọc được số, đã để 0/));
+    expect(s.items.slice(khoang.length).map((i) => i.warn)).toEqual(so0.map(() => undefined));
+    // Phía web (đường dán) cùng kết luận.
+    for (const g of khoang) expect(chuKhongRaSo(g, parseLooseNumber(g)), g).toBe(true);
+    for (const g of so0) expect(chuKhongRaSo(g, parseLooseNumber(g)), g).toBe(false);
+  });
+
   it("KHỚP phía web: chuKhongRaSo ở clipboard.ts (dùng cho đường dán) cho cùng kết luận với bộ nhập", async () => {
     const giaChu = ["ĐG1.500.000", "gia1.500", "Liên hệ", "0", "0đ", "-", "(0)", "95.000đ/m2", "VNĐ1.500.000", "1e3"];
     const s = await tep(giaChu.map((g, k) => [String(k + 1), `Mục ${k + 1}`, "cái", "1", g]), HDR5);

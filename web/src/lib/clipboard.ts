@@ -83,13 +83,17 @@ const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "")
 
 // Ô CHỮ ở cột số mà ĐỌC RA 0 (soát toàn diện đợt 4): luật L17 không đoán nên "ĐG1.500.000", "SL12", "12m2",
 // "1e3" đọc 0 — đúng, nhưng phải NÓI ra: bộ nhập Excel không có cảnh báo dòng nào cho ca này, tệp không có
-// cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy. `n` là số hàm đọc đã trả cho ô. Còn chữ số sau bước bỏ
-// cụm = đã đọc được một số 0 thật ("0", "0đ", "(0)", "0 m2") → không báo; ô chỉ có gạch / ký hiệu tiền ("-"
-// kiểu kế toán) là ô trống → không báo; còn lại ("Liên hệ", "gia1.500") → báo. PHẢI khớp bản port ở
-// src/excelImport.ts.
+// cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy. `n` là số hàm đọc đã trả cho ô. Sau bước bỏ cụm mà còn
+// chữ số KHÁC 0 thì ô có số nhưng đọc hỏng → báo (khoảng giá "1.500.000 - 2.000.000", "1,2,3.4.5" đọc NaN → 0 —
+// phản biện đợt 4: bản đầu miễn cho mọi chữ số nên hai ca này lọt). Chỉ còn chữ số 0 = số 0 thật ("0", "0đ",
+// "(0)", "0 m2") → không báo; ô chỉ có gạch / ký hiệu tiền ("-" kiểu kế toán) là ô trống → không báo; còn lại
+// ("Liên hệ", "gia1.500") → báo. PHẢI khớp bản port ở src/excelImport.ts.
 export const chuKhongRaSo = (s: string, n: number): boolean => {
   const t = String(s ?? "").trim();
-  if (!t || n || /\d/.test(boCumChuSo(tachNgoacKeToan(t).s))) return false;
+  if (!t || n) return false;
+  const conLai = boCumChuSo(tachNgoacKeToan(t).s);
+  if (/[1-9]/.test(conLai)) return true;
+  if (/\d/.test(conLai)) return false;
   return t.replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€\s().,\-–—−]/gi, "") !== "";
 };
 
