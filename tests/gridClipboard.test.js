@@ -701,3 +701,35 @@ describe("adjustRefsForRowEdit (chèn/xoá hàng)", () => {
     expect(adjustRefsForRowEdit("=2*3", 5, 1)).toBe("=2*3");
   });
 });
+
+// Soát toàn diện đợt 3 (L17): bộ lọc ký tự [^\d.,-] bỏ CHỮ nhưng GIỮ chữ số của cụm "m2", "3m5W", "x2"
+// rồi ghép vào số. Ô "m2" lệch cột rơi vào SL đọc thành 2; "12 m2" thành 122; giá "95.000đ/m2" thành
+// 95,0002. Cụm có chữ cái ĐỨNG TRƯỚC chữ số là tên / đơn vị / kích thước — không phải số.
+describe("chữ số dính sau chữ cái không được nhặt làm số — L17 (đợt 3)", () => {
+  it("parseLooseDecimal: 'm2' / '3m5W' / '2x3' → 0; '12 m2' → 12; đơn vị đứng SAU số vẫn giữ số", () => {
+    expect(parseLooseDecimal("m2")).toBe(0);
+    expect(parseLooseDecimal("3m5W")).toBe(0);
+    expect(parseLooseDecimal("2x3")).toBe(0);
+    expect(parseLooseDecimal("12 m2")).toBe(12);
+    expect(parseLooseDecimal("3,5 m2")).toBeCloseTo(3.5);
+    expect(parseLooseDecimal("1.5kg")).toBeCloseTo(1.5);
+    expect(parseLooseDecimal("10 bộ")).toBe(10);
+    expect(parseLooseDecimal("10bộ")).toBe(10);
+  });
+  it("parseLooseNumber: giá '95.000đ/m2' → 95000 (không phải 95,0002); 'm2' → 0", () => {
+    expect(parseLooseNumber("95.000đ/m2")).toBe(95000);
+    expect(parseLooseNumber("50.000 /m2")).toBe(50000);
+    expect(parseLooseNumber("95.000đ")).toBe(95000);
+    expect(parseLooseNumber("m2")).toBe(0);
+  });
+  it("đường quy ước khối (khopQuyUoc → parseTheoQuyUoc) cũng vậy", () => {
+    expect(khopQuyUoc("m2", "vn")).toBe(false);
+    expect(parseTheoQuyUoc("12 m2", "vn")).toBe(12);
+    expect(parseTheoQuyUoc("1.500.000đ/m2", "vn")).toBe(1500000);
+  });
+  it("reconstructExportRows: khối lệch cột, 'm2' rơi vào ô SL → SL 0, không phải 2", () => {
+    const R = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+    const [a] = reconstructExportRows([["1", "Vách", "", "", "m2", "95000", ""]], R, new Set(["quantity", "unitPrice", "days"]));
+    expect(a.quantity).toBe(0);
+  });
+});

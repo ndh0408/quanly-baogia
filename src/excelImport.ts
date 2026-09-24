@@ -224,11 +224,16 @@ const PHAN_TRAM = /^-?[\d.,\s]*\d[\d.,\s]*%$/;
 const boPhanTram = (s: string): string | null => { const t = String(s ?? "").trim(); return PHAN_TRAM.test(t) ? t.slice(0, -1) : null; };
 const chia100 = (n: number) => Number((n / 100).toPrecision(12));
 
+// CHỮ SỐ DÍNH SAU CHỮ CÁI (PORT boCumChuSo, soát toàn diện đợt 3 L17): ô chữ SL "12 m2" từng nạp 122,
+// Đơn Giá "95.000đ/m2" nạp 95,0002 — bộ lọc ký tự bỏ chữ mà giữ chữ số của "m2". Cụm có chữ cái ĐỨNG
+// TRƯỚC chữ số bị bỏ cả cụm; chữ đứng SAU số ("95.000đ", "10bộ") vẫn là đơn vị.
+const boCumChuSo = (s: string) => String(s ?? "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
+
 function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   if (str.includes(",") && str.includes(".")) {
     str = str.lastIndexOf(",") > str.lastIndexOf(".") ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
@@ -247,7 +252,7 @@ function parseLooseDecimal(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
   const dots = (str.match(/\./g) || []).length, commas = (str.match(/,/g) || []).length;
@@ -295,7 +300,7 @@ function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
   const nhom = str.split(nghin);

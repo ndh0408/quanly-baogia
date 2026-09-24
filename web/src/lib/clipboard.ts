@@ -64,13 +64,20 @@ const chia100 = (n: number) => Number((n / 100).toPrecision(12));   // 12,5 / 10
 /** Ô là một số phần trăm ("10%", "(12,5%)") — nơi gọi cần biết để giữ đủ số lẻ (xem GridTable pasteCellVal). */
 export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? "")).s) != null;
 
+// CHỮ SỐ DÍNH SAU CHỮ CÁI (soát toàn diện đợt 3, L17): bộ lọc ký tự [^\d.,-] của các hàm đọc số bỏ
+// CHỮ nhưng GIỮ chữ số của cụm "m2", "3m5W", "2x3" rồi ghép vào số — ô "m2" lệch cột rơi vào SL đọc 2,
+// SL "12 m2" đọc 122, giá "95.000đ/m2" đọc 95,0002. Cụm có chữ cái ĐỨNG TRƯỚC chữ số là tên / đơn vị /
+// kích thước, không phải số → bỏ CẢ cụm trước khi lọc ("12m2" = 0: không đoán). Chữ đứng SAU số
+// ("95.000đ", "1.5kg", "10bộ") vẫn là đơn vị, số giữ nguyên. PHẢI khớp bản port ở src/excelImport.ts.
+const boCumChuSo = (s: string) => String(s ?? "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
+
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
 // "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.
 export function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
-  s = String(s).trim().replace(/[^\d.,-]/g, "");
+  s = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!s || s === "-") return 0;
   if (s.includes(",") && s.includes(".")) {
     s = s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
@@ -91,7 +98,7 @@ export function parseLooseDecimal(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
   const dots = (str.match(/\./g) || []).length, commas = (str.match(/,/g) || []).length;
@@ -147,7 +154,7 @@ export function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boole
 // giá "250.000" là khối từ máy locale VN, nơi "2.675" đúng là hai nghìn sáu trăm bảy lăm.
 // Phần CHỮ SỐ + DẤU của một ô (bỏ ngoặc kế toán, ký hiệu tiền, chữ, dấu trừ đầu) — đúng phần mà
 // parseTheoQuyUoc / parseLooseDecimal thật sự đọc, để khuôn được kiểm trên chính thứ sẽ được đọc.
-const loiSo = (s: string) => tachNgoacKeToan(String(s ?? "").trim()).s.trim().replace(/[^\d.,-]/g, "").replace(/^-/, "");
+const loiSo = (s: string) => boCumChuSo(tachNgoacKeToan(String(s ?? "").trim()).s).trim().replace(/[^\d.,-]/g, "").replace(/^-/, "");
 export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
   const t = loiSo(s);
   return qu === "vn"
@@ -165,7 +172,7 @@ export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
   const nhom = str.split(nghin);

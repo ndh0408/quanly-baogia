@@ -130,3 +130,15 @@ describe("L51: số dạng chữ trong tệp ngoài đọc như khi dán vào l�
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[1500, 50000], [1, -500000]]);
   });
 });
+
+describe("L17 (đợt 3): chữ số dính sau chữ cái trong ô CHỮ không được nạp làm số", () => {
+  it("SL chữ '12 m2' = 12 (không phải 122); Đơn Giá '95.000đ/m2' = 95.000; SL 'm2' = 0 — khớp đường dán", async () => {
+    const rows = [
+      ["1", "Vách", "m2", "12 m2", "95.000đ/m2"],
+      ["2", "Sàn", "m2", "m2", "50000"],
+    ];
+    const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[12, 95000], [0, 50000]]);
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual(rows.map((r) => [parseLooseDecimal(r[3]), parseLooseNumber(r[4])]));
+  });
+});
