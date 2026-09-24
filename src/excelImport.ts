@@ -199,7 +199,7 @@ function cellText(v: unknown): string {
 
 // Số kiểu VN/US — PORT từ web/src/lib/clipboard.ts (giữ khớp hành vi dán tay).
 //
-// GIỮ KHỚP CẢ BA MẢNH của clipboard.ts: tachNgoacKeToan (GRID-13), suyQuyUocSo + parseTheoQuyUoc.
+// GIỮ KHỚP MỌI MẢNH của clipboard.ts: tachNgoacKeToan (GRID-13), boPhanTram (L15), suyQuyUocSo + parseTheoQuyUoc.
 // Trước soát toàn diện L51 bản port dừng ở hai hàm đầu: dán vào lưới đọc "(500.000)" = −500.000 và
 // SL "1.500" (bảng quy ước VN) = 1500, còn nạp CÙNG dữ liệu từ tệp (ô định dạng Text) ra +500.000 và
 // 1,5 — chiết khấu thành khoản CỘNG mà không một cảnh báo dòng nào (Đơn Giá lẫn Thành Tiền cùng sai dấu).
@@ -216,9 +216,18 @@ const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
   return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
+// PHẦN TRĂM (PORT boPhanTram, soát toàn diện L15): ô CHỮ "10%" ở cột SL/Đơn Giá — bộ lọc ký tự bỏ "%"
+// nên trước đây nạp thành 10, "Phí quản lý 10% × 50.000.000" ra 500.000.000. Dán vào lưới đã đọc 0,1
+// từ b98716d. Chỉ nhận "%" đứng CUỐI một chuỗi toàn số: "10% VAT" vẫn đọc như cũ. (Ô SỐ định dạng %
+// trong xlsx vốn đã là 0,1 — không đi qua nhánh chữ.)
+const PHAN_TRAM = /^-?[\d.,\s]*\d[\d.,\s]*%$/;
+const boPhanTram = (s: string): string | null => { const t = String(s ?? "").trim(); return PHAN_TRAM.test(t) ? t.slice(0, -1) : null; };
+const chia100 = (n: number) => Number((n / 100).toPrecision(12));
+
 function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   if (str.includes(",") && str.includes(".")) {
@@ -237,6 +246,7 @@ function parseLooseNumber(s: string): number {
 function parseLooseDecimal(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
@@ -284,6 +294,7 @@ function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boolean): Qu
 function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";

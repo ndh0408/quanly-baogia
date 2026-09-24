@@ -102,6 +102,29 @@ describe("L51: số dạng chữ trong tệp ngoài đọc như khi dán vào l�
     expect(s.items.map((i) => i.unitPrice)).toEqual(rows.map((r) => (qu ? parseTheoQuyUoc(r[4], qu) : parseLooseNumber(r[4]))));
   });
 
+  // Soát toàn diện L15 (phần nạp tệp): dán "10%" vào lưới đã ra 0,1 (b98716d) nhưng bản port số ở bộ nhập
+  // Excel chưa nhận hậu tố "%" — ô CHỮ "10%" ở cột SL nạp thành 10: "Phí quản lý 10% × 50.000.000" ra
+  // 500.000.000 thay vì 5.000.000. (Ô SỐ định dạng % trong xlsx vốn là 0,1 nên không bị.)
+  it("ô CHỮ '10%' / '12,5%' ở cột SL/Đơn Giá → 0,1 / 0,125 như khi dán; '10% VAT' vẫn đọc như cũ", async () => {
+    const rows = [
+      ["1", "Phí quản lý", "%", "10%", "50000000"],
+      ["2", "Phụ phí", "gói", "1", "12,5%"],
+      ["3", "Ghi chú giá", "gói", "1", "10% VAT"],
+    ];
+    const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    expect(s.items[0].quantity).toBeCloseTo(0.1, 10);
+    expect(s.items[1].unitPrice).toBeCloseTo(0.125, 10);
+    expect(s.items[2].unitPrice).toBe(10);
+    // Không có ô chữ nào mang tín hiệu quy ước → lưới đọc SL bằng parseLooseDecimal, giá bằng parseLooseNumber
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual(rows.map((r) => [parseLooseDecimal(r[3]), parseLooseNumber(r[4])]));
+  });
+
+  it("bảng có quy ước VN: SL chữ '10%' vẫn là 0,1 (nhánh parseTheoQuyUoc)", async () => {
+    const s = await tep([["1", "Phí quản lý", "%", "10%", "50.000.000", "5.000.000"]]);
+    expect(s.items[0].quantity).toBeCloseTo(0.1, 10);
+    expect(s.items[0].warn).toBeUndefined();
+  });
+
   it("ô SỐ THẬT không đổi gì", async () => {
     const s = await tep([[1, "Ghế", "cái", 1500, 50000, 75000000], [2, "Chiết khấu", "gói", 1, -500000, -500000]]);
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[1500, 50000], [1, -500000]]);
