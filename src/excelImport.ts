@@ -205,12 +205,15 @@ function cellText(v: unknown): string {
 // 1,5 — chiết khấu thành khoản CỘNG mà không một cảnh báo dòng nào (Đơn Giá lẫn Thành Tiền cùng sai dấu).
 
 // Số âm kiểu KẾ TOÁN: định dạng Accounting hiện "(1.500.000)" thay vì "-1.500.000". Ngoặc bao TRỌN giá
-// trị thì đảo dấu (bộ lọc ký tự bên dưới bỏ ngoặc, không có bước này là số âm thành DƯƠNG).
+// trị thì đảo dấu (bộ lọc ký tự bên dưới bỏ ngoặc, không có bước này là số âm thành DƯƠNG). Phần TRONG
+// ngoặc phải là SỐ thuần: Đơn Giá chữ "(Tạm tính) 500.000 (chưa VAT)" cũng mở "(" đóng ")" nhưng là hai
+// chú thích — bản trước nạp thành −500.000, không cảnh báo (soát toàn diện đợt 3).
 const AM_KE_TOAN = /^\((.*)\)$/;
+const SO_TRONG_NGOAC = /^[\s\d.,%-]*\d[\s\d.,%-]*$/;
 const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
   const t = String(s).trim().replace(/\s*[₫đ$]$|^[₫đ$]\s*/gi, "").trim();
   const m = AM_KE_TOAN.exec(t);
-  return m ? { s: m[1], am: true } : { s: String(s), am: false };
+  return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
 function parseLooseNumber(s: string): number {

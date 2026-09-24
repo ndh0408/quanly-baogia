@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import { parseQuoteWorkbook } from "../src/excelImport.js";
-import { parseTheoQuyUoc, suyQuyUocSo, khopQuyUoc, parseLooseDecimal } from "../web/src/lib/clipboard.ts";
+import { parseTheoQuyUoc, suyQuyUocSo, khopQuyUoc, parseLooseDecimal, parseLooseNumber } from "../web/src/lib/clipboard.ts";
 
 const HDR = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"];
 async function tep(rows, hdr = HDR) {
@@ -87,6 +87,19 @@ describe("L51: số dạng chữ trong tệp ngoài đọc như khi dán vào l�
     const danTay = (v) => (khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
     expect(s.items.map((i) => i.quantity)).toEqual(rows.map((r) => danTay(r[3])));
     expect(s.items.map((i) => i.quantity)).toEqual([0.5, 2.25, 1500]);
+  });
+
+  // Đợt 3: tachNgoacKeToan nhận MỌI chuỗi mở "(" đóng ")" là số âm kế toán — kể cả hai chú thích ở hai
+  // đầu. Đơn Giá chữ "(Tạm tính) 500.000 (chưa VAT)" nạp thành −500.000 (hạng mục thành khoản TRỪ).
+  it("Đơn Giá chữ '(Tạm tính) 500.000 (chưa VAT)' là +500.000; '(500.000)' vẫn là −500.000; khớp dán tay", async () => {
+    const rows = [
+      ["1", "Sân khấu", "gói", "1", "(Tạm tính) 500.000 (chưa VAT)"],
+      ["2", "Chiết khấu", "gói", "1", "(500.000)"],
+    ];
+    const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    expect(s.items.map((i) => i.unitPrice)).toEqual([500000, -500000]);
+    const qu = suyQuyUocSo(rows.map((r) => r.slice(3)), (c) => c >= 1);
+    expect(s.items.map((i) => i.unitPrice)).toEqual(rows.map((r) => (qu ? parseTheoQuyUoc(r[4], qu) : parseLooseNumber(r[4]))));
   });
 
   it("ô SỐ THẬT không đổi gì", async () => {

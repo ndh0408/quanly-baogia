@@ -448,6 +448,21 @@ describe("số âm kiểu kế toán '(…)' — GRID-13", () => {
   it("dấu trừ thường vẫn như cũ", () => { expect(parseLooseNumber("-1.500.000")).toBe(-1500000); expect(parseLooseDecimal("-2,5")).toBeCloseTo(-2.5); });
   it("ngoặc KHÔNG bao trọn giá trị thì không đảo dấu", () => expect(parseLooseNumber("1.500 (VAT)")).toBe(1500));
   it("'()' rỗng → 0", () => expect(parseLooseNumber("()")).toBe(0));
+  // Soát toàn diện đợt 3: chuỗi MỞ bằng "(" và ĐÓNG bằng ")" chưa chắc là số âm kế toán — hai chú thích
+  // hai đầu "(Tạm tính) 500.000 (chưa VAT)" bị đọc thành −500.000, không cảnh báo. Chỉ nhận ngoặc kế toán
+  // khi phần TRONG ngoặc là số thuần (chữ số, dấu tách, ký hiệu tiền, %).
+  it("ngoặc bao CHỮ ở hai đầu không phải số âm: '(Tạm tính) 500.000 (chưa VAT)' → 500000", () => {
+    expect(parseLooseNumber("(Tạm tính) 500.000 (chưa VAT)")).toBe(500000);
+    expect(parseLooseDecimal("(tạm) 2,5 (chưa chốt)")).toBeCloseTo(2.5);
+    expect(parseTheoQuyUoc("(Tạm tính) 500.000 (chưa VAT)", "vn")).toBe(500000);
+    expect(suyQuyUocSo([["(Tạm tính) 1.500 (chưa VAT)"]], () => true)).toBeNull();
+  });
+  it("ngoặc kế toán THẬT vẫn là số âm, kể cả kèm ký hiệu tiền / %", () => {
+    expect(parseLooseNumber("(500.000 VNĐ)")).toBe(-500000);
+    expect(parseLooseNumber("( 1.500.000 )")).toBe(-1500000);
+    expect(parseLooseNumber("($1,500.00)")).toBe(-1500);
+    expect(parseLooseNumber("(10%)")).toBeCloseTo(-0.1);
+  });
 });
 
 describe("GN KHÔNG NGÀY — nhóm con STT TRỐNG (kể cả có ĐVT/giá); Banner nhóm con ĐÁNH SỐ", () => {
