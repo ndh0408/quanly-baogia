@@ -189,7 +189,8 @@ function datStyleRieng(cell: any, patch: (st: any) => Record<string, unknown>) {
 // mẫu): 0 ca thiếu dòng, ~15% ca thừa một dòng. Nhân thêm HE_SO_AN_TOAN và chừa biên để máy khác
 // DPI/Excel khác bản vẫn không cắt chữ ("thà cao còn hơn cắt chữ").
 // Chữ có dấu tra theo chữ gốc (NFD); móc ơ/ư và gạch đ rộng hơn chữ gốc ~1px. Ký tự lạ (emoji,
-// chữ CJK…) tính 15px — rộng như 'M'.
+// chữ CJK…) tính 15px — rộng như 'M'. Dấu kết hợp ĐỨNG RIÊNG (chữ gõ bằng bảng mã "Unicode tổ
+// hợp" của Unikey, hoặc dán từ nơi khác) thì rộng 0 như Excel vẽ — xem `soDongKhiXuongHang`.
 const RONG_TNR11_PX: Record<"dam" | "thuong", Record<number, string>> = {
   dam:    { 3: "|", 4: " ,./fijl", 5: "!()-:;[]t'`\\‘’", 6: "Irz{}", 7: "acsy", 8: "\"#$*0123456789?JS_bdeghnopquvx~–“”", 9: "+<=>FPZ^k×", 10: "ELTVXYw", 11: "ABCDGNRU", 12: "HKOQm", 13: "&", 14: "@W", 15: "%M—…" },
   thuong: { 3: ",:ijl|'", 4: " ./;t`\\", 5: "!\"()-I[]fr‘’", 6: "J^sz“", 7: "$*0123456789?abcdeghknopquvxy{}”", 8: "#+<=>FS_~–×", 9: "ELPTZ", 10: "BCGRX", 11: "ADHKNOQUVYmw", 13: "%M", 14: "@W", 15: "—…" },
@@ -204,10 +205,12 @@ const PX_MOI_DON_VI_COT = 7;  // 1 đơn vị bề rộng cột = chữ số '0'
 // 266px, còn Excel hiển thị "37,29". Phần chữ dùng được = 7 × bề rộng lưu − 5px đệm − 3px biên.
 const DEM_EXCEL_PX = 5;
 const LE_O_PX = 3;
+const DAU_KET_HOP = /\p{Mn}/u;
 function rongKyTuPx(ch: string, dam: boolean): number {
   const bang = dam ? BANG_RONG.dam : BANG_RONG.thuong;
   const co = bang.get(ch);
   if (co != null) return co;
+  if (DAU_KET_HOP.test(ch)) return 0;
   if (ch === "đ") return (bang.get("d") ?? 8) + 1;
   if (ch === "Đ") return bang.get("D") ?? 11;
   const nfd = ch.normalize("NFD");
@@ -222,6 +225,10 @@ function rongKyTuPx(ch: string, dam: boolean): number {
  */
 export function soDongKhiXuongHang(text: unknown, beRongCot: number, { dam = true, co = 11 }: { dam?: boolean; co?: number } = {}): number {
   if (text == null || text === "") return 1;
+  // Chữ TỔ HỢP (NFD: "ô" = "o" + U+0302) tính mỗi dấu là một ký tự lạ 15px, nên ước lượng gấp ~2
+  // lần số dòng thật (đo Excel COM: cùng câu, NFC cần 4 dòng, NFD bị tính 8). Dựng sẵn về NFC
+  // trước khi đo; dấu nào không có dạng dựng sẵn thì `rongKyTuPx` tính rộng 0.
+  text = String(text).normalize("NFC");
   const tiLe = ((Number(co) || 11) / 11) * HE_SO_AN_TOAN;
   const doRong = (s: string) => { let px = 0; for (const ch of s) px += rongKyTuPx(ch, dam); return px * tiLe; };
   // Chặn dưới 4 chữ số: cột quá hẹp (hoặc bề rộng hỏng) không được làm vòng cắt-cứng chạy vô hạn.
