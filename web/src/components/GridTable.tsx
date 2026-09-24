@@ -2459,11 +2459,14 @@ function GridTableInner(props: GridTableProps) {
     if (!editable || !files || !files.length) return;
     const room = IMG_MAX - ((items[i].images || []) as string[]).length;
     if (room <= 0) { toast(`Tối đa ${IMG_MAX} ảnh mỗi ô`, "info"); return; }
-    const mangLucChon = items, kHang = items[i]._k;
+    const mangLucChon = items, hangLucChon = items[i], kHang = hangLucChon._k;
     const out: string[] = [];
     for (const f of Array.from(files).slice(0, room)) { const d = await fileToImg(f); if (d) out.push(d); }
     if (!out.length) return;
-    const j = conGanRef.current && itemsNayRef.current === mangLucChon ? items.findIndex((it) => it._k === kHang) : -1;
+    // `_k` là trường tuỳ chọn: hàng thiếu khoá mà tìm `_k === undefined` là khớp nhầm hàng ĐẦU TIÊN cũng
+    // thiếu khoá → nhận theo chính đối tượng hàng (Ctrl+Z thay đối tượng thì không thấy → báo chọn lại).
+    const timLai = () => (kHang != null ? items.findIndex((it) => it._k === kHang) : items.indexOf(hangLucChon));
+    const j = conGanRef.current && itemsNayRef.current === mangLucChon ? timLai() : -1;
     if (j < 0) { toast("Ảnh chưa được thêm — bảng đã đổi trong lúc xử lý ảnh (xoá hàng, đổi sheet, nạp lại). Hãy chọn lại ảnh", "error"); return; }
     const cur = (items[j].images || []) as string[];
     const them = out.slice(0, IMG_MAX - cur.length);

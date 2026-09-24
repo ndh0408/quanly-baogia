@@ -138,6 +138,32 @@ describe("addImages — ảnh ghi theo hạng mục lúc chọn tệp, không th
     expect(toastChu()).toContain("chọn lại");
   });
 
+  // `_k` là trường TUỲ CHỌN của ItemK. Mọi đường nạp hiện nay đều đóng khoá, nhưng GridTable không tự
+  // đóng: hàng thiếu `_k` thì tìm theo `_k === undefined` khớp nhầm hàng ĐẦU TIÊN cũng thiếu khoá
+  // (phản biện đợt 4). Thiếu khoá thì nhận hàng theo chính đối tượng hàng lúc chọn tệp.
+  it("hàng THIẾU `_k`: chọn ảnh cho hàng 2 → ảnh vào hàng 2, không rơi sang hàng đầu cũng thiếu khoá", async () => {
+    const items = [mk({ name: "A" }), mk({ name: "B" }), mk({ name: "C" })];
+    items.forEach((x) => { delete (x as { _k?: number })._k; });
+    moLuoi(items);
+    chonAnh(2, ["c1"]);
+    await thaHet();
+    expect(anhCua(items[0]), "ảnh của C rơi sang A (hàng đầu thiếu khoá)").toEqual([]);
+    expect(anhCua(items[2])).toEqual(["c1"]);
+  });
+
+  it("hàng THIẾU `_k` bị xoá trong lúc nén → không ghi sang hàng khác, báo chọn lại", async () => {
+    const items = [mk({ name: "A" }), mk({ name: "B" })];
+    items.forEach((x) => { delete (x as { _k?: number })._k; });
+    moLuoi(items);
+    chonAnh(1, ["b1"]);
+    await choDoc();
+    act(() => { (hop!.querySelector('tr[data-row="1"] .rm-row') as HTMLButtonElement).click(); });
+    expect(items.map((x) => x.name)).toEqual(["A"]);
+    await thaHet();
+    expect(anhCua(items[0]), "hàng B đã xoá mà ảnh của nó rơi sang A").toEqual([]);
+    expect(toastChu()).toContain("chọn lại");
+  });
+
   it("đường thường: chọn 2 ảnh → vào đúng hàng, một mốc hoàn tác", async () => {
     const items = [mk({ name: "A" }), mk({ name: "B" })];
     moLuoi(items);
