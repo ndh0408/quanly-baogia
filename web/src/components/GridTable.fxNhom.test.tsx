@@ -86,7 +86,9 @@ function goRoiChot(el: HTMLInputElement, chu: string) {
   act(() => { el.dispatchEvent(new Event("change", { bubbles: true })); });
 }
 
-const canhBao = (it: ItemK, f: string) => !!(it as unknown as { _fxWarn?: Record<string, boolean> })._fxWarn?.[f];
+// Ô đỏ = một trong hai cờ: `_fxLoi` (vòng lặp / không tính được — đúng ca của tệp này) hoặc
+// `_fxWarn` (tham chiếu hỏng). Tách hai cờ ở soát toàn diện L8; lưới tô cùng một màu.
+const canhBao = (it: ItemK, f: string) => { const c = it as unknown as { _fxWarn?: Record<string, boolean>; _fxLoi?: Record<string, boolean> }; return !!(c._fxWarn?.[f] || c._fxLoi?.[f]); };
 
 describe("Công thức trỏ vào hàng nhóm", () => {
   it("=F1*20% (Đơn Giá của nhóm KHÁC) ra 20% tổng nhóm — trước đây ra 0", () => {

@@ -50,11 +50,22 @@ const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
   return m ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
+// PHẦN TRĂM (soát toàn diện L15): Excel/Sheets chép ô định dạng % dưới dạng CHỮ "10%" (giá trị gốc
+// 0,1). Bộ lọc ký tự của các hàm đọc số bỏ "%" nên "10%" dán vào SL/Đơn giá thành 10 — dòng "Phí quản
+// lý 10% × 50.000.000" ra 500.000.000. Chỉ nhận "%" đứng CUỐI một chuỗi toàn số ("12,5%", "(10%)"):
+// "10% VAT" vẫn đọc như cũ. Nhánh công thức vốn đã hiểu "=10%" là 0,1 — nay hai đường nhất quán.
+const PHAN_TRAM = /^-?[\d.,\s]*\d[\d.,\s]*%$/;
+const boPhanTram = (s: string): string | null => { const t = String(s ?? "").trim(); return PHAN_TRAM.test(t) ? t.slice(0, -1) : null; };
+const chia100 = (n: number) => Number((n / 100).toPrecision(12));   // 12,5 / 100 không kéo theo đuôi dấu phẩy động
+/** Ô là một số phần trăm ("10%", "(12,5%)") — nơi gọi cần biết để giữ đủ số lẻ (xem GridTable pasteCellVal). */
+export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? "")).s) != null;
+
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
-// "(1.500.000)" → -1500000 (âm kiểu kế toán).
+// "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.
 export function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
   s = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!s || s === "-") return 0;
   if (s.includes(",") && s.includes(".")) {
@@ -75,6 +86,7 @@ export function parseLooseNumber(s: string): number {
 export function parseLooseDecimal(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
@@ -144,6 +156,7 @@ export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
 export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
@@ -242,6 +255,35 @@ export function soMoHoNghin(s: string): boolean {
   return /^[1-9]\d{0,2}[.,]\d{3}$/.test(loiSo(s));
 }
 
+// ── KHỐI NGOÀI CÓ CỘT THÀNH TIỀN? (soát toàn diện L12) ────────────────────────────────────────
+// Lưới và file Excel xuất ra đều hiện Thành Tiền GIỮA Đơn Giá và Ghi Chú, nhưng cột này không nhập
+// được nên không nằm trong danh sách cột dán. Người dùng bôi Hạng Mục → Ghi Chú trên file báo giá rồi
+// dán: ghép theo vị trí đẩy Thành Tiền vào Ghi Chú, Ghi Chú thật sang Ghi chú NỘI BỘ (không xuất Excel)
+// hoặc mất hẳn. `roles` là vai trò từng cột của khối KHI COI một cột là "_amount". Chỉ nhận khi đa số
+// hàng có số ở cột đó khớp SL × ĐG (× Ngày) — không chắc thì nơi gọi giữ ghép theo vị trí như cũ.
+export function khopCotThanhTien(matrix: string[][], roles: string[], qu: QuyUocSo | null = null): boolean {
+  const iA = roles.indexOf("_amount"), iQ = roles.indexOf("quantity"), iP = roles.indexOf("unitPrice"), iD = roles.indexOf("days");
+  if (iA < 0 || iQ < 0 || iP < 0) return false;
+  const soDo = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
+  const soTien = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
+  const laSo = (v: string) => /\d/.test(v) && /^[-(]?[\d.,\s]+\)?\s*[₫đ$]?$/i.test(v.trim());
+  let xet = 0, khop = 0;
+  for (const row of matrix) {
+    const a = String(row[iA] ?? "").trim(), q = String(row[iQ] ?? "").trim(), p = String(row[iP] ?? "").trim();
+    const d = iD >= 0 ? String(row[iD] ?? "").trim() : "";
+    if (!laSo(a)) continue;            // ô trống / chữ / công thức ở cột TT → hàng này không phân định được
+    const tt = soTien(a); if (!tt) continue;
+    xet++;
+    if (!laSo(q) || !laSo(p) || (d && !laSo(d))) continue;
+    const sl = soDo(q), gia = soTien(p), ngay = d ? soDo(d) || 1 : 1;
+    // Thành Tiền của app nhân SL đã làm tròn 1 số lẻ (qtyRound) — nhận cả hai cách tính.
+    const sl1 = Math.round(sl * 10) / 10;
+    const lech = Math.max(2, Math.abs(tt) * 0.005);
+    if (Math.abs(sl * ngay * gia - tt) <= lech || Math.abs(sl1 * ngay * gia - tt) <= lech) khop++;
+  }
+  return khop > 0 && khop * 2 > xet;
+}
+
 export type RebuiltItem = Record<string, unknown> & { kind: string; formulas?: Record<string, string> };
 export function reconstructExportRows(matrix: string[][], roles: string[], numericRoles: Set<string>, numberSubs = false): RebuiltItem[] {
   const numSet = numericRoles instanceof Set ? numericRoles : new Set(["quantity", "unitPrice", "days"]);
@@ -281,6 +323,8 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
       if (numSet.has(role)) {
         if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
         else it[role] = (role === "quantity" || role === "days") ? soDo(v) : soTien(v);   // SL/Ngày = số đo → thập phân (khi không suy được quy ước)
+        // SL phần trăm cần hơn 1 số lẻ ("12,5%" → 0,125) → cờ SL chính xác, như lưới (L15).
+        if (role === "quantity" && laPhanTram(v)) { const a = Math.abs(Number(it[role]) || 0); if (Math.round(a * 10 + 1e-6) / 10 !== Math.round(a * 1e4 + 1e-8) / 1e4) it.quantityExact = true; }
       } else if (role === "detail" || role === "notes" || role === "name" || role === "label" || role === "internalNote") it[role] = v;
       else it[role] = v.trim();
     });
@@ -321,6 +365,14 @@ export function looksLikeExportPaste(matrix: string[][], startCol: number, field
   if (!col0Ok) return false;
   const hasGroupLetter = matrix.some((r) => /^[A-Z]$/.test((r[0] || "").trim()));
   const maxCols = Math.max(...matrix.map((r) => r.length));
+  // Hai tín hiệu mà khối app xuất ra LUÔN có (soát toàn diện L16): (1) ≥ 2 cột — bản xuất luôn có cột
+  // STT và cột Hạng Mục; (2) có ít nhất một hàng mà STT TRỐNG hoặc là SỐ (hạng mục / nhóm con đánh số)
+  // và các cột sau có dữ liệu. Thiếu chúng thì danh sách tên 1–2 chữ cái — cỡ áo "S⏎M⏎L⏎XL" dán từ
+  // Zalo, khối "S ⇥ ⇥ cái ⇥ 10 ⇥ 50.000" — bị coi là bản xuất: cột 1 thành STT, mọi hàng thành NHÓM
+  // rỗng tên, ĐVT/SL/ĐG lệch cột.
+  if (maxCols < 2) return false;
+  const coHangMuc = matrix.some((r) => /^\d*$/.test((r[0] || "").trim()) && r.slice(1).some((c) => String(c ?? "").trim() !== ""));
+  if (!coHangMuc) return false;
   // maxCols > fieldCount: có cột STT thừa (Windows giữ cột rỗng cuối). NHƯNG Excel cho Mac hay BỎ
   // cột rỗng cuối → maxCols == fieldCount; khi đó dựa vào: khối NHIỀU DÒNG + có chữ nhóm A/B (rất khó
   // trùng với dán dữ liệu thường) → vẫn coi là báo giá app xuất ra.
