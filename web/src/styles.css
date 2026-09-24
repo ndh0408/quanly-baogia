@@ -3160,6 +3160,16 @@ textarea[aria-invalid="true"] {
   align-self: start;
   margin-top: max(0px, calc(4vh - 20px));
 }
+/* Màn hẹp ≤ 760px: .modal cao tối đa 96vh chứ không phải 92vh (khối @media gần đầu tệp), nên chỗ neo
+   4vh ở trên sai số — và khi cửa sổ thấp hơn 500px (điện thoại xoay ngang 667×375) hộp cỡ tối đa đi từ
+   20px tới 20 + 96vh, TRÀN mép dưới vài px. Neo lại theo 96vh: 20px + (100vh − 40px − 96vh)/2 = 2vh; và
+   không cho hộp cao quá phần nền mờ còn lại (100vh − 40px) để mép dưới luôn nằm trong cửa sổ. */
+@media (max-width: 760px) {
+  .modal.import-modal {
+    margin-top: max(0px, calc(2vh - 20px));
+    max-height: min(96vh, calc(100vh - 40px));
+  }
+}
 /* Bảng kế hoạch: chia cột theo TỈ LỆ CỐ ĐỊNH. Để bảng tự co giãn thì ô "Nạp vào" (select có chữ
    dài) và ô thống kê giành hết bề ngang, bóp cột tên sheet còn ~120px → chữ rơi mỗi dòng 1 từ. */
 .import-plan-wrap {
