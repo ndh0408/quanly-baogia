@@ -53,6 +53,10 @@ regexes = [
   # Khoá HKDF giả trong hai bài PII (tests/pii-contract-decode.test.js, tests/ze-pii-cutover.test.js).
   # Tự mô tả là đồ test ngay trong tên, và chỉ đủ dài để qua ràng buộc >= 16 của zod.
   '''khoa-test-[a-z-]*du-dai-cho-hkdf''',
+  # Mật khẩu MỚI giả trong các bài test đổi/đặt lại/kích hoạt mật khẩu (đợt sửa audit 2026-09-23:
+  # tests/au-*.test.js, tests/hs-phien-chi-duoi-api.test.js). Tên tự mô tả: "Mật khẩu mới",
+  # "Đặt lại", "Kẻ tấn công", "Nhận lời mời" + số + một chữ — không từng là mật khẩu của ai.
+  '''(MatKhauMoi|DatLai|KeTanCong|NhanLoiMoi)[0-9]{3,6}[a-z]''',
 ]
 
 # ── Mật khẩu demo dùng chung, viết thẳng trong mã ───────────────────────────
