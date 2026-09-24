@@ -739,6 +739,26 @@ describe("chữ số dính sau chữ cái không được nhặt làm số — L
     expect(parseTheoQuyUoc("12 m2", "vn")).toBe(12);
     expect(parseTheoQuyUoc("1.500.000đ/m2", "vn")).toBe(1500000);
   });
+  // Phản biện đợt 3: bỏ CẢ cụm có chữ đứng trước số thì cả tiền tố hợp lệ ĐẦU ô cũng mất — SL "x2" (2 lần),
+  // giá có mã tiền viết liền "VNĐ1.500.000" / "đ1.500" / "USD1,500" đọc 0 (trước bản sửa L17 đọc đúng số).
+  it("tiền tố 'x' / mã tiền viết LIỀN trước số ở ĐẦU ô vẫn đọc số", () => {
+    expect(parseLooseDecimal("x2")).toBe(2);
+    expect(parseLooseDecimal("X2")).toBe(2);
+    expect(parseLooseDecimal("x1,5")).toBeCloseTo(1.5);
+    expect(parseLooseNumber("VNĐ1.500.000")).toBe(1500000);
+    expect(parseLooseNumber("VND95.000")).toBe(95000);
+    expect(parseLooseNumber("đ1.500")).toBe(1500);
+    expect(parseLooseNumber("USD1,500")).toBe(1500);
+    expect(parseLooseNumber("(VND1.500.000)")).toBe(-1500000);
+    expect(khopQuyUoc("VNĐ1.500.000", "vn")).toBe(true);
+    expect(parseTheoQuyUoc("VNĐ1.500.000", "vn")).toBe(1500000);
+    // Luật L17 giữ nguyên: tiền tố chỉ ở ĐẦU ô, phần sau phải là số; còn lại vẫn bỏ cả cụm.
+    expect(parseLooseDecimal("m2")).toBe(0);
+    expect(parseLooseDecimal("2x3")).toBe(0);
+    expect(parseLooseDecimal("x3m5")).toBe(0);
+    expect(parseLooseDecimal("xe2")).toBe(0);
+    expect(parseLooseDecimal("3 x2")).toBe(3);
+  });
   it("reconstructExportRows: khối lệch cột, 'm2' rơi vào ô SL → SL 0, không phải 2", () => {
     const R = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
     const [a] = reconstructExportRows([["1", "Vách", "", "", "m2", "95000", ""]], R, new Set(["quantity", "unitPrice", "days"]));

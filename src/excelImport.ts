@@ -227,8 +227,10 @@ const chia100 = (n: number) => Number((n / 100).toPrecision(12));
 
 // CHỮ SỐ DÍNH SAU CHỮ CÁI (PORT boCumChuSo, soát toàn diện đợt 3 L17): ô chữ SL "12 m2" từng nạp 122,
 // Đơn Giá "95.000đ/m2" nạp 95,0002 — bộ lọc ký tự bỏ chữ mà giữ chữ số của "m2". Cụm có chữ cái ĐỨNG
-// TRƯỚC chữ số bị bỏ cả cụm; chữ đứng SAU số ("95.000đ", "10bộ") vẫn là đơn vị.
-const boCumChuSo = (s: string) => String(s ?? "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
+// TRƯỚC chữ số bị bỏ cả cụm; chữ đứng SAU số ("95.000đ", "10bộ") vẫn là đơn vị. Tiền tố "x" / mã tiền viết
+// liền ở ĐẦU ô ("x2", "VNĐ1.500.000") được gỡ trước, không bị bỏ cả cụm (phản biện đợt 3).
+const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
+const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
 
 function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);

@@ -70,8 +70,12 @@ export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? 
 // CHỮ nhưng GIỮ chữ số của cụm "m2", "3m5W", "2x3" rồi ghép vào số — ô "m2" lệch cột rơi vào SL đọc 2,
 // SL "12 m2" đọc 122, giá "95.000đ/m2" đọc 95,0002. Cụm có chữ cái ĐỨNG TRƯỚC chữ số là tên / đơn vị /
 // kích thước, không phải số → bỏ CẢ cụm trước khi lọc ("12m2" = 0: không đoán). Chữ đứng SAU số
-// ("95.000đ", "1.5kg", "10bộ") vẫn là đơn vị, số giữ nguyên. PHẢI khớp bản port ở src/excelImport.ts.
-const boCumChuSo = (s: string) => String(s ?? "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
+// ("95.000đ", "1.5kg", "10bộ") vẫn là đơn vị, số giữ nguyên. Ngoại lệ: tiền tố "x" (SL "x2" = 2 lần) và mã
+// tiền viết LIỀN ("VNĐ1.500.000", "đ1.500", "USD1,500") ở ĐẦU ô được gỡ trước — bỏ cả cụm thì chúng đọc 0
+// trong khi trước bản sửa L17 đọc đúng số (phản biện đợt 3). Chỉ ở đầu ô: "3 x2" vẫn là 3, "2x3" / "x3m5"
+// vẫn bỏ. PHẢI khớp bản port ở src/excelImport.ts.
+const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
+const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
 
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
 // "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.

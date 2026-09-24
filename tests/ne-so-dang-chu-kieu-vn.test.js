@@ -154,4 +154,15 @@ describe("L17 (đợt 3): chữ số dính sau chữ cái trong ô CHỮ không 
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[12, 95000], [0, 50000]]);
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual(rows.map((r) => [parseLooseDecimal(r[3]), parseLooseNumber(r[4])]));
   });
+
+  // Phản biện đợt 3: tiền tố "x" / mã tiền viết liền ở ĐẦU ô ("x2", "VNĐ1.500.000") từng bị bỏ cả cụm → 0.
+  it("SL chữ 'x2' = 2; Đơn Giá 'VNĐ1.500.000' = 1.500.000; 'USD1,500' = 1.500 — khớp đường dán", async () => {
+    const rows = [
+      ["1", "Vách", "cái", "x2", "VNĐ1.500.000"],
+      ["2", "Sàn", "cái", "3", "USD1,500"],
+    ];
+    const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[2, 1500000], [3, 1500]]);
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual(rows.map((r) => [parseLooseDecimal(r[3]), parseLooseNumber(r[4])]));
+  });
 });
