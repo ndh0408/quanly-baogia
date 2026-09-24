@@ -726,10 +726,13 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       }
       // Ô CHỮ không đọc được số → 0 (soát toàn diện đợt 4): "ĐG1.500.000" / "Liên hệ" ở Đơn Giá mà tệp
       // không có cột Thành Tiền thì không cảnh báo nào khác bắt được. Nhóm: như trên, chỉ xét SL.
+      // SL của NHÓM và Số Ngày trống / 0 thì app tính ×1 (groupMult = max(1, SL || 1); ngày trống = ×1) —
+      // câu báo phải nói đúng con số app dùng, không phải "đã để 0" (phản biện đợt 4).
       for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0]] as const) {
         if (isGroup && role !== "quantity") continue;
         const t = colOf[role] ? chuSo(cellAt(r, role)) : "";
-        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, đã để 0, cần nhập lại`);
+        const deLai = isGroup || role === "days" ? "đã bỏ trống (tính như 1)" : "đã để 0";
+        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, ${deLai}, cần nhập lại`);
       }
     }
 

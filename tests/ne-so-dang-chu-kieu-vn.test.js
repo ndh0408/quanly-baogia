@@ -241,6 +241,25 @@ describe("đợt 4 việc 1: ô CHỮ ở cột số đọc ra 0 phải có cả
     for (const g of so0) expect(chuKhongRaSo(g, parseLooseNumber(g)), g).toBe(false);
   });
 
+  // Phản biện đợt 4: SL của hàng NHÓM và Số Ngày trống / 0 thì app tính ×1 (groupMult = max(1, SL || 1); ngày
+  // trống = ×1) — câu "đã để 0" nói sai con số app thật sự dùng.
+  //   ĐÃ ĐO (2721ffb): nhóm SL "Trọn gói" → warn "… không đọc được số, đã để 0, cần nhập lại".
+  it("câu cảnh báo nói đúng con số: SL hàng NHÓM / Số Ngày không đọc được → 'tính như 1', dòng thường → 'đã để 0'", async () => {
+    const s = await tep([
+      ["A", "Nhóm SL chữ", "", "Trọn gói", "", ""],
+      ["1", "Nhân sự", "người", "2", "cả tuần", "500.000"],
+      ["2", "Loa", "cái", "Liên hệ", "2", "100.000"],
+    ], ["STT", "Hạng mục", "ĐVT", "Số lượng", "Số ngày", "Đơn giá"]);
+    const [nhom, ns, loa] = s.items;
+    expect(nhom.kind).toBe("section");
+    expect(nhom.warn?.join(" | ")).toMatch(/Số Lượng.*Trọn gói.*không đọc được số, đã bỏ trống \(tính như 1\)/);
+    expect(ns.days).toBeNull();
+    expect(ns.warn?.join(" | ")).toMatch(/Số Ngày.*cả tuần.*không đọc được số, đã bỏ trống \(tính như 1\)/);
+    expect(loa.quantity).toBe(0);
+    expect(loa.warn?.join(" | ")).toMatch(/Số Lượng.*Liên hệ.*không đọc được số, đã để 0/);
+    for (const it of [nhom, ns]) expect(it.warn.join(" | ")).not.toMatch(/đã để 0/);
+  });
+
   it("KHỚP phía web: chuKhongRaSo ở clipboard.ts (dùng cho đường dán) cho cùng kết luận với bộ nhập", async () => {
     const giaChu = ["ĐG1.500.000", "gia1.500", "Liên hệ", "0", "0đ", "-", "(0)", "95.000đ/m2", "VNĐ1.500.000", "1e3"];
     const s = await tep(giaChu.map((g, k) => [String(k + 1), `Mục ${k + 1}`, "cái", "1", g]), HDR5);
