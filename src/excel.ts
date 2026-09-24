@@ -253,6 +253,18 @@ export function soDongKhiXuongHang(text: unknown, beRongCot: number, { dam = tru
   return Math.max(1, total);
 }
 
+// ── CHIỀU CAO MỘT DÒNG CHỮ THEO CỠ ───────────────────────────────────────────────────────────
+// Đo bằng Excel thật (Rows.AutoFit, Times New Roman, 96dpi): mỗi dòng cao đúng một số NGUYÊN px nên
+// không tỉ lệ thuận với cỡ chữ — cỡ 12 cần 15,75pt (21px), cỡ 14 cần 18,75pt, cỡ 18 cần 22,5pt.
+// Cỡ ≤ 11 giữ 15pt như mọi hàng hạng mục từ trước. Cỡ chưa đo thì làm tròn LÊN theo px ở tỉ lệ
+// ~1,36 (tỉ lệ lớn nhất trong các cỡ đã đo) — thà cao còn hơn cắt chữ.
+const CAO_MOT_DONG_PT: Record<number, number> = { 12: 15.75, 14: 18.75, 18: 22.5 };
+function caoMotDongPt(co: number): number {
+  const n = Number(co) || 11;
+  if (n <= 11) return 15;
+  return CAO_MOT_DONG_PT[n] ?? Math.ceil((n * 4) / 3 * 1.36) * 0.75;
+}
+
 /** Strip leading/trailing whitespace AND collapse internal newlines to spaces. */
 function clean(s: any) {
   if (s == null) return "";
@@ -788,8 +800,12 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (!chu) return;                       // ô rỗng: giữ nguyên (dải banner rỗng còn bị ẩn hàng)
       const r = parseInt(String(addr).replace(/^[A-Z]+/, ""), 10);
       if (!r) return;
-      const soDong = wrapLines(chu, null, beRongVungGop(addr), fontDo(addr));
-      const can = Math.min(409, Math.max(18, soDong * 15 + 3));
+      const f = fontDo(addr);
+      const soDong = wrapLines(chu, null, beRongVungGop(addr), f);
+      // Mỗi dòng theo CỠ CHỮ thật của ô: hai ô đi qua đây đều cỡ 12 (15,75pt/dòng) — tính 15pt như
+      // chữ 11 thì khối "Kính gửi" đủ 5 dòng thiếu 0,75pt, dải thông tin 7 dòng thiếu 2,25pt, và
+      // dòng cuối bị xén (đo Excel COM).
+      const can = Math.min(409, Math.max(18, soDong * caoMotDongPt(f.co) + 3));
       // CHỈ NỚI RA, KHÔNG BÓP LẠI: chiều cao trong tệp mẫu là chủ ý trình bày của người dùng.
       const dangCo = ws.getRow(r).height;
       if (dangCo == null || can > dangCo) ws.getRow(r).height = can;
@@ -804,7 +820,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // vùng gộp bị Excel cắt CẢ HAI ĐẦU (đo: ~83 ký tự ở CLF, ~88 ở GN là bắt đầu cụt). Chỉ khi chữ
   // THẬT SỰ tràn mới bật wrap và nới hàng — tiêu đề vừa một dòng giữ nguyên từng thuộc tính của tệp
   // mẫu. Đặt SAU khối cột ảnh vì vùng gộp tiêu đề có thể vừa nối dài sang cột HÌNH ẢNH. Không đi qua
-  // `caoTheoChu`: nó tính 15pt/dòng (chữ 11), còn Excel cần ~1,3 × cỡ chữ mỗi dòng (22,5pt ở cỡ 18).
+  // `caoTheoChu`: ô tiêu đề chỉ bật wrap khi chữ THẬT SỰ tràn, và giữ công thức cao riêng bên dưới.
   if (c.title) {
     try {
       const o = ws.getCell(c.title);
@@ -1392,9 +1408,10 @@ ${ghiChu}` : null;
             ensureWrap(oGC);
             // Và NỚI CHIỀU CAO theo chữ: hàng này bị mẫu khoá cứng 61pt, ghi chú dài hơn ~4 dòng
             // là khách không đọc được phần còn lại.
+            const fGC = fontDo(oChinh);
             const soDong = wrapLines(`* Ghi chú: 
-${ghiChu}`, null, beRongVungGop(oChinh), fontDo(oChinh));
-            const can = Math.min(409, Math.max(18, soDong * 15 + 3));
+${ghiChu}`, null, beRongVungGop(oChinh), fGC);
+            const can = Math.min(409, Math.max(18, soDong * caoMotDongPt(fGC.co) + 3));
             const dangCo = ws.getRow(newRow).height;
             if (dangCo == null || can > dangCo) ws.getRow(newRow).height = can;
           }
