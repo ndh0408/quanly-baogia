@@ -558,7 +558,7 @@ function GridTableInner(props: GridTableProps) {
     for (let pass = 0; pass < Math.max(8, soFx + 1); pass++) {
       let ch = false;
       const tn = tinhTongNhom();
-      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f) && khoaO(i, f) !== oDangGo) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (!(typeof rec[f] === "number" && chiLechDauPhayDong(v, rec[f] as number))) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f) && khoaO(i, f) !== oDangGo) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null || fxVongRef.current) continue; if (NUMERIC.has(f)) { if (!(typeof rec[f] === "number" && chiLechDauPhayDong(v, rec[f] as number))) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
   };
@@ -616,6 +616,12 @@ function GridTableInner(props: GridTableProps) {
       // không tính được, dù cờ `_fxLoi` đã rơi ở đâu đó (hồi quy 68f8800: Esc làm mất cờ) → giữ số đang
       // có và tô đỏ như recomputeAll, không báo — ghi 0 ở đây là mất tiền chỉ vì con trỏ đi qua.
       if (v === null && NUMERIC.has(f)) { datCoVong(i, f); if (giuCoHong && raw.trim() === fxCu) return; if (!daDo) baoFxLoi(); }
+      // VÒNG QUA TỔNG CHÍNH NHÓM (cellNum bật fxVongRef, trả 0 cho số hạng đó nhưng vẫn cộng phần còn lại):
+      // kết quả là tổng DỞ DANG — không được ghi. Công thức vừa gõ/dán → ô ra 0 kèm đỏ (fxNhom: "không bịa
+      // số"); recomputeAll thì giữ nguyên số đã lưu. Diễn tập lên production 2026-09-25: một báo giá thật có
+      // "=ROUND((SUM(G15:G58)*14%);-6)" phủ luôn hàng tổng của chính nhóm, sửa một ô bất kỳ là đơn giá tự
+      // nhảy 0 → 41.000.000.
+      if (fxVongRef.current && NUMERIC.has(f)) { it[f] = 0; return; }
       // Số tính lại chỉ lệch DẤU PHẨY ĐỘNG so với số đang có (máy chủ lưu 4 số lẻ: 5.6375; JS tính
       // "=2.75*2.05" ra 5.637499999999999) → giữ số đang có. Không thì chỉ BẤM QUA một ô công thức (rời ô,
       // Enter, Esc) cũng đổi model → mốc so của onGridBlur lệch → báo giá thành "chưa lưu", hỏi khi rời
