@@ -125,6 +125,19 @@ describe("L51: số dạng chữ trong tệp ngoài đọc như khi dán vào l�
     expect(s.items[0].warn).toBeUndefined();
   });
 
+  // Phản biện đợt 3: "(1.500.000 đồng)" — chữ "đồng" trong ngoặc không nằm trong danh sách ký hiệu tiền
+  // được gỡ nên ngoặc bị coi là chú thích → nạp +1.500.000 (trước bản sửa ngoặc chú thích là −1.500.000).
+  it("Đơn Giá chữ '(1.500.000 đồng)' / '(US$1,500)' là số âm; khớp dán tay", async () => {
+    const rows = [
+      ["1", "Chiết khấu", "gói", "1", "(1.500.000 đồng)"],
+      ["2", "Giảm giá", "gói", "1", "(US$1,500)"],
+    ];
+    const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    expect(s.items.map((i) => i.unitPrice)).toEqual([-1500000, -1500]);
+    const qu = suyQuyUocSo(rows.map((r) => r.slice(3)), (c) => c >= 1);
+    expect(s.items.map((i) => i.unitPrice)).toEqual(rows.map((r) => (qu ? parseTheoQuyUoc(r[4], qu) : parseLooseNumber(r[4]))));
+  });
+
   it("ô SỐ THẬT không đổi gì", async () => {
     const s = await tep([[1, "Ghế", "cái", 1500, 50000, 75000000], [2, "Chiết khấu", "gói", 1, -500000, -500000]]);
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[1500, 50000], [1, -500000]]);

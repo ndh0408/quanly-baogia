@@ -45,13 +45,15 @@ export function cellsToHTML(matrix: string[][]): string {
 // dòng cộng thêm, tổng lệch gấp đôi khoản giảm. Nhận ra ngoặc bao TRỌN giá trị thì đảo dấu.
 // Phần TRONG ngoặc phải là SỐ thuần (chữ số, dấu tách, ký hiệu tiền, %): "(Tạm tính) 500.000 (chưa VAT)"
 // cũng mở "(" đóng ")" nhưng là hai chú thích — bản trước đọc thành −500.000, hạng mục thành khoản TRỪ
-// mà không cảnh báo (soát toàn diện đợt 3). PHẢI khớp bản port ở src/excelImport.ts.
+// mà không cảnh báo (soát toàn diện đợt 3). Chữ tiền được gỡ trước khi xét gồm cả "đồng" / "dong" / "US$":
+// thiếu chúng thì "(1.500.000 đồng)" bị coi là chú thích, đọc +1.500.000 (phản biện đợt 3). PHẢI khớp bản
+// port ở src/excelImport.ts.
 const AM_KE_TOAN = /^\((.*)\)$/;
 const SO_TRONG_NGOAC = /^[\s\d.,%-]*\d[\s\d.,%-]*$/;
 const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
   const t = String(s).trim().replace(/\s*[₫đ$]$|^[₫đ$]\s*/gi, "").trim();
   const m = AM_KE_TOAN.exec(t);
-  return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
+  return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
 // PHẦN TRĂM (soát toàn diện L15): Excel/Sheets chép ô định dạng % dưới dạng CHỮ "10%" (giá trị gốc

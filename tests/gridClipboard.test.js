@@ -463,6 +463,18 @@ describe("số âm kiểu kế toán '(…)' — GRID-13", () => {
     expect(parseLooseNumber("($1,500.00)")).toBe(-1500);
     expect(parseLooseNumber("(10%)")).toBeCloseTo(-0.1);
   });
+  // Phản biện đợt 3: danh sách ký hiệu tiền được gỡ trước khi xét "số thuần" thiếu chữ "đồng" và "US$" —
+  // "(1.500.000 đồng)" (định dạng âm có chữ đồng trong ngoặc) từng đọc +1.500.000 (trước bản sửa là âm).
+  it("ngoặc kế toán kèm chữ 'đồng' / 'dong' / 'US$' vẫn là số âm", () => {
+    expect(parseLooseNumber("(1.500.000 đồng)")).toBe(-1500000);
+    expect(parseLooseNumber("(1.500.000 Đồng)")).toBe(-1500000);
+    expect(parseLooseNumber("(1.500.000 dong)")).toBe(-1500000);
+    expect(parseLooseNumber("(US$1,500)")).toBe(-1500);
+    expect(parseLooseDecimal("(2,5 đồng)")).toBeCloseTo(-2.5);
+    expect(parseTheoQuyUoc("(1.500.000 đồng)", "vn")).toBe(-1500000);
+    // Chữ khác trong ngoặc vẫn không phải số âm.
+    expect(parseLooseNumber("(Tạm tính) 500.000 (chưa VAT)")).toBe(500000);
+  });
 });
 
 describe("GN KHÔNG NGÀY — nhóm con STT TRỐNG (kể cả có ĐVT/giá); Banner nhóm con ĐÁNH SỐ", () => {

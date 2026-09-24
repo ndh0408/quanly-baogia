@@ -207,13 +207,14 @@ function cellText(v: unknown): string {
 // Số âm kiểu KẾ TOÁN: định dạng Accounting hiện "(1.500.000)" thay vì "-1.500.000". Ngoặc bao TRỌN giá
 // trị thì đảo dấu (bộ lọc ký tự bên dưới bỏ ngoặc, không có bước này là số âm thành DƯƠNG). Phần TRONG
 // ngoặc phải là SỐ thuần: Đơn Giá chữ "(Tạm tính) 500.000 (chưa VAT)" cũng mở "(" đóng ")" nhưng là hai
-// chú thích — bản trước nạp thành −500.000, không cảnh báo (soát toàn diện đợt 3).
+// chú thích — bản trước nạp thành −500.000, không cảnh báo (soát toàn diện đợt 3). Chữ tiền được gỡ gồm cả
+// "đồng" / "dong" / "US$" — thiếu thì "(1.500.000 đồng)" nạp +1.500.000 (phản biện đợt 3).
 const AM_KE_TOAN = /^\((.*)\)$/;
 const SO_TRONG_NGOAC = /^[\s\d.,%-]*\d[\s\d.,%-]*$/;
 const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
   const t = String(s).trim().replace(/\s*[₫đ$]$|^[₫đ$]\s*/gi, "").trim();
   const m = AM_KE_TOAN.exec(t);
-  return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
+  return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
 // PHẦN TRĂM (PORT boPhanTram, soát toàn diện L15): ô CHỮ "10%" ở cột SL/Đơn Giá — bộ lọc ký tự bỏ "%"
