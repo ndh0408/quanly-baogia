@@ -46,4 +46,4 @@ Dockerfile       text eol=lf
 
 # `git archive` (deploy.sh ship mã bằng lệnh này) tự điền mã commit + giờ commit vào tệp → máy chủ biết mình
 # đang chạy bản nào để HIỆN cho người dùng (src/phienBan.ts). Cây làm việc thì tệp giữ nguyên $Format:…$.
-public/phien-ban.txt text eol=lf export-subst
+public/.phien-ban text eol=lf export-subst

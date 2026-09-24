@@ -1,16 +1,29 @@
 // Dải "Hệ thống vừa được cập nhật — [Tải bản mới]" + dòng phiên bản ở chân menu (chủ repo 2026-09-24).
 // Logic nằm ở ../lib/phienBan.ts; ở đây chỉ vẽ và nối nút.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { toast } from "../lib/ui";
 import {
-  usePhienBan, batDauTheoDoi, kiemTraBanMoi, taiBanMoi, luuRoiBao, anTam, hienLai, dangDo, nhanPhienBan, type DangDo,
+  usePhienBan, batDauTheoDoi, kiemTraBanMoi, taiBanMoi, luuRoiBao, anTam, hienLai, dangDo, nhanPhienBan, layTrangThai, type DangDo,
 } from "../lib/phienBan";
 
+// Câu nhắc kèm dải khi người dùng đang dở gì đó. "chua-ro" (trang không tự khai an toàn) thì KHÔNG nhắc
+// gì thêm — phần lớn lúc đó chẳng có gì dở, nhắc mãi thành nhờn; bấm Tải bản mới mới hỏi lại.
 const CAU_DO: Record<Exclude<DangDo, null>, string> = {
   "chua-luu": "Bạn còn thay đổi CHƯA LƯU — bấm Lưu trước, rồi bấm Tải bản mới.",
   "form-mo": "Lưu hoặc đóng form đang mở trước, rồi bấm Tải bản mới.",
-  "dang-go": "Rời ô đang gõ (hoặc lưu) trước, rồi bấm Tải bản mới.",
+  "dang-go": "Lưu phần đang gõ trước, rồi bấm Tải bản mới.",
+  "chua-ro": "",
 };
+// Câu hỏi lại khi người dùng bấm Tải bản mới lúc đang dở.
+const CAU_HOI: Record<Exclude<DangDo, null>, [string, string]> = {
+  "chua-luu": ["Còn thay đổi chưa lưu.", "Lưu trước để chắc chắn không mất, hay tải bản mới luôn? (Tải luôn: phần chưa lưu được giữ tạm trên máy này — mở lại sẽ được hỏi “Khôi phục”.)"],
+  "form-mo": ["Đang mở một form.", "Tải bản mới bây giờ thì nội dung đang nhập trong form sẽ mất."],
+  "dang-go": ["Đang gõ dở.", "Tải bản mới bây giờ thì phần đang gõ sẽ mất."],
+  "chua-ro": ["Trang này có thể còn phần đang nhập chưa lưu.", "Tải bản mới bây giờ thì phần đó sẽ mất — lưu trước nếu cần."],
+};
+// Bấm chuột vào nút làm ô đang gõ mất con trỏ TRƯỚC khi click chạy → lúc hỏi "đang dở không" thì ô đã
+// không còn con trỏ, nhánh "đang gõ" không bao giờ hỏi (soát 2026-09-24). Giữ con trỏ ở lại ô.
+const giuConTro = (e: MouseEvent) => e.preventDefault();
 
 /** Dải thông báo trên cùng — gắn MỘT lần ở gốc app (main.tsx), có mặt ở mọi màn kể cả đăng nhập. */
 export function ThongBaoBanMoi() {
@@ -28,13 +41,20 @@ export function ThongBaoBanMoi() {
   if (!s.coBanMoi || Date.now() < s.anDenLuc) return null;
   const dd = dangDo();
 
+  const tai = async () => {
+    setHoi(null);
+    if (await taiBanMoi()) return;
+    // Không tải được mà vẫn còn bản mới (máy chủ vừa lùi bản thì dải tự biến mất, khỏi báo).
+    if (layTrangThai().coBanMoi) toast("Chưa tải được bản mới — mạng chập chờn, máy chủ đang cập nhật hoặc đang lưu dở. Thử lại sau ít phút.", "error");
+  };
   const bamTai = () => {
-    const bayGio = dangDo();
+    // Trạng thái lúc bấm; không thấy gì thì lấy trạng thái của lượt vẽ gần nhất (≤ 2 giây trước).
+    const bayGio = dangDo() ?? dd;
     if (bayGio) { setHoi(bayGio); return; }
-    void taiBanMoi();
+    void tai();
   };
   const luuRoiTai = async () => {
-    if (await luuRoiBao()) { void taiBanMoi(); return; }
+    if (await luuRoiBao()) { void tai(); return; }
     toast("Chưa lưu được — xem thông báo lỗi trên màn hình, sửa rồi bấm Tải bản mới lại", "error");
     setHoi(null);
   };
@@ -44,10 +64,9 @@ export function ThongBaoBanMoi() {
       <span className="tbbm-icon" aria-hidden="true">🔄</span>
       <div className="tbbm-chu">
         {hoi ? (
-          <span><b>{hoi === "chua-luu" ? "Còn thay đổi chưa lưu." : "Đang có phần chưa xong."}</b>{" "}
-            {hoi === "chua-luu" ? "Lưu trước để không mất, hay tải bản mới luôn?" : "Tải bản mới bây giờ thì phần đang mở / đang gõ sẽ mất."}</span>
+          <span><b>{CAU_HOI[hoi][0]}</b> {CAU_HOI[hoi][1]}</span>
         ) : (
-          <span>Hệ thống vừa được cập nhật.{dd ? " " + CAU_DO[dd] : ""}</span>
+          <span>Hệ thống vừa được cập nhật.{dd && CAU_DO[dd] ? " " + CAU_DO[dd] : ""}</span>
         )}
       </div>
       <div className="tbbm-nut">
@@ -56,17 +75,15 @@ export function ThongBaoBanMoi() {
         ) : hoi ? (
           <>
             {hoi === "chua-luu" && <button type="button" className="btn btn-sm btn-primary" onClick={() => void luuRoiTai()}>Lưu rồi tải bản mới</button>}
-            <button type="button" className="btn btn-sm btn-danger" onClick={() => void taiBanMoi()}>
-              {hoi === "chua-luu" ? "Tải luôn (bỏ thay đổi)" : "Tải luôn"}
-            </button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => void tai()}>Tải luôn</button>
             <button type="button" className="btn btn-sm" onClick={() => setHoi(null)}>Hủy</button>
           </>
         ) : (
-          <button type="button" className="btn btn-sm btn-primary" onClick={bamTai}>Tải bản mới</button>
+          <button type="button" className="btn btn-sm btn-primary" onMouseDown={giuConTro} onClick={bamTai}>Tải bản mới</button>
         )}
       </div>
       {!hoi && !s.dangTai && (
-        <button type="button" className="tbbm-dong" aria-label="Ẩn thông báo bản mới (nhắc lại sau 30 phút)" title="Ẩn — nhắc lại sau 30 phút" onClick={() => anTam()}>✕</button>
+        <button type="button" className="tbbm-dong" aria-label="Ẩn thông báo bản mới (nhắc lại sau 30 phút)" title="Ẩn — nhắc lại sau 30 phút" onMouseDown={giuConTro} onClick={() => anTam()}>✕</button>
       )}
     </div>
   );

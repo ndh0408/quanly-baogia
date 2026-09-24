@@ -289,7 +289,20 @@ function docThan(t: string, r: Response): unknown {
   }
 }
 
+// LỆNH GHI ĐANG BAY. Dải "Có bản mới" (lib/phienBan.ts) chờ số này về 0 rồi mới tải lại trang, và
+// không tự tải khi nó > 0: trang Hóa đơn lưu ô khi blur — chuyển tab vừa bắn lệnh PUT vừa kích hoạt
+// lượt tự tải, tải lại trước khi PUT kịp đi là số vừa gõ mất im lặng (soát 2026-09-24). Nhịp tim NỀN
+// (im401 — presence) không tính: nó chạy suốt và mất một nhịp không mất gì.
+let lenhGhiDangBay = 0;
+export const soLenhGhiDangBay = () => lenhGhiDangBay;
+
 async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
+  if (!CAN_GHI((opts.method || "GET").toUpperCase()) || opts.im401) return reqGoc<T>(path, opts);
+  lenhGhiDangBay++;
+  try { return await reqGoc<T>(path, opts); } finally { lenhGhiDangBay--; }
+}
+
+async function reqGoc<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   const method = (opts.method || "GET").toUpperCase();
   if (__preview && method !== "GET" && method !== "HEAD") {
     // XEM THỬ (sandbox): KHÔNG gửi lên server → trả "thành công giả" để thao tác chạy mượt, lưu TẠM ở client,

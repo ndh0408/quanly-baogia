@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api, type Me, type OverviewResp, type RevenuePoint, type TopSaleRow, type ProjectQuote, type ProjectSheet } from "../lib/api";
 import { fmtMoney, fmtPct, sheetCode, soMa, statusLabel, errMsg, trangKhachTuChoi } from "../lib/format";
+import { useTrangAnToan } from "../lib/phienBan";
 
 // "Tổng quan" THÔNG MINH: chọn kỳ (7/30/90 ngày · quý · năm) → KPI có xu hướng so kỳ trước,
 // biểu đồ doanh số theo ngày (SVG), phễu/pipeline theo kỳ kèm tỷ lệ thắng, "Cần xử lý" (AR/chứng từ
@@ -277,6 +278,7 @@ function ActionItems({ projects }: { projects: ProjectQuote[] }) {
 }
 
 export function DashboardPage({ me }: { me: Me }) {
+  useTrangAnToan();   // chỉ xem/lọc — tải lại lúc này không mất gì (dải "Có bản mới", lib/phienBan.ts)
   const isAdmin = me.permissions.includes("quote:read:all");
   const [period, setPeriod] = useState<PeriodKey>(loadPeriod());
   const range = useMemo(() => computeRange(period), [period]);

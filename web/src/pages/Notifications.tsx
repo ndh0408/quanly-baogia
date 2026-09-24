@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Notif } from "../lib/api";
 import { errMsg, fmtDateTime } from "../lib/format";
 import { toast } from "../lib/ui";
+import { useTrangAnToan } from "../lib/phienBan";
 
 // Port "Thông báo" (renderNotifications) — bê ĐẦY ĐỦ: danh sách thẻ thông báo (đã/chưa đọc) +
 // lọc Tất cả/Chưa đọc + "Đánh dấu đã đọc tất cả" + bấm 1 thông báo → đánh dấu đã đọc + deep-link
@@ -26,6 +27,7 @@ function dedupNotifs(list: Notif[]): Notif[] {
 }
 
 export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
+  useTrangAnToan();   // chỉ xem/lọc — tải lại lúc này không mất gì (dải "Có bản mới", lib/phienBan.ts)
   const qc = useQueryClient();
   const [filter, setFilter] = useState(""); // "" = tất cả · "unread" = chưa đọc (lọc client-side)
   const { data, isPending, error, refetch } = useQuery({

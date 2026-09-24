@@ -6,6 +6,7 @@ import * as M from "../lib/quoteMath";
 import { ExtraPayDialog, extraTableSum } from "../components/ExtraTables";
 import { mauBangHn } from "../components/HnTables";
 import { codeLabel, errMsg, fmtDate, dash } from "../lib/format";
+import { useTrangAnToan } from "../lib/phienBan";
 
 // Màn hình CHỈ XEM BẢNG NỘI BỘ (quyền quote:internal:view) — tài khoản "chi phí": thấy các bảng nội bộ của
 // 1 báo giá + đánh dấu THANH TOÁN từng hàng (+ ảnh). KHÔNG lộ giá/khách/báo giá chính (server đã lược).
@@ -25,6 +26,7 @@ const rowTotal = (it: any, coNgay: boolean) => {
 type PayTarget = { sheetId?: number; hn?: boolean; item: Record<string, unknown> } | null;
 
 export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) {
+  useTrangAnToan();   // chỉ xem/lọc — tải lại lúc này không mất gì (dải "Có bản mới", lib/phienBan.ts)
   const { data, isPending, error, refetch } = useQuery({ queryKey: ["quote-internal", quoteId], queryFn: () => api.getQuote(quoteId) });
   // Danh sách mẫu — để biết bảng nào CÓ cột Số Ngày (luật chọn mẫu của HnTables / ExtraTables). Chưa có
   // thì chưa vẽ số: vẽ tạm kiểu "nhân days bất kể mẫu" là nháy một con số tiền sai.

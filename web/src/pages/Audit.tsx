@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type AuditEntry } from "../lib/api";
 import { dash, fmtDateTime } from "../lib/format";
 import { useIsMobile } from "../lib/ui";
+import { useTrangAnToan } from "../lib/phienBan";
 
 // Port "Nhật ký hoạt động" (renderAuditLog) — bê ĐẦY ĐỦ: lọc theo Hoạt động/Đối tượng/Khoảng
 // ngày (Từ–Đến) + Xóa lọc + phân trang + nhãn tiếng Việt + skeleton/empty/error. Read-only.
@@ -145,6 +146,7 @@ const RESOURCE_OPTS = Object.entries(RESOURCE_LABEL);
 const PAGE_SIZE = 50;
 
 export function AuditPage() {
+  useTrangAnToan();   // chỉ xem/lọc — tải lại lúc này không mất gì (dải "Có bản mới", lib/phienBan.ts)
   const [action, setAction] = useState("");
   const [resource, setResource] = useState("");
   const [from, setFrom] = useState("");

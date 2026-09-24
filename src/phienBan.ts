@@ -11,7 +11,7 @@
 //   vào tên, nên đổi tên = đổi bản; và đây ĐÚNG là thứ trình duyệt sẽ tải khi tải lại trang. Web so tên
 //   này với tệp mình đang chạy — không cần mã commit, không đụng đường build của deploy.sh.
 // · `sha` / `capNhatLuc` — chỉ để HIỆN cho người đọc ("Phiên bản 9dd30dc · 24/09 14:00"). Lấy từ
-//   public/phien-ban.txt, tệp mang thuộc tính `export-subst` (.gitattributes): `git archive` — chính
+//   public/.phien-ban, tệp mang thuộc tính `export-subst` (.gitattributes): `git archive` — chính
 //   thứ deploy.sh dùng để ship mã — tự điền mã commit + giờ commit vào đó. Chạy từ cây làm việc (dev
 //   cục bộ, verify) thì tệp còn nguyên `$Format:…$` → hai trường này null, web hiện "bản đang phát triển".
 import fs from "node:fs";
@@ -22,11 +22,9 @@ export type PhienBan = {
   banGiaoDien: string | null;
   sha: string | null;
   capNhatLuc: string | null;
-  khoiDongLuc: string;
 };
 
 const GOC_MAC_DINH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const KHOI_DONG_LUC = new Date().toISOString();
 
 /** Đọc thẳng từ đĩa (không cache) — cho test truyền thư mục gốc giả. */
 export function docPhienBan(goc: string = GOC_MAC_DINH): PhienBan {
@@ -39,12 +37,15 @@ export function docPhienBan(goc: string = GOC_MAC_DINH): PhienBan {
   let sha: string | null = null;
   let capNhatLuc: string | null = null;
   try {
-    const t = fs.readFileSync(path.join(goc, "public", "phien-ban.txt"), "utf8").trim();
+    // TỆP CHẤM (.phien-ban): express.static mặc định bỏ qua dotfile → không bị phục vụ công khai ở
+    // /phien-ban.txt kèm mã commit ĐẦY ĐỦ và cache `immutable` 1 năm (soát 2026-09-24). Web chỉ cần
+    // mã rút gọn qua /api/phien-ban.
+    const t = fs.readFileSync(path.join(goc, "public", ".phien-ban"), "utf8").trim();
     const m = /^([0-9a-f]{7,40})\s+(\S+)/.exec(t);
     if (m && !Number.isNaN(Date.parse(m[2]))) { sha = m[1].slice(0, 7); capNhatLuc = m[2]; }
   } catch { /* thiếu tệp → không có số để hiện */ }
 
-  return { banGiaoDien, sha, capNhatLuc, khoiDongLuc: KHOI_DONG_LUC };
+  return { banGiaoDien, sha, capNhatLuc };
 }
 
 // Mỗi tab hỏi 5 phút một lần; đọc đĩa mỗi lượt là thừa, nhưng cũng không giữ mãi — dev cục bộ build lại

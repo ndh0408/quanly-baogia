@@ -276,7 +276,8 @@ export function createApp() {
       logger,
       // Probe/scrape (~6 lượt/phút, ~8.640 dòng/ngày) không ghi log truy cập — chúng nhấn chìm dòng
       // thật trong Loki (audit 2026-09-22, OBS-08). Lỗi của chúng vẫn thấy qua metric và qua log lỗi.
-      autoLogging: { ignore: (req: Request) => req.url === "/livez" || req.url === "/metrics" },
+      // /api/phien-ban cùng loại: MỌI tab đang mở (cả tab bỏ quên, cả màn đăng nhập) hỏi 12 lượt/giờ.
+      autoLogging: { ignore: (req: Request) => { const p = (req.url || "").split("?")[0]; return p === "/livez" || p === "/metrics" || p === "/api/phien-ban"; } },
       customLogLevel: (_req: Request, res: Response, err: Error | undefined) => {
         if (err || res.statusCode >= 500) return "error";
         if (res.statusCode >= 400) return "warn";
@@ -341,7 +342,8 @@ export function createApp() {
   // PHIÊN BẢN ĐANG PHÁT (src/phienBan.ts) — web hỏi định kỳ để báo "Có bản mới" sau deploy. Công khai
   // (trang đăng nhập cũng cần biết) và đặt TRƯỚC cổng phiên bên dưới: đi qua phiên thì mỗi lần hỏi (5
   // phút/tab) lại làm mới cookie rolling → tab bỏ quên KHÔNG BAO GIỜ hết phiên. Vẫn nằm sau apiLimiter.
-  // Chỉ trả tên tệp giao diện (vốn đã công khai trong index.html) + mã commit rút gọn (repo công khai).
+  // Chỉ trả tên tệp giao diện (vốn đã công khai trong index.html) + mã commit rút gọn và giờ commit
+  // (repo công khai) — không gì khác (bỏ giờ khởi động tiến trình: soát 2026-09-24).
   app.get("/api/phien-ban", (_req: Request, res: Response) => {
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json(phienBanHienTai());

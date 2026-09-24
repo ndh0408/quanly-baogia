@@ -6,6 +6,7 @@ import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
 import { statusLabel, fmtMoney, fmtDate, codeLabel, tieuDeHienThi, errMsg, dash } from "../lib/format";
 import { xuatBaoGia } from "../lib/exportQuote";
+import { useTrangAnToan } from "../lib/phienBan";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
 // + phân trang + LƯU filter vào URL (#/list?q=&status=&sort=&page=) + thao tác (mở→editor ·
@@ -18,6 +19,7 @@ const QUOTE_SORTS = ["createdAt", "quoteDate", "total", "quoteNumber"];
 const PAGE_SIZE = 20;
 
 export function QuoteListPage({ me }: { me: Me }) {
+  useTrangAnToan();   // chỉ xem/lọc (bộ lọc nằm trên URL) — tải lại không mất gì (dải "Có bản mới", lib/phienBan.ts)
   const qc = useQueryClient();
   const can = useCallback((perm: string) => me.permissions.includes(perm) || (perm.endsWith(":own") && me.permissions.includes(perm.replace(/:own$/, ":all"))), [me]);
   // Theo QUYỀN (không theo role cứng): thấy mọi báo giá → hiện cột "Người tạo"; người điền HN → bản lược HN.

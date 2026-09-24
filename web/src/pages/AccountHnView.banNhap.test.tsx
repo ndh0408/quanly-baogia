@@ -27,6 +27,7 @@ import { AccountHnView } from "./AccountHnView";
 import { ApiError, api, setPreviewMode } from "../lib/api";
 import { khoaBanNhap, docBanNhap, ghiBanNhap } from "../lib/localDraft";
 import * as ui from "../lib/ui";
+import { laTrangAnToan } from "../lib/phienBan";
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -511,5 +512,31 @@ describe("L64 — bảng Hà Nội đổi mẫu qua lại không mất số Ngà
     await cho(200);
     expect(theCuoi()).toContain("2.000.000");
     expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "mới mở đã bật cờ chưa lưu").toBe(false);
+  });
+});
+
+describe("dải 'Có bản mới' (lib/phienBan.ts) — màn Account Hà Nội", () => {
+  const trinhDuyetHoi = () => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
+  it("chưa gõ gì → khai tải lại an toàn; gõ giá → hết an toàn", async () => {
+    await mo();
+    expect(laTrangAnToan()).toBe(true);
+    goGia("6000000");
+    await cho(250);
+    expect(laTrangAnToan()).toBe(false);
+  });
+
+  it("'Tải luôn' (phien-ban:truoc-tai) → bản nháp ghi NGAY, trình duyệt khỏi hỏi lần hai; ghi không được thì vẫn hỏi", async () => {
+    await mo();
+    goGia("6000000");
+    await cho(250);
+    expect(docBanNhap(KHOA, 5)).toBeNull();
+    const day = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("đầy", "QuotaExceededError"); });
+    try {
+      await act(async () => { window.dispatchEvent(new Event("phien-ban:truoc-tai")); });
+      expect(trinhDuyetHoi(), "không giữ được bản nháp → trình duyệt phải hỏi lần cuối").toBe(true);
+    } finally { day.mockRestore(); }
+    await act(async () => { window.dispatchEvent(new Event("phien-ban:truoc-tai")); });
+    expect(giaTrongNhap(KHOA)).toBe(6_000_000);
+    expect(trinhDuyetHoi(), "đã giữ bản nháp → không hỏi lần hai").toBe(false);
   });
 });

@@ -12,6 +12,7 @@ import { AnchoredPanel } from "../components/AnchoredPanel";
 import { sapXepTheoFile } from "../lib/importApply";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuyenBanNhapCu } from "../lib/localDraft";
+import { useTrangAnToan } from "../lib/phienBan";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
 const RONG: never[] = [];
@@ -289,6 +290,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // songRef, hẹn giờ và pagehide/visibilitychange đã huỷ cùng cleanup.
   const goLucRef = useRef(0);
   useEffect(() => { songRef.current = true; return () => { songRef.current = false; goLucRef.current = Date.now(); }; }, []);
+  // Dải "Có bản mới" (lib/phienBan.ts): trình soạn tự khai TẢI LẠI AN TOÀN chỉ khi báo giá ĐÃ CÓ trên máy
+  // chủ và không còn gì chưa lưu. Báo giá MỚI (#/rnew) thì không bao giờ: phần điền ở wizard chỉ nằm trong
+  // bộ nhớ — kể cả lúc chưa gõ gì (cờ chưa-lưu còn tắt) — tự tải lại là mất trắng (soát 2026-09-24).
+  useTrangAnToan(() => !isNew && !dirtyRef.current);
   // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
   // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
   const draftRef = useRef<QuoteFull | null>(null);
@@ -399,6 +404,17 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
     };
     window.addEventListener("editor:discard", boThayDoi);
+    // "Tải luôn" ở dải báo bản mới (lib/phienBan.ts taiBanMoi): GHI BẢN NHÁP NGAY rồi hạ dirtyRef để trình
+    // duyệt khỏi hỏi "Tải lại trang?" lần hai — mở lại được hỏi "Khôi phục?". Ghi không được (quá lớn,
+    // bộ nhớ đầy, đang xem thử quyền) thì GIỮ cờ: hộp beforeunload là chốt chặn cuối. Cờ dùng chung
+    // __editorDirty để nguyên — lỡ trang không tải lại thì guardLeave vẫn hỏi khi rời.
+    const truocTai = () => {
+      if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current || nhapQuaLonRef.current) return;
+      if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+      const kq = ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current, meIdRef.current);
+      if (kq === "da-ghi" || kq === "da-ghi-bo-anh") dirtyRef.current = false;
+    };
+    window.addEventListener("phien-ban:truoc-tai", truocTai);
     // FE-13: bản nháp chỉ được ghi sau 1,2s NGỪNG gõ — đúng lúc dễ mất nhất (gõ xong đóng tab / chuyển
     // app / máy sập) thì phần cuối chưa kịp ghi. Trang sắp ẩn hoặc sắp rời → ghi NGAY.
     const ghiNgay = () => {
@@ -412,6 +428,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     return () => {
       window.removeEventListener("beforeunload", h);
       window.removeEventListener("editor:discard", boThayDoi);
+      window.removeEventListener("phien-ban:truoc-tai", truocTai);
       window.removeEventListener("pagehide", ghiNgay);
       document.removeEventListener("visibilitychange", khiAn);
       (window as WinDirty).__editorDirty = false;

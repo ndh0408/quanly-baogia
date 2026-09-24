@@ -2,7 +2,7 @@
 //
 // Chốt ba điều:
 //   1. Đọc đúng bản giao diện (tên tệp JS chính trong public/app2/index.html) và mã commit + giờ từ
-//      public/phien-ban.txt — tệp chưa được `git archive` điền thì trả null, không bịa.
+//      public/.phien-ban — tệp chưa được `git archive` điền thì trả null, không bịa.
 //   2. Endpoint CÔNG KHAI, `no-store`, và KHÔNG đi qua phiên: web hỏi 5 phút/lần — đi qua phiên (cookie
 //      rolling) thì tab bỏ quên sẽ không bao giờ hết phiên đăng nhập.
 //   3. `git archive` (deploy.sh ship mã bằng lệnh này) THẬT SỰ điền mã commit vào tệp (.gitattributes
@@ -28,16 +28,16 @@ describe("docPhienBan", () => {
   it("tên tệp JS chính + mã commit/giờ đã được git archive điền", () => {
     fs.writeFileSync(path.join(goc, "public", "app2", "index.html"),
       '<html><head><script type="module" crossorigin src="/app2/assets/index-BVwnOoE_.js"></script><link rel="stylesheet" href="/app2/assets/index-Dk2.css"></head></html>');
-    fs.writeFileSync(path.join(goc, "public", "phien-ban.txt"), "9dd30dc17584bf3cc5771d2c11dfa44b25eaa2e0 2026-09-24T13:40:12+07:00\n");
+    fs.writeFileSync(path.join(goc, "public", ".phien-ban"), "9dd30dc17584bf3cc5771d2c11dfa44b25eaa2e0 2026-09-24T13:40:12+07:00\n");
     const pb = docPhienBan(goc);
     expect(pb.banGiaoDien).toBe("index-BVwnOoE_");
     expect(pb.sha).toBe("9dd30dc");
     expect(pb.capNhatLuc).toBe("2026-09-24T13:40:12+07:00");
-    expect(typeof pb.khoiDongLuc).toBe("string");
+    expect(Object.keys(pb).sort(), "không trả gì ngoài ba trường này (soát 2026-09-24: bỏ giờ khởi động tiến trình)").toEqual(["banGiaoDien", "capNhatLuc", "sha"]);
   });
 
   it("tệp còn nguyên $Format:…$ (chạy từ cây làm việc) → sha/giờ null, KHÔNG bịa", () => {
-    fs.writeFileSync(path.join(goc, "public", "phien-ban.txt"), "$Format:%H %cI$\n");
+    fs.writeFileSync(path.join(goc, "public", ".phien-ban"), "$Format:%H %cI$\n");
     const pb = docPhienBan(goc);
     expect(pb.sha).toBeNull();
     expect(pb.capNhatLuc).toBeNull();
@@ -66,6 +66,14 @@ describe("GET /api/phien-ban", () => {
     expect(r.status).toBe(200);
     expect(r.headers["set-cookie"]).toBeUndefined();
   });
+
+  it("tệp phiên bản KHÔNG bị phục vụ tĩnh (mã commit đầy đủ + cache immutable 1 năm)", async () => {
+    for (const duong of ["/.phien-ban", "/phien-ban.txt"]) {
+      const r = await request(app).get(duong);
+      expect(r.text ?? "", duong).not.toMatch(/\$Format:|^[0-9a-f]{40}\s/);
+      expect(r.headers["cache-control"] ?? "", duong).not.toMatch(/immutable/);
+    }
+  });
 });
 
 /** Đọc một tệp khỏi gói tar (git archive thêm một mục pax_global_header đầu tiên). */
@@ -83,13 +91,13 @@ function docTuTar(buf, ten) {
 
 const daCommit = (() => {
   // Có trong commit HEAD (không chỉ đã `git add`) — git archive đọc từ commit.
-  try { execFileSync("git", ["cat-file", "-e", "HEAD:public/phien-ban.txt"], { cwd: ROOT, stdio: "ignore" }); return true; } catch { return false; }
+  try { execFileSync("git", ["cat-file", "-e", "HEAD:public/.phien-ban"], { cwd: ROOT, stdio: "ignore" }); return true; } catch { return false; }
 })();
 
-describe.runIf(daCommit)("git archive điền mã commit vào public/phien-ban.txt (export-subst)", () => {
+describe.runIf(daCommit)("git archive điền mã commit vào public/.phien-ban (export-subst)", () => {
   it("gói deploy.sh ship mang đúng mã commit HEAD + giờ commit", () => {
-    const tar = execFileSync("git", ["archive", "--format=tar", "HEAD", "public/phien-ban.txt"], { cwd: ROOT });
-    const noiDung = docTuTar(tar, "public/phien-ban.txt");
+    const tar = execFileSync("git", ["archive", "--format=tar", "HEAD", "public/.phien-ban"], { cwd: ROOT });
+    const noiDung = docTuTar(tar, "public/.phien-ban");
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim();
     expect(noiDung, "không thấy tệp trong gói").not.toBeNull();
     expect(noiDung.trim()).toMatch(new RegExp(`^${head} \\d{4}-\\d{2}-\\d{2}T`));

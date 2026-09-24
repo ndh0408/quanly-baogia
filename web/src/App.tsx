@@ -4,6 +4,7 @@ import { Shell } from "./components/Shell";
 import { promptModal, toast } from "./lib/ui";
 import { xoaMoiBanNhap, ghiNhanNguoiDung } from "./lib/localDraft";
 import { ngheAuth, phatDangNhap } from "./lib/authSync";
+import { useTrangAnToan, taiLaiTrang } from "./lib/phienBan";
 
 export type PreviewState = { perms: string[]; label: string };
 
@@ -19,7 +20,9 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
           <div style={{ fontSize: 40 }}>⚠️</div>
           <h2>Đã xảy ra lỗi hiển thị</h2>
           <p className="muted">{this.state.error.message || "Lỗi không xác định"}</p>
-          <button className="btn btn-primary" onClick={() => location.reload()}>Tải lại trang</button>
+          {/* Lỗi hiển thị có khi do bản giao diện CŨ trong service worker — máy chủ đã có bản mới thì gỡ SW
+              trước để lần tải lại này đã là bản mới (lib/phienBan.ts taiLaiTrang). */}
+          <button className="btn btn-primary" onClick={() => void taiLaiTrang()}>Tải lại trang</button>
         </div>
       );
     }
@@ -105,7 +108,9 @@ export function App() {
       <div className="center" role="alert" style={{ flexDirection: "column", gap: 12, padding: 24, textAlign: "center" }}>
         <h2>Không kết nối được máy chủ</h2>
         <p className="muted">Có thể mạng đang chập chờn hoặc hệ thống đang cập nhật. Phiên đăng nhập của bạn KHÔNG bị mất — thử lại sau ít giây.</p>
-        <button className="btn btn-primary" onClick={() => location.reload()}>Thử lại</button>
+        {/* Máy chủ lên lại với bản mới → gỡ SW trước (khỏi phải tải hai lần); chưa lên thì tải lại thường,
+            GIỮ SW để vỏ offline còn hiện được màn này (lib/phienBan.ts taiLaiTrang). */}
+        <button className="btn btn-primary" onClick={() => void taiLaiTrang()}>Thử lại</button>
       </div>
     );
   }
@@ -179,6 +184,9 @@ function Login({ onLogin, lopPhu = false, tenGoiY }: { onLogin: (m: Me) => void;
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Dải "Có bản mới" (lib/phienBan.ts): màn đăng nhập tải lại không mất gì. Nhưng form này còn được dùng
+  // lại trong LỚP PHỦ đăng nhập lại (lopPhu) đè lên trang đang soạn dở — lúc đó khai KHÔNG an toàn.
+  useTrangAnToan(() => !lopPhu);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
