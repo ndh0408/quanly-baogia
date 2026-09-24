@@ -3160,6 +3160,16 @@ textarea[aria-invalid="true"] {
   align-self: start;
   margin-top: max(0px, calc(4vh - 20px));
 }
+/* Màn hẹp ≤ 760px: .modal cao tối đa 96vh chứ không phải 92vh (khối @media gần đầu tệp), nên chỗ neo
+   4vh ở trên sai số — và khi cửa sổ thấp hơn 500px (điện thoại xoay ngang 667×375) hộp cỡ tối đa đi từ
+   20px tới 20 + 96vh, TRÀN mép dưới vài px. Neo lại theo 96vh: 20px + (100vh − 40px − 96vh)/2 = 2vh; và
+   không cho hộp cao quá phần nền mờ còn lại (100vh − 40px) để mép dưới luôn nằm trong cửa sổ. */
+@media (max-width: 760px) {
+  .modal.import-modal {
+    margin-top: max(0px, calc(2vh - 20px));
+    max-height: min(96vh, calc(100vh - 40px));
+  }
+}
 /* Bảng kế hoạch: chia cột theo TỈ LỆ CỐ ĐỊNH. Để bảng tự co giãn thì ô "Nạp vào" (select có chữ
    dài) và ô thống kê giành hết bề ngang, bóp cột tên sheet còn ~120px → chữ rơi mỗi dòng 1 từ. */
 .import-plan-wrap {
@@ -3940,6 +3950,34 @@ textarea[aria-invalid="true"] {
    chỉ 2.5:1. opacity: Firefox mặc định làm mờ placeholder 0.54. */
 :where(:root[data-theme="dark"]) ::placeholder {
   color: var(--text-muted);
+  opacity: 1;
+}
+/* Chữ gợi ý chế độ SÁNG (soát toàn diện đợt 3) — hai chỗ còn dưới 4.5:1:
+   · ô công thức: public/style.css (đóng băng) đặt #aab2bd — 2.14:1 trên nền trắng. --text-muted sáng
+     #5b6575 cùng tông xám-xanh, 5.5–5.9:1 trên nền trắng / nền focus #fffbe8 / nền chỉ-đọc #f6f7f9, vẫn
+     nhạt hơn hẳn chữ công thức #111. Luật tối riêng bên dưới (độ ưu tiên cao hơn) vẫn thắng ở dark.
+   · hàng nhóm / nhóm con: #757575 mặc định của Chrome trên nền màu của hàng chỉ 3.05–3.89:1. Giữ XÁM
+     TRUNG TÍNH như mặc định (khác sắc chữ thật nâu / xanh / đỏ gạch / rêu nên không lẫn với tên nhóm đã
+     gõ), chỉ đậm lên vừa đủ cho TỪNG nền: 4.64–4.67:1. Hàng nhóm GN có chữ thật chỉ 4.57:1 nên gợi ý
+     đứng ngang chữ thật — tách nhau bằng sắc. Luật tối (có #nhom-toi) vẫn thắng ở dark. opacity: Firefox
+     mặc định làm mờ placeholder 0.54. */
+#fx-input::placeholder {
+  color: var(--text-muted);
+}
+.excel-table tr.section-row:not(.subgroup-row) td :is(input, textarea)::placeholder {
+  color: #696969; /* 4.64:1 trên #fae9db */
+  opacity: 1;
+}
+.excel-table tr.subgroup-row td :is(input, textarea)::placeholder {
+  color: #5c5c5c; /* 4.67:1 trên #c9d9ef */
+  opacity: 1;
+}
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td :is(input, textarea)::placeholder {
+  color: #5b5b5b; /* 4.66:1 trên #f4cfb0 */
+  opacity: 1;
+}
+.excel-table.clf-theme tr.subgroup-row td :is(input, textarea)::placeholder {
+  color: #595959; /* 4.64:1 trên #cad8aa */
   opacity: 1;
 }
 

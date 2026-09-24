@@ -104,7 +104,18 @@ function napEditor() {
   return (dangNapEditor ??= import("../pages/QuoteEditor").then((m) => (editorSan = m.QuoteEditorPage), (e: unknown) => { dangNapEditor = null; throw e; }));
 }
 const napEditorNgam = () => { napEditor().catch(() => { /* nạp trước hỏng: lúc mở thật lazy() tự nạp lại */ }); };
-if (typeof location !== "undefined" && /^#\/?(?:(?:quotes|redit)\/\d|rnew)/.test(location.hash)) napEditorNgam();
+// NẠP THEO HASH CHỈ CHO NGƯỜI MỞ ĐƯỢC TRÌNH SOẠN (soát toàn diện đợt 3). Dòng dưới chạy lúc tải module,
+// TRƯỚC khi biết `me` — bản trước nạp cho MỌI ai mở link #/quotes/:id: account HN, tài khoản chi phí
+// (hai loại này có view riêng) và cả người chưa đăng nhập, tức tải ~46 kB trình soạn + ~96 kB
+// ExtraTables mà không bao giờ dùng. Đợi `me` thì mất đúng cái lợi của L72 (lần dựng đầu treo lazy →
+// khung chờ ≥ 300 ms), nên dựa vào GỢI Ý Shell ghi lại cho lần tải sau: người đăng nhập gần nhất trên
+// trình duyệt này có mở được trình soạn đầy đủ không. Đăng xuất thì xoá gợi ý. Gợi ý sai (người khác
+// đăng nhập) chỉ tốn một lượt tải thừa hoặc một lần khung chờ — không chạm quyền: chunk là JS tĩnh, cổng
+// quyền vẫn ở Shell + máy chủ.
+const GOI_Y_MO_SOAN = "quanly:moTrinhSoan";
+const quenGoiYMoSoan = () => { try { localStorage.removeItem(GOI_Y_MO_SOAN); } catch { /* bộ nhớ bị chặn */ } };
+const lanTruocMoDuocSoan = () => { try { return localStorage.getItem(GOI_Y_MO_SOAN) === "1"; } catch { return false; } };
+if (typeof location !== "undefined" && /^#\/?(?:(?:quotes|redit)\/\d|rnew)/.test(location.hash) && lanTruocMoDuocSoan()) napEditorNgam();
 const QuoteEditorLazy = lazy(() => napEditor().then((C) => ({ default: C })));
 /** Chốt MỘT lần lúc dựng (mỗi route một lần — LazyBoundary có key): chunk sẵn → component thật, chưa →
  *  lazy. KHÔNG đổi qua lại khi đang hiển thị: đổi kiểu phần tử là React dựng lại trình soạn từ đầu,
@@ -414,7 +425,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
         es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
         // Phiên bị thu hồi (khoá tài khoản / gỡ MFA / đổi mật khẩu) — dọn luôn bản nháp cục bộ,
         // cùng lý do như nút Đăng xuất bên dưới (máy dùng chung).
-        es.addEventListener("session:revoked", async () => { song = false; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); location.reload(); });
+        es.addEventListener("session:revoked", async () => { song = false; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); quenGoiYMoSoan(); location.reload(); });
         es.onerror = () => {
           // CLOSED = bắt tay hỏng (429/401/5xx) → trình duyệt sẽ KHÔNG tự thử lại, ta phải tự hẹn.
           // CONNECTING = đứt giữa chừng → trình duyệt tự lo, đừng dựng thêm kết nối thứ hai.
@@ -466,6 +477,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   // L72: nạp trước chunk trình soạn lúc rảnh — báo giá đầu tiên mở từ Danh sách không phải chờ khung
   // xương. Chỉ cho ai mở được trình soạn (account HN / tài khoản chi phí có view riêng).
   const moDuocTrinhSoan = has("quote:read:own") && !isAccountHn && !isInternalViewer;
+  useEffect(() => { try { localStorage.setItem(GOI_Y_MO_SOAN, moDuocTrinhSoan ? "1" : "0"); } catch { /* bộ nhớ bị chặn: lần sau không nạp trước */ } }, [moDuocTrinhSoan]);
   useEffect(() => {
     if (!moDuocTrinhSoan || editorSan) return;
     const w: Partial<Pick<Window, "requestIdleCallback" | "cancelIdleCallback">> = window;
@@ -512,7 +524,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
             <span>@{me.username}</span><br />
             <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
             {/* FE-05: chỉ nạp lại khi máy chủ đã huỷ phiên — lỗi mạng thì nói thật là CHƯA thoát. */}
-            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; if (!(await dangXuat(() => api.logout()))) { toast("Chưa đăng xuất được — kiểm tra mạng rồi thử lại", "error"); return; } xoaMoiBanNhap(); phatDangXuat(); location.reload(); }}>Đăng xuất</button>
+            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; if (!(await dangXuat(() => api.logout()))) { toast("Chưa đăng xuất được — kiểm tra mạng rồi thử lại", "error"); return; } xoaMoiBanNhap(); quenGoiYMoSoan(); phatDangXuat(); location.reload(); }}>Đăng xuất</button>
           </div>
         </aside>
         {isWizard ? (
