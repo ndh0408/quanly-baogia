@@ -14,8 +14,9 @@
 //
 // AN TOÀN LÀ TRÊN HẾT (báo giá = tiền của khách): mọi công thức dịch xong đều được
 // TỰ KIỂM (đánh giá lại bằng bộ eval port từ frontend, so với giá trị đã lưu). Bất cứ
-// nghi ngờ nào (hàm lạ, ref ngoài bảng, ref trỏ vào hàng nhóm/chữ, kết quả lệch) →
-// QUAY VỀ ghi số như cũ. Vì vậy thay đổi này CHỈ tốt hơn, không bao giờ làm hỏng export.
+// nghi ngờ nào (hàm lạ, ref ngoài bảng, ref trỏ vào hàng info/chữ, ô tổng nhóm mà tệp không mang
+// đúng số lưới web, kết quả lệch) → QUAY VỀ ghi số như cũ. Vì vậy thay đổi này CHỈ tốt hơn,
+// không bao giờ làm hỏng export.
 import { nhanLamTronDong } from "./tienDong.js";
 
 // Hàm Excel có tên + ngữ nghĩa khớp 1:1 với bộ eval của editor → an toàn để xuất.
@@ -288,6 +289,9 @@ type FormulaContext = {
   allowedRef: Set<string>;                         // field được phép tham chiếu
   rowToExcel: (editorRow: number) => number | null;
   rangeOk: (editorRow1: number, editorRow2: number) => boolean;
+  /** Ô ĐƠN LẺ ở hàng NHÓM (Đơn Giá / Thành Tiền nhóm) → hàng Excel, null nếu không cho. Chỉ dùng cho
+   *  tham chiếu đơn: dải vẫn qua rangeOk, vốn chỉ nhận hàng mục — dải đi qua hàng nhóm bị từ chối. */
+  groupRowToExcel?: (editorRow: number, field: string) => number | null;
 };
 
 /**
@@ -490,7 +494,7 @@ function mapRef(ctx: FormulaContext, colLetters: string, rowDigits: string) {
   if (!field || !ctx.allowedRef.has(field)) return null;   // ref chữ/_stt/cột không có → bỏ
   const col = ctx.fieldToCol[field];
   if (!col) return null;
-  const row = ctx.rowToExcel(Number(rowDigits));
+  const row = ctx.rowToExcel(Number(rowDigits)) ?? ctx.groupRowToExcel?.(Number(rowDigits), field) ?? null;
   if (row == null) return null;
   return { field, col, row };
 }
@@ -505,6 +509,15 @@ type EditorItem = {
   formulas?: Record<string, string | undefined>;
 };
 
+/** Cấu hình nhóm của MỘT sheet + ô tiền của hàng nhóm trong tệp Excel (excel.ts dựng). */
+export type NhomCuaSheet = {
+  groupSubtotal: boolean;   // sheet.groupSubtotal — "Hiện Thành Tiền nhóm": Thành Tiền nhóm = tổng × SL nhóm
+  numberSubs: boolean;      // bản BANNER: tổng nhóm CHA cuộn qua mọi mục của các nhóm con
+  /** Hàng Excel + con số mà ô Đơn Giá / Thành Tiền của hàng nhóm (chỉ số editor, 0-based) mang trong
+   *  tệp; null khi ô đó để TRỐNG hoặc nhóm không có hàng Excel. */
+  oExcel: (editorIndex0: number, field: "unitPrice" | "_amount") => { row: number; value: number } | null;
+};
+
 /**
  * Dựng "bộ dịch công thức" cho MỘT sheet khi xuất Excel. Khép kín toàn bộ logic toạ độ
  * + tự kiểm để excel.js chỉ cần gọi `cellFormula(raw, computedValue)`.
@@ -516,12 +529,15 @@ type EditorItem = {
  *   rowToExcel : (editorIndex0 : number) → hàng Excel của item ĐÓ nếu là ô tham chiếu được
  *                (item/sub đã đặt chỗ), ngược lại null. Tra theo ĐỊA CHỈ ĐỐI TƯỢNG item nên
  *                không lệ thuộc việc lọc/đổi chỉ số (xem cách dựng ở excel.js).
+ *   nhom       : (tuỳ chọn) cấu hình nhóm của sheet + ô tiền của hàng NHÓM trong tệp — có thì công
+ *                thức trỏ vào Đơn Giá / Thành Tiền nhóm được dịch (xem groupRowToExcel bên dưới).
  */
 export function buildFormulaContext(
-  { cols, items, rowToExcel }: {
+  { cols, items, rowToExcel, nhom }: {
     cols: Record<string, string | undefined>;            // field → cột Excel của template
     items: EditorItem[];                                 // item theo thứ tự editor (ref = index+1)
     rowToExcel: (editorIndex0: number) => number | null;
+    nhom?: NhomCuaSheet;
   },
 ) {
   const usesDays = !!cols.days;
@@ -546,7 +562,7 @@ export function buildFormulaContext(
   // chặn bằng ĐỒ THỊ PHỤ THUỘC (hasCycle bên dưới) — chỉ chặn đúng công thức tạo vòng.
   const allowedRef = new Set(["quantity", "unitPrice", "days", "_amount"]);
 
-  const ctx = {
+  const ctx: FormulaContext = {
     colToField, fieldToCol, allowedRef,
     rowToExcel: (n: number) => rowToExcel(n - 1),
     rangeOk: (n1: number, n2: number) => {
@@ -574,12 +590,72 @@ export function buildFormulaContext(
     // khi web hiện 62, công thức tham chiếu ô đó lệch tự kiểm và bị hạ về số chết (soát chéo excel#11).
     return usesDays ? nhanLamTronDong(q, Number(it.days) || 1, p) : nhanLamTronDong(q, p);
   };
+
+  // ===== Ô TỔNG NHÓM — ĐÚNG NGHĨA LƯỚI WEB (GridTable.tsx: tinhTongNhom + cellNum) =====
+  // Hàng nhóm KHÔNG để trống hai cột tiền trên lưới: Đơn Giá nhóm = Σ Thành Tiền mục trong nhóm (bản
+  // BANNER: nhóm cha cuộn qua mọi mục của các nhóm con), Thành Tiền nhóm = tổng đó × SL nhóm khi bật
+  // "Hiện Thành Tiền nhóm", tắt thì 0. Công thức trỏ vào đó (báo giá #49: Đơn Giá phí vận chuyển
+  // "=ROUND((SUM(G50;…;G6)*14%);-6)") web tính được, nên tệp cũng phải mang công thức sống — trước đây
+  // hàng nhóm không có trong bản đồ hàng Excel, cả công thức bị huỷ, khách mở tệp chỉ thấy số chết.
+  // `chuCua`/`chuConCua` = nhóm cha / nhóm con đang chứa hàng i — tập "thành viên" web dùng để bắt vòng.
+  const laNhom = (row: number) => { const k = items[row]?.kind; return k === "section" || k === "subsection"; };
+  const laOTongNhom = (row: number, field: string) => laNhom(row) && (field === "unitPrice" || field === "_amount");
+  const tongNhom: Record<number, number> = {};
+  const thanhVien = new Map<number, number[]>();   // hàng nhóm → các hàng web coi là "thuộc nhóm" (bắt vòng)
+  {
+    const chuCua: number[] = new Array(items.length).fill(-1), chuConCua: number[] = new Array(items.length).fill(-1);
+    let curSection = -1, curSub = -1;
+    for (let i = 0; i < items.length; i++) {
+      const k = items[i]?.kind;
+      if (k === "section" || k === "subsection") {
+        if (k === "subsection") curSub = i; else { curSection = i; curSub = -1; }
+        tongNhom[i] = 0;
+        chuCua[i] = k === "subsection" ? curSection : -1;
+        continue;
+      }
+      chuCua[i] = curSection; chuConCua[i] = curSub;
+      if (k === "info") continue;
+      const amt = amountOf(items[i]);
+      const parent = curSub >= 0 ? curSub : curSection;
+      if (parent >= 0) tongNhom[parent] += amt;
+      if (nhom?.numberSubs && curSub >= 0 && curSection >= 0) tongNhom[curSection] += amt;   // banner: dồn lên nhóm cha
+    }
+    for (let j = 0; j < items.length; j++) {
+      for (const g of [chuCua[j], chuConCua[j]]) {
+        if (g < 0) continue;
+        let ds = thanhVien.get(g);
+        if (!ds) thanhVien.set(g, (ds = []));
+        ds.push(j);
+      }
+    }
+  }
+  const heSoNhom = (it: EditorItem) => Math.max(1, (it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity)) || 1);   // = groupMult của web
+  const soONhomWeb = (row: number, field: string) =>
+    field === "unitPrice" ? (tongNhom[row] || 0) : (nhom?.groupSubtotal ? (tongNhom[row] || 0) * heSoNhom(items[row]) : 0);
+  // Chỉ dịch tham chiếu ô nhóm khi ô Excel được trỏ tới mang ĐÚNG con số web dùng cho ô ấy. Ô trống
+  // (tắt "Thành Tiền nhóm", nhóm rỗng), nhóm không có hàng Excel, hay số hai phía lệch nhau → null →
+  // cả công thức ghi SỐ như cũ. SL / Số Ngày của hàng nhóm không phải ô tổng → không cho (giữ nguyên
+  // tệp của mọi công thức khác). Vòng qua tổng CHÍNH nhóm do hasCycle bên dưới chặn.
+  if (nhom) {
+    ctx.groupRowToExcel = (n: number, field: string) => {
+      const row = n - 1;
+      if (!laOTongNhom(row, field)) return null;
+      const o = nhom.oExcel(row, field as "unitPrice" | "_amount");
+      if (!o || !Number.isFinite(o.value)) return null;
+      const web = soONhomWeb(row, field);
+      return Math.abs(o.value - web) <= 1e-6 * Math.max(1, Math.abs(web)) ? o.row : null;
+    };
+  }
+
   const editorCellNum = (addr: string) => {
     const m = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(String(addr).trim());
     if (!m) return 0;
     const field = colToField[m[1].toUpperCase()];
     const it = items[Number(m[2]) - 1];
     if (!field || !it) return 0;
+    // Ô tổng nhóm: đúng số lưới web dùng (cellNum) — groupRowToExcel chỉ cho dịch khi ô Excel mang
+    // chính số này, nên tự kiểm khớp nghĩa là Excel tính lại cũng ra số ấy.
+    if (laOTongNhom(Number(m[2]) - 1, field)) return soONhomWeb(Number(m[2]) - 1, field);
     if (field === "_amount") return amountOf(it);
     // SỐ LƯỢNG: trả số ĐÃ LÀM TRÒN, khớp amountOf() ngay trên và khớp lưới web (GridTable cellNum,
     // editor.js cellNumByAddr). Trả số thô thì self-check ở dưới lệch quá dung sai → cellFormula
@@ -618,9 +694,10 @@ export function buildFormulaContext(
     },
   };
 
-  // ===== ĐỒ THỊ PHỤ THUỘC — chặn VÒNG LẶP khi cho ref cột Thành Tiền =====
+  // ===== ĐỒ THỊ PHỤ THUỘC — chặn VÒNG LẶP khi cho ref cột Thành Tiền / ô tổng nhóm =====
   // Node (rowIdx0, field). Cạnh: công thức tại (r,f) → các ref của nó; riêng _amount(r) LUÔN
-  // phụ thuộc quantity/unitPrice/days của CHÍNH hàng r (ô Excel Thành Tiền = ROUND(SL×ĐG)).
+  // phụ thuộc quantity/unitPrice/days của CHÍNH hàng r (ô Excel Thành Tiền = ROUND(SL×ĐG)); ô tổng
+  // nhóm phụ thuộc các hàng thuộc nhóm (xem depsOf).
   // Trả null nghĩa là "dải ô lớn bất thường, không dựng nổi đồ thị" → nơi gọi coi như KHÔNG DỊCH
   // ĐƯỢC và ghi con số (mặc định an toàn sẵn có của module).
   //
@@ -651,13 +728,27 @@ export function buildFormulaContext(
     return out;
   };
   const depsOf = (row: number, field: string): { row: number; field: string }[] | null => {
+    let base: { row: number; field: string }[] | null;
     if (field === "_amount") {
-      const base = [{ row, field: "quantity" }, { row, field: "unitPrice" }];
+      base = [{ row, field: "quantity" }, { row, field: "unitPrice" }];
       if (usesDays) base.push({ row, field: "days" });
-      return base;
+    } else {
+      const raw = items[row]?.formulas?.[field];
+      base = raw ? refsInFormula(raw) : [];
+      if (base === null) return null;
     }
-    const raw = items[row]?.formulas?.[field];
-    return raw ? refsInFormula(raw) : [];
+    // Ô TỔNG NHÓM phụ thuộc SL nhóm (×SL) và MỌI ô số của các hàng thuộc nhóm — y như cạnh oVongLap của
+    // web thêm cho tham chiếu nhóm (thuộc nhóm = chuCua/chuConCua, nên nhóm cha kéo theo cả nhóm con và
+    // mục của chúng). Rộng hơn quan hệ cộng thật một chút là CHỦ Ý: thừa cạnh chỉ làm thêm ca "vòng"
+    // → ghi số; thiếu cạnh là tệp mang vòng tròn Excel. Chỉ CỘNG thêm cạnh, không bỏ cạnh cũ nào.
+    if (laOTongNhom(row, field)) {
+      base.push({ row, field: "quantity" });
+      for (const j of thanhVien.get(row) || []) {
+        base.push({ row: j, field: "quantity" }, { row: j, field: "unitPrice" });
+        if (usesDays) base.push({ row: j, field: "days" });
+      }
+    }
+    return base;
   };
   const hasCycle = (row: number, field: string, raw: string) => {
     const start = `${row}|${field}`;
@@ -683,14 +774,18 @@ export function buildFormulaContext(
     /**
      * Trả công thức Excel cho ô có công thức gốc `raw` nếu DỊCH ĐƯỢC và TỰ KIỂM khớp
      * computedValue; ngược lại null (nơi gọi ghi số như cũ). `self` (item đang ghi + field)
-     * để chặn VÒNG khi công thức tham chiếu cột Thành Tiền — thiếu self thì ref _amount bị từ chối.
+     * để chặn VÒNG khi công thức tham chiếu cột Thành Tiền / ô tổng nhóm — thiếu self thì các ref
+     * đó bị từ chối.
      */
     cellFormula(raw: string | null | undefined, computedValue: number, self?: { item: EditorItem; field: string }) {
       if (!raw) return null;
       evalBudget = MAX_REF_ROWS;   // ngân sách bung dải của bộ tự kiểm: mỗi công thức một suất
       const refs = refsInFormula(String(raw));
       if (refs === null) return null;   // dải ô khổng lồ → ghi số, KHÔNG bung ra bộ nhớ
-      const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && refs.some((r) => r.field === "_amount");
+      // Trỏ vào Thành Tiền, hoặc vào ô TỔNG NHÓM (cả Đơn Giá nhóm) → phải soát vòng: mục nằm trong
+      // nhóm X mà trỏ tổng X (trực tiếp hay qua ô khác) thì Excel báo "circular reference", còn lưới
+      // web tô đỏ và giữ nguyên số đã lưu — tệp phải ghi SỐ đó.
+      const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && refs.some((r) => r.field === "_amount" || laOTongNhom(r.row, r.field));
       if (usesAmount) {
         const selfRow = self ? items.indexOf(self.item) : -1;
         if (selfRow < 0 || !self || hasCycle(selfRow, self.field, String(raw))) return null;   // vòng lặp / không rõ ô → ghi số
