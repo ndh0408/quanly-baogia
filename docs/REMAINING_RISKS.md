@@ -1029,13 +1029,13 @@ nay chỉ còn đúng một nửa:
 | Thành phần | Chỗ ở |
 |---|---|
 | Ngăn xếp thuần `createUndoStack` / `undoRedoKey` / `UNDO_LIMIT` | `web/src/lib/gridUndo.ts` — **có bài kiểm đơn vị** |
-| Bài kiểm mức component (jsdom, opt-in) | `web/src/components/GridTable.component.test.tsx` — **42 bài** |
+| Bài kiểm mức component (jsdom, opt-in) | `web/src/components/GridTable.component.test.tsx` — **44 bài** |
 | `histRef = useRef(createUndoStack())` | `web/src/components/GridTable.tsx` (grep `histRef = useRef`) |
 | `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx` (hàm `snap`) |
 | `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx` (hàm `pushUndo`) |
 | `restore(json)` — `JSON.parse` + cấp lại `_k` + co vùng chọn + `recomputeAll()` | `web/src/components/GridTable.tsx` (hàm `restore`) |
 | `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx` (hai hàm cùng tên) |
-| Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1167-1168` |
+| Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx` (grep `undoRedoKey`) |
 | Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx` (grep `dangGoIME(e)`) |
 | `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx` (grep `dropMark()`) |
 | `addImages` — **chỗ duy nhất chưa có cổng** | `web/src/components/GridTable.tsx` (grep `const addImages`) |
