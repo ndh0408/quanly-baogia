@@ -223,7 +223,21 @@ describe("INFRA-03 — migration HUỶ đang chờ", () => {
 });
 
 describe("INFRA-14 — test-on-dev.sh", () => {
-  function chayTod(env) {
+  // Script gói commit HEAD của THƯ MỤC ĐANG ĐỨNG (git bundle) và từ chối cây bẩn — nên mỗi lượt chạy trong
+  // một repo tạm sạch, không phụ thuộc repo thật đang có thay đổi chưa commit (chạy `npm run verify` trước
+  // khi commit là chuyện thường). Dockerfile vẫn đọc từ thư mục của script (ROOT).
+  function repoTam(dir, { ban = false } = {}) {
+    const repo = join(dir, "repo");
+    mkdirSync(repo);
+    const g = (...a) => spawnSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a], { encoding: "utf8" });
+    g("init", "-q");
+    writeFileSync(join(repo, "a.txt"), "1\n");
+    g("add", "a.txt");
+    g("commit", "-q", "-m", "t");
+    if (ban) writeFileSync(join(repo, "a.txt"), "2\n");
+    return { repo, sha: g("rev-parse", "HEAD").stdout.trim() };
+  }
+  function chayTod(env, { ban = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "ops-tod-"));
     rac.push(dir);
     const bin = join(dir, "bin");
@@ -231,15 +245,24 @@ describe("INFRA-14 — test-on-dev.sh", () => {
     for (const d of [bin, stub]) mkdirSync(d);
     writeFileSync(join(bin, "ssh"), STUB_SSH_TOD);
     chmodSync(join(bin, "ssh"), 0o755);
+    const { repo, sha } = repoTam(dir, { ban });
     const r = spawnSync("bash", [join(ROOT, "test-on-dev.sh")], {
+      cwd: repo,
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_DIR: stub, ...env }, encoding: "utf8",
     });
     const log = existsSync(join(stub, "ssh.log")) ? readFileSync(join(stub, "ssh.log"), "utf8") : "";
-    return { code: r.status, out: `${r.stdout}${r.stderr}`, log };
+    const bundle = join(stub, "bundle");
+    return { code: r.status, out: `${r.stdout}${r.stderr}`, log, sha, repo, bundle: existsSync(bundle) ? bundle : null };
   }
+  // ssh giả. Lượt ĐẨY BUNDLE (`cat > '…bundle'`) phải ĐỌC stdin như ssh thật — không đọc thì `git bundle`
+  // dính SIGPIPE, pipefail làm script thoát 1 trước lượt chạy chính, và mọi bài bên dưới đo nhầm lượt đó.
+  // STUB_UPLOAD_RC chỉ áp cho lượt đẩy bundle; STUB_RC chỉ áp cho lượt chạy trên VM.
   const STUB_SSH_TOD = `#!/usr/bin/env bash
 shift
 printf '%s\\n' "$*" >> "$STUB_DIR/ssh.log"
+case "$*" in
+  "cat > "*) cat > "$STUB_DIR/bundle"; exit "\${STUB_UPLOAD_RC:-0}" ;;
+esac
 exit "\${STUB_RC:-0}"
 `;
 
@@ -259,6 +282,35 @@ exit "\${STUB_RC:-0}"
     expect(r.log).not.toMatch(/printenv REDIS_URL/);
     expect(r.log).toMatch(/REDIS_URL="redis:\/\/127\.0\.0\.1:6379\/0"/);
     expect(r.log).toMatch(/NODE_IMG='node:\d+[^']*@sha256:[0-9a-f]{64}'/);
+  });
+
+  it("kiểm ĐÚNG commit HEAD: bundle gửi đi chứa HEAD, VM nhận đúng SHA, không mount mã đang deploy", () => {
+    const r = chayTod({ SSH: "staging-ts" });
+    expect(r.code).toBe(0);
+    expect(r.bundle, "không có bundle nào được đẩy lên VM").not.toBeNull();
+    const heads = spawnSync("git", ["bundle", "list-heads", r.bundle], { cwd: r.repo, encoding: "utf8" }).stdout;
+    expect(heads).toMatch(new RegExp(`^${r.sha} HEAD$`, "m"));
+    expect(r.log).toContain(`TEST_SHA='${r.sha}'`);
+    expect(r.log).toContain(`DIR='/tmp/quanly-test-${r.sha.slice(0, 12)}-`);
+    // Trước đây mount thẳng thư mục mã ĐANG DEPLOY trên VM → kiểm nhầm mã cũ, không phải HEAD.
+    expect(r.log).not.toMatch(/DIR=\/opt\/stacks/);
+    expect(r.log).toMatch(/clone --quiet "\$BUNDLE" "\$DIR"/);
+    expect(r.log).toMatch(/rev-parse HEAD\)" = "\$TEST_SHA"/);
+  });
+
+  it("cây git bẩn → từ chối, không gửi gì lên VM", () => {
+    const r = chayTod({ SSH: "staging-ts" }, { ban: true });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/cây git đang bẩn/);
+    expect(r.log).toBe("");
+  });
+
+  it("đẩy bundle hỏng → thoát khác 0, KHÔNG chạy lượt test trên VM", () => {
+    const r = chayTod({ SSH: "staging-ts", STUB_UPLOAD_RC: "255" });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/không gửi được git bundle/);
+    expect(r.log.trim().split("\n")).toHaveLength(1);
+    expect(r.log).toMatch(/^cat > '\/tmp\/quanly-test-/);
   });
 });
 
