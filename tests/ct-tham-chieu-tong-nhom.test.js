@@ -1,9 +1,9 @@
 // CÔNG THỨC THAM CHIẾU Ô TỔNG NHÓM bị ghi SỐ CHẾT vào tệp Excel (báo giá #49, nhóm D "Phí vận chuyển,
 // lắp đặt và tháo dỡ" — dữ liệu dưới đây TỰ DỰNG, chỉ mô phỏng CẤU TRÚC của sheet thật).
 //
-// Hai hàng D1/D2 giữ Đơn Giá "=ROUND((SUM(G50;G43;…;G6)*14%);-6)" — G6, G11… là ô THÀNH TIỀN của các
-// hàng NHÓM CON. Lưới web tính được (cellNum trả tổng nhóm × SL nhóm khi bật "Hiện Thành Tiền nhóm") nên
-// ô hiện 23.000.000 kèm dấu ƒ. Tệp Excel thì ô Đơn Giá chỉ là SỐ 23000000: bộ dịch (src/quoteFormula.ts)
+// D1 là dòng 71; dòng 72 mở nhóm Agency Fee, D2 ở dòng 73. D1 tham chiếu Thành Tiền các nhóm con;
+// D2 còn tham chiếu Thành Tiền nhóm D (G70) và các nhóm chính khác. Lưới web tính được các tổng nhóm,
+// còn tệp Excel cũ chỉ ghi SỐ: bộ dịch (src/quoteFormula.ts)
 // chỉ cho tham chiếu hàng item/sub — hàng nhóm không có trong bản đồ hàng Excel → cả công thức bị huỷ.
 //
 // ĐÃ ĐO TRÊN MÃ CŨ (8e1920d): ca (a) cả hai biến thể ";-6" / ",-6" ra số 23000000, không có công thức;
@@ -13,7 +13,9 @@
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import { buildQuoteBuffer } from "../src/excel.js";
+import { parseQuoteWorkbook } from "../src/excelImport.js";
 import { TEMPLATE_CONFIGS } from "../src/templateConfigs.js";
+import { toGridItems } from "../web/src/lib/importApply.js";
 
 const muc = (name, quantity, unitPrice, formulas) => ({ kind: "item", name, unit: "cái", quantity, unitPrice, ...(formulas ? { formulas } : {}) });
 const nhom = (name, quantity = 1) => ({ kind: "section", name, unit: "gói", quantity, unitPrice: 0 });
@@ -42,16 +44,17 @@ function hangCua(ws, code, ten) {
 
 // ── (a) Ca báo giá #49: cấu trúc 73 hàng như sheet thật ───────────────────────────────────────────────
 // Hàng editor (1-based): 1 info · 2 nhóm · 3 mục · 4 nhóm "Decor" · 5 info · 6/11/16/20/23/29/31/33/35/37/
-// 39/41/43/47/50/52 nhóm con (mục ở giữa) · 49 info · 56 nhóm (57–69 mục) · 70 nhóm D · 71 D1 · 72 D2 · 73
-// mục rỗng. Mẫu GN (marico_decor): cột editor A stt · B tên · C chi tiết · D ĐVT · E SL · F ĐG · G Thành
+// 39/41/43/47/50/52 nhóm con (mục ở giữa) · 49 info · 56 nhóm (57–69 mục) · 70 nhóm D · 71 D1 ·
+// 72 nhóm Agency Fee · 73 D2. Mẫu GN (marico_decor): cột editor A stt · B tên · C chi tiết · D ĐVT · E SL · F ĐG · G Thành
 // Tiền · H ghi chú; cột Excel SL=F · ĐG=G · Thành Tiền=H; hàng editor k → hàng Excel 11 + k.
 const CT_D = "=ROUND((SUM(G50;G43;G41;G39;G37;G35;G33;G31;G29;G23;G16;G11;G6)*14%);-6)";
 const CT_D_PHAY = "=ROUND((SUM(G50;G43;G41;G39;G37;G35;G33;G31;G29;G23;G16;G11;G6)*14%),-6)";   // ",-6" kiểu Excel EN trộn ";"
-function sheet49({ d1 = CT_D, d2 = CT_D_PHAY, giaD = 23000000, slNhomCon6 = 1 } = {}) {
+const CT_AGENCY = "=ROUND(SUM(G70;G56;G6;G50;G43;G41;G39;G37;G35;G33;G31;G29;G23;G16;G11;G2)*10%;-6)";
+function sheet49({ d1 = CT_D, giaD = 23000000, giaAgency = 20000000, slNhomCon6 = 1 } = {}) {
   const items = [
     info("Thông tin chương trình"),                                                      // 1
     nhom("Nhóm mở đầu"), muc("Mục mở đầu", 1, 2000000),                                  // 2, 3
-    nhom("Decor"), info("Ghi chú Decor"),                                                // 4, 5
+    nhom("Decor"), info("Thông tin Decor"),                                               // 4, 5
     nhomCon("Nhóm con 6", slNhomCon6),                                                   // 6
     muc("M7", 19.2, 95000, { quantity: "=6,4*3" }),
     muc("M8", 2, 2600000, { unitPrice: "=320000*4+120000*11" }),
@@ -70,40 +73,64 @@ function sheet49({ d1 = CT_D, d2 = CT_D_PHAY, giaD = 23000000, slNhomCon6 = 1 } 
     nhomCon("Nhóm con 41"), muc("M42", 1, 6000000),
     nhomCon("Nhóm con 43"), ...[44, 45, 46].map((k) => muc(`M${k}`, 1, 5000000)),        // 15.000.000
     nhomCon("Nhóm con 47"), muc("M48", 1, 1000000),
-    info("Ghi chú 49"),
+    info("Thông tin 49"),
     nhomCon("Nhóm con 50"), muc("M51", 1, 20000000),
     nhomCon("Nhóm con 52"), ...[53, 54, 55].map((k) => muc(`M${k}`, 1, 1000000)),
     nhom("Nhóm 56"), ...Array.from({ length: 13 }, (_x, k) => muc(`M${57 + k}`, 1, 500000)),
     nhom("Phí vận chuyển, lắp đặt và tháo dỡ"),                                          // 70
     muc("D1", 1, giaD, { unitPrice: d1 }),                                               // 71
-    muc("D2", 0, giaD, { unitPrice: d2 }),                                               // 72
-    muc("", 0, 0),                                                                       // 73
+    nhom("Agency Fee"),                                                                 // 72
+    muc("D2", 1, giaAgency, { unitPrice: CT_AGENCY }),                                   // 73
   ];
   items[60].notes = "500000"; items[60].formulas = { notes: "=F60*E60" };   // ghi chú công thức như sheet thật
   expect(items.length).toBe(73);
   expect(items[70].name).toBe("D1");
+  expect(items[72].name).toBe("D2");
   return items;
 }
 const EXCEL_D = "ROUND((SUM(H61,H54,H52,H50,H48,H46,H44,H42,H40,H34,H27,H22,H17)*14%),-6)";
+const EXCEL_AGENCY = "ROUND(SUM(H81,H67,H17,H61,H54,H52,H50,H48,H46,H44,H42,H40,H34,H27,H22,H13)*10%,-6)";
 
 describe("(a) báo giá #49: Đơn Giá D1/D2 tham chiếu Thành Tiền các nhóm con → công thức sống", () => {
-  it("cả hai biến thể \";-6\" và \",-6\" ra đúng công thức Excel, result 23.000.000", async () => {
+  it("D1 và D2 theo đúng cấu trúc 73 dòng ra công thức Excel sống", async () => {
     const ws = await mo(baoGia("marico_decor", sheet49()));
     expect(ws.getCell("C82").value).toBe("D1");
-    expect(ws.getCell("C83").value).toBe("D2");
-    for (const addr of ["G82", "G83"]) {
+    expect(ws.getCell("C83").value).toBe("Agency Fee");
+    expect(ws.getCell("C84").value).toBe("D2");
+    for (const [addr, formula, result] of [["G82", EXCEL_D, 23000000], ["G84", EXCEL_AGENCY, 20000000]]) {
       const v = ws.getCell(addr).value;
       expect(laCongThuc(v), `${addr} bị ghi số chết: ${JSON.stringify(v)}`).toBe(true);
-      expect(v.formula).toBe(EXCEL_D);
-      expect(v.result).toBe(23000000);
+      expect(v.formula).toBe(formula);
+      expect(v.result).toBe(result);
     }
     // Ô Thành Tiền nhóm con được trỏ tới giữ đúng con số web dùng (Σ mục con × SL nhóm = 1).
     expect(ws.getCell("H17").value).toMatchObject({ formula: "G17", result: 16339000 });
     expect(ws.getCell("G17").value).toMatchObject({ formula: "SUM(H18:H21)", result: 16339000 });
     expect(ws.getCell("H61").value).toMatchObject({ result: 20000000 });
-    // Thành Tiền D1 = ROUND(ĐG × SL) như mọi mục; D2 SL 0.
+    // Thành Tiền D1/D2 = ROUND(ĐG × SL) như mọi mục.
     expect(ws.getCell("H82").value).toMatchObject({ formula: "ROUND(G82*F82,0)", result: 23000000 });
-    expect(ws.getCell("H83").value).toMatchObject({ formula: "ROUND(G83*F83,0)" });   // result 0: exceljs không ghi lại
+    expect(ws.getCell("H84").value).toMatchObject({ formula: "ROUND(G84*F84,0)", result: 20000000 });
+  });
+  it("biến thể dấu phẩy ở ROUND vẫn dịch đúng", async () => {
+    const ws = await mo(baoGia("marico_decor", sheet49({ d1: CT_D_PHAY })));
+    expect(ws.getCell("G82").value).toMatchObject({ formula: EXCEL_D, result: 23000000 });
+  });
+  it("nạp lại Excel giữ công thức D1 và D2 ở đúng hai nhóm", async () => {
+    const parsed = await parseQuoteWorkbook(await buildQuoteBuffer(baoGia("marico_decor", sheet49())));
+    const rows = parsed.sheets.find((s) => !s.skipped).items;
+    expect(rows.find((r) => r.name === "D1").formulas.unitPrice).toBeTruthy();
+    expect(rows.find((r) => r.name === "D2").formulas.unitPrice).toBeTruthy();
+    expect(parsed.sheets.find((s) => !s.skipped).stats.formulasDropped).toBe(0);
+    const ws = await mo(baoGia("marico_decor", toGridItems(rows, { usesDays: false, addrDetail: true }).items));
+    for (const name of ["D1", "D2"]) {
+      const v = ws.getCell(`G${hangCua(ws, "marico_decor", name)}`).value;
+      expect(laCongThuc(v), `${name} mất công thức sau vòng nạp rồi xuất`).toBe(true);
+    }
+  });
+  it("dữ liệu có số đã lưu lệch công thức: giữ số, không đổi tiền khi Excel tính lại", async () => {
+    const ws = await mo(baoGia("marico_decor", sheet49({ giaD: 0, giaAgency: 2000000 })));
+    expect(ws.getCell("G82").value).toBe(0);
+    expect(ws.getCell("G84").value).toBe(2000000);
   });
 
   it("gác: số đã lưu lệch kết quả công thức (tự kiểm trượt) → vẫn ghi số", async () => {
