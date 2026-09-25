@@ -198,6 +198,11 @@ export function vanTayHn(tables: any): string {
       unitPrice: Number(it?.unitPrice) || 0,
       days: it?.days != null ? Number(it.days) : null,
       notes: it?.notes ?? null,
+      // Ba cột nội bộ (NS · Lưu kho · Chứng từ) cũng là thứ NGƯỜI DÙNG GÕ: thiếu ở đây thì phần HN đã
+      // chốt mà ai đó sửa chúng sẽ "giống hệt CSDL" → chotHnTables lặng lẽ bỏ, thay vì báo 409.
+      ns: it?.ns ?? null,
+      luuKho: !!it?.luuKho,
+      chungTu: it?.chungTu ?? null,
     })),
   })));
 }
@@ -452,6 +457,11 @@ export function sanitizeExtraTables(tables: any, { valid = ["hcm", "khach"], boC
       unitPrice: Number(it.unitPrice) || 0,
       days: it.days != null ? Number(it.days) : null,
       notes: it.notes ? String(it.notes).trim() : null,
+      // Ba cột riêng của bảng nội bộ (xem itemSchema): thiếu ở đây là Lưu xong mất sạch, vì hàm này
+      // dựng lại từng hàng bằng danh sách trường chứ không chép nguyên.
+      ns: it.ns ? String(it.ns).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() || null : null,
+      luuKho: !!it.luuKho,
+      chungTu: ["VAT", "HDNS", "TM"].includes(it.chungTu) ? it.chungTu : null,
       formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,
       // rid = id ỔN ĐỊNH cho từng hàng → server khớp được trạng thái DUYỆT khi non-admin lưu
       // (chống tự duyệt qua payload). approved/approvedAt/approvedBy do reconcileExtraApprovals

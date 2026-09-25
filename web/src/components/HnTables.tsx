@@ -174,7 +174,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
           <GridTable key={`hn-${ai}-${t.templateId}-${t._k}`} items={t.items} fxBar
             clfTheme={!!tplOf(t)?.code?.startsWith("clofull")}   // bảng phụ của báo giá Colorfull phải cùng màu với lưới chính và với tệp Excel
             usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
-            editable={editable} internalNote={false}
+            editable={editable} internalNote={false} cotNoiBo
             approveCol={false} canApprove={!!canApprove}
             payCol={!!canPay && !!quoteId}
             canPay={!!canPay && !!quoteId}

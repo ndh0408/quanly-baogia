@@ -242,7 +242,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                       dock={thanhChung ? thanhChung.dock : undefined}
                       anThanhThem={!!thanhChung && thanhChung.dangLam !== idLuoi(cat)}
                       onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}
-                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false}
+                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false} cotNoiBo
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
                       payCol canPay={!!canPay && !!quoteId && trongPhamVi(cat)}
                       onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}

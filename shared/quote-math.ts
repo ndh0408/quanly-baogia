@@ -10,6 +10,7 @@ export type Item = {
   kind: ItemKind; label?: string; name?: string; detail?: string; unit?: string;
   quantity?: number; quantityExact?: boolean; days?: number | null; unitPrice?: number; notes?: string; internalNote?: string;
   approved?: boolean; approvedAt?: string | null; approvedBy?: number | null;
+  ns?: string | null; luuKho?: boolean; chungTu?: "VAT" | "HDNS" | "TM" | null;   // chỉ bảng nội bộ
   formulas?: Record<string, string>; order?: number;
   images?: string[];   // MẢNG ảnh base64 data-URL (cột "Hình ảnh", chỉ khi sheet.showImages)
 };

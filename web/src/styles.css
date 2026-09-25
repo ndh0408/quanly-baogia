@@ -4468,3 +4468,15 @@ textarea[aria-invalid="true"] {
 .sidebar .phien-ban-chan-menu .pbcm-nut:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
 }
+
+/* Ba cột riêng của bảng nội bộ (NS · CHỨNG TỪ · LƯU KHO — GridTable `cotNoiBo`, 2026-09-25). */
+.excel-table td.col-chung-tu select {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  padding: 2px 4px;
+}
+.excel-table td.col-luu-kho {
+  text-align: center;
+}

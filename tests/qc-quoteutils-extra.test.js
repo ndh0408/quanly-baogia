@@ -80,3 +80,46 @@ describe("presentQuote(hnOnly) không gửi ảnh chứng từ cho account Hà N
     expect(out.sheets).toBeUndefined();
   });
 });
+
+// ── BA CỘT CỦA BẢNG NỘI BỘ: NS · LƯU KHO · CHỨNG TỪ (2026-09-25) ────────────────────────────
+// Người dùng yêu cầu thêm cho MỌI bảng nội bộ (Chi phí HCM · Phí khách hàng · Hà Nội). Hàng bảng nội
+// bộ đi qua ba cửa, cửa nào quên trường là Lưu xong mất trắng mà không ai báo:
+//   1. zod (itemSchema) — khoá lạ bị LOẠI im lặng;
+//   2. sanitizeExtraTables / sanitizeHnTables — dựng lại hàng bằng danh sách trường;
+//   3. vanTayHn — phần HN đã chốt: vân tay "giống CSDL" thì chotHnTables lặng lẽ BỎ phần gửi lên.
+import { sanitizeExtraTables, vanTayHn } from "../src/quoteUtils.js";
+import { HnSaveSchema } from "../src/validators.js";
+
+describe("bảng nội bộ giữ NS · Lưu kho · Chứng từ qua mọi cửa lưu", () => {
+  const hang = { kind: "item", name: "Nước suối", quantity: 1, unitPrice: 480000, ns: "Tiên ứng", luuKho: true, chungTu: "HDNS" };
+
+  it("zod nhận ba trường (không loại im lặng) và CHẶN chứng từ lạ", () => {
+    const ok = HnSaveSchema.parse({ hnTables: [{ items: [hang] }] });
+    expect(ok.hnTables[0].items[0]).toMatchObject({ ns: "Tiên ứng", luuKho: true, chungTu: "HDNS" });
+    expect(() => HnSaveSchema.parse({ hnTables: [{ items: [{ ...hang, chungTu: "CK" }] }] })).toThrow();
+  });
+
+  it("sanitize giữ đủ ba trường cho HCM / Phí khách hàng và bảng Hà Nội", () => {
+    for (const category of ["hcm", "khach"]) {
+      const [t] = sanitizeExtraTables([{ category, items: [hang] }]);
+      expect(t.items[0], category).toMatchObject({ ns: "Tiên ứng", luuKho: true, chungTu: "HDNS" });
+    }
+    const [hn] = sanitizeHnTables([{ items: [hang] }]);
+    expect(hn.items[0]).toMatchObject({ ns: "Tiên ứng", luuKho: true, chungTu: "HDNS" });
+  });
+
+  it("hàng cũ không có ba trường → mặc định rỗng; chứng từ lạ lọt tới đây cũng bị bỏ", () => {
+    const [t] = sanitizeExtraTables([{ category: "hcm", items: [{ kind: "item", name: "Cũ", chungTu: "XYZ" }] }]);
+    expect(t.items[0]).toMatchObject({ ns: null, luuKho: false, chungTu: null });
+  });
+
+  it("vân tay HN đổi khi chỉ sửa một trong ba trường — phần đã chốt báo 409 chứ không bỏ im lặng", () => {
+    const goc = vanTayHn([{ items: [hang] }]);
+    for (const doi of [{ ns: "Đặng" }, { luuKho: false }, { chungTu: "VAT" }]) {
+      expect(vanTayHn([{ items: [{ ...hang, ...doi }] }]), JSON.stringify(doi)).not.toBe(goc);
+    }
+    // Dữ liệu CŨ trong CSDL (thiếu ba khoá) và bản client gửi lại sau khi sanitize (null/false) là MỘT.
+    const cu = { kind: "item", name: "Cũ", quantity: 1, unitPrice: 1 };
+    expect(vanTayHn([{ items: [cu] }])).toBe(vanTayHn([{ items: [{ ...cu, ns: null, luuKho: false, chungTu: null }] }]));
+  });
+});

@@ -98,3 +98,65 @@ describe("L2 — ô Duyệt luôn khớp model sau Ctrl+Z / Ctrl+Y", () => {
     expect(tich(0).checked, "model đã duyệt lại mà ô vẫn trống").toBe(true);
   });
 });
+
+// ── BA CỘT CỦA BẢNG NỘI BỘ: NS · CHỨNG TỪ · LƯU KHO (2026-09-25) ────────────────────────────
+// Cùng tệp với cột Duyệt vì cùng loại: cột chỉ bảng nội bộ bật, ô tích/chọn không đi qua đường gõ ô.
+function VoNoiBo({ items, cotNoiBo }: { items: ItemK[]; cotNoiBo: boolean }) {
+  const [, buoc] = useState(0);
+  return (
+    <GridTable items={items} usesDays={false} showDetail={false} numberSubs={false} editable
+      internalNote={false} approveCol canApprove cotNoiBo={cotNoiBo} groupSubtotal={false} onChange={() => buoc((v) => v + 1)} />
+  );
+}
+function moLuoiNoiBo(items: ItemK[], cotNoiBo = true) {
+  hop = document.createElement("div");
+  document.body.appendChild(hop);
+  root = createRoot(hop);
+  act(() => root!.render(<VoNoiBo items={items} cotNoiBo={cotNoiBo} />));
+}
+const tieuDe = () => [...hop!.querySelectorAll("thead th")].map((th) => (th.textContent || "").trim());
+
+describe("bảng nội bộ: cột NS · CHỨNG TỪ · LƯU KHO", () => {
+  it("chỉ hiện khi bật cotNoiBo, đứng sau GHI CHÚ và trước DUYỆT", () => {
+    moLuoiNoiBo([mk({ name: "Nước suối" })]);
+    const td = tieuDe();
+    expect(td.slice(td.indexOf("GHI CHÚ"), td.indexOf("DUYỆT") + 1)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO", "DUYỆT"]);
+  });
+
+  it("lưới không bật (lưới chính) thì không có ba cột", async () => {
+    moLuoiNoiBo([mk({ name: "A" })], false);
+    expect(tieuDe()).not.toContain("NS");
+    expect(tieuDe()).not.toContain("LƯU KHO");
+  });
+
+  it("tích Lưu kho, chọn Chứng từ, gõ NS → ghi đúng vào hàng", () => {
+    const items = [mk({ name: "Nước suối" })];
+    moLuoiNoiBo(items);
+    const kho = hop!.querySelector('tr[data-row="0"] td.col-luu-kho input') as HTMLInputElement;
+    act(() => { kho.click(); });
+    expect(items[0].luuKho).toBe(true);
+    expect(kho.checked).toBe(true);
+
+    const chon = hop!.querySelector('tr[data-row="0"] td.col-chung-tu select') as HTMLSelectElement;
+    expect([...chon.options].map((x) => x.textContent)).toEqual(["—", "VAT", "HĐNS", "TM"]);
+    act(() => { chon.value = "HDNS"; chon.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(items[0].chungTu).toBe("HDNS");
+    act(() => { chon.value = ""; chon.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(items[0].chungTu).toBeNull();
+
+    const ns = o(0, "ns");
+    expect(ns, "ô NS phải là ô chữ của lưới (điều hướng / chép / dán được)").toBeTruthy();
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(ns, "Tiên ứng");
+      ns.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(items[0].ns).toBe("Tiên ứng");
+  });
+
+  it("hàng nhóm không có ô tích / ô chọn (không có gì để lưu kho hay chứng từ)", () => {
+    moLuoiNoiBo([mk({ kind: "section", name: "NHÓM A" }), mk({ name: "Hàng" })]);
+    expect(hop!.querySelector('tr[data-row="0"] td.col-luu-kho input')).toBeNull();
+    expect(hop!.querySelector('tr[data-row="0"] td.col-chung-tu select')).toBeNull();
+    expect(hop!.querySelector('tr[data-row="1"] td.col-luu-kho input')).toBeTruthy();
+  });
+});

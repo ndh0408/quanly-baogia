@@ -150,6 +150,7 @@ function noiDungBangNoiBo(ts: unknown) {
       unit: it?.unit ?? null, quantity: Number(it?.quantity) || 0, quantityExact: !!it?.quantityExact,
       unitPrice: Number(it?.unitPrice) || 0, days: it?.days != null ? Number(it.days) : null, notes: it?.notes ?? null,
       formulas: it?.formulas ?? null, approved: !!it?.approved,
+      ns: it?.ns ?? null, luuKho: !!it?.luuKho, chungTu: it?.chungTu ?? null,   // ba cột nội bộ — sửa là "chưa lưu"
     })),
   }));
 }
@@ -161,7 +162,7 @@ function noiDungBangNoiBo(ts: unknown) {
  * HN lưu giá thì đổi.
  */
 export const vanTayHnNoiDung = (ts: unknown): string => {
-  type Hang = { kind?: unknown; label?: unknown; name?: unknown; detail?: unknown; unit?: unknown; quantity?: unknown; quantityExact?: unknown; unitPrice?: unknown; days?: unknown; notes?: unknown };
+  type Hang = { kind?: unknown; label?: unknown; name?: unknown; detail?: unknown; unit?: unknown; quantity?: unknown; quantityExact?: unknown; unitPrice?: unknown; days?: unknown; notes?: unknown; ns?: unknown; luuKho?: unknown; chungTu?: unknown };
   type Bang = { name?: unknown; templateId?: unknown; groupSubtotal?: unknown; items?: Hang[] };
   return JSON.stringify((Array.isArray(ts) ? ts as Bang[] : []).map((t) => ({
     name: t?.name ? String(t.name).trim() : null,
@@ -171,6 +172,7 @@ export const vanTayHnNoiDung = (ts: unknown): string => {
       kind: it?.kind ?? null, label: it?.label ?? null, name: String(it?.name || "").trim(), detail: it?.detail ?? null,
       unit: it?.unit ?? null, quantity: Number(it?.quantity) || 0, quantityExact: !!it?.quantityExact,
       unitPrice: Number(it?.unitPrice) || 0, days: it?.days != null ? Number(it.days) : null, notes: it?.notes ?? null,
+      ns: it?.ns ?? null, luuKho: !!it?.luuKho, chungTu: it?.chungTu ?? null,   // khớp quoteUtils.vanTayHn
     })),
   })));
 };

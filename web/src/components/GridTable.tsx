@@ -35,6 +35,9 @@ export type GridTableProps = {
   payCol?: boolean;                // cột THANH TOÁN nội bộ per-hàng (bảng nội bộ)
   canPay?: boolean;                // có quyền quote:internal:pay → bấm được
   onPayRow?: (item: ItemK) => void; // mở dialog tích thanh toán + ảnh cho 1 hàng
+  /** Ba cột CHỈ của bảng nội bộ (Chi phí HCM · Phí khách hàng · Hà Nội) — người dùng yêu cầu 2026-09-25:
+   *  NS (chữ tự do như ô ghi chú) · CHỨNG TỪ (VAT / HĐNS / TM) · LƯU KHO (tích chọn). Lưới chính không bật. */
+  cotNoiBo?: boolean;
   groupSubtotal: boolean;
   onGroupSubtotal?: (v: boolean) => void;
   showImages?: boolean;            // BẬT cột "Hình ảnh" (ảnh mỗi hạng mục, xuất Excel)
@@ -72,7 +75,9 @@ export type GridTableProps = {
 type Addr = { row: number; field: string; L: string };
 /** Cảnh báo gom trong MỘT lượt dán (xem pasteCellVal) — onPaste báo một lần khi dán xong. */
 type BaoDan = { moHo: string[]; khongSo: string[]; boiSo: [string, number][] };
-const MULTILINE = new Set(["name", "detail", "notes", "internalNote"]);
+const MULTILINE = new Set(["name", "detail", "notes", "internalNote", "ns"]);
+/** Lựa chọn của cột CHỨNG TỪ — giá trị lưu khớp `chungTu` trong src/validators.ts. */
+const CHUNG_TU: Array<[string, string]> = [["VAT", "VAT"], ["HDNS", "HĐNS"], ["TM", "TM"]];
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
 // Bấm vào những vùng này KHÔNG được coi là "rời lưới" → GIỮ vùng chọn.
@@ -221,7 +226,7 @@ let demCat = 0;
 const CAT_DA_XONG = new Set<string>();
 
 function GridTableInner(props: GridTableProps) {
-  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
+  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
   const histRef = useRef(createUndoStack());
@@ -310,7 +315,7 @@ function GridTableInner(props: GridTableProps) {
   // mang theo được "hàng này là nhóm hay mục", dán xuống dựng lại đúng cấu trúc.
   // LƯU Ý: FIELDS chỉ là danh sách cột ĐIỀU HƯỚNG, hoàn toàn tách khỏi ADDR (sơ đồ chữ cái cột) —
   // thêm cột ở đây KHÔNG dịch chữ cái nào nên công thức đã lưu của báo giá cũ vẫn trỏ đúng.
-  const FIELDS = (["_stt", "name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null].filter(Boolean)) as string[];
+  const FIELDS = (["_stt", "name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null, cotNoiBo ? "ns" : null].filter(Boolean)) as string[];
   const RO_FIELDS = new Set(["_stt", "_amount"]);   // chọn/copy được, cấm ghi vào model
   const DATA_FIELD_COUNT = FIELDS.length - 1;       // số cột DỮ LIỆU (không tính _stt) — cho nhận dạng khối dán
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
@@ -426,6 +431,7 @@ function GridTableInner(props: GridTableProps) {
     ...(usesDays ? [{ f: "days", L: "" }] : []),
     { f: "unitPrice", L: "" }, { f: "_amount", ro: true, L: "" }, { f: "notes", L: "" },
     ...(internalNote ? [{ f: "internalNote", L: "" }] : []),
+    ...(cotNoiBo ? [{ f: "ns", L: "" }] : []),   // cột CUỐI của sơ đồ — không dịch chữ cột nào trước nó
   ];
   ADDR.forEach((c, i) => { c.L = M.groupLetter(i); });
   const colByL: Record<string, { f: string }> = {}; ADDR.forEach((c) => { colByL[c.L] = c; });
@@ -2164,6 +2170,8 @@ function GridTableInner(props: GridTableProps) {
     tenHang: (i: number, el: HTMLTextAreaElement) => void;
     anh: (i: number, el: HTMLInputElement) => void;
     duyet: (i: number, checked: boolean) => void;
+    luuKho: (i: number, checked: boolean) => void;
+    chungTu: (i: number, v: string) => void;
     bam: (vai: string, i: number, el: HTMLElement) => void;
   } | null>(null);
   const xuLyO = useCallback((e: { target: EventTarget | null; nativeEvent?: Event }) => {
@@ -2186,6 +2194,8 @@ function GridTableInner(props: GridTableProps) {
     else if (vai === "ten-hang") h.tenHang(i, el);
     else if (vai === "anh") h.anh(i, el);
     else if (vai === "duyet") h.duyet(i, el.checked);
+    else if (vai === "luu-kho") h.luuKho(i, el.checked);
+    else if (vai === "chung-tu") h.chungTu(i, el.value);
   }, []);
   /** Bấm / bấm đúp trong dòng (xoá dòng, xem công thức, ảnh, thanh toán) — cố định như xuLyO. */
   const xuLyBam = useCallback((e: { currentTarget: EventTarget | null }) => {
@@ -2231,6 +2241,9 @@ function GridTableInner(props: GridTableProps) {
     tenHang: (i, el) => { editingRef.current = true; markEditUndo(i, "name"); (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); nameSuggest(i, el); },
     anh: (i, el) => { addImages(i, el.files); el.value = ""; },
     duyet: toggleApprove,
+    // Tích / chọn là MỘT bước hoàn tác (như Duyệt) và vẽ lại ngay để ô bám model.
+    luuKho: (i, checked) => { pushUndo(); (items[i] as Record<string, unknown>).luuKho = checked; onChange(); },
+    chungTu: (i, v) => { pushUndo(); (items[i] as Record<string, unknown>).chungTu = v || null; onChange(); },
     bam: (vai, i, el) => {
       if (vai === "xoa-dong") removeRow(i);
       else if (vai === "xem-tt") revealAmount(i, el);
@@ -2328,6 +2341,7 @@ function GridTableInner(props: GridTableProps) {
       { ideal: 140, floor: 96 },                                 // THÀNH TIỀN
       { ideal: 150, floor: 96 },                                 // GHI CHÚ
       ...(internalNote ? [{ ideal: 150, floor: 96 }] : []),      // GHI CHÚ NỘI BỘ
+      ...(cotNoiBo ? [{ ideal: 130, floor: 90 }, { ideal: 100, floor: 84 }, { ideal: 90, floor: 72 }] : []),   // NS · CHỨNG TỪ · LƯU KHO
       ...(showImages ? [{ ideal: 150, floor: 110 }] : []),       // HÌNH ẢNH — thumbnail 44px + nút
       ...(approveCol ? [{ ideal: 120, floor: 92 }] : []),        // DUYỆT
       ...(payCol ? [{ ideal: 140, floor: 104 }] : []),           // THANH TOÁN
@@ -2359,6 +2373,7 @@ function GridTableInner(props: GridTableProps) {
     const amount = w(fixed[k++]);
     const notes = w(fixed[k++]);
     const internal = internalNote ? w(fixed[k++]) : 0;
+    const noiBo = cotNoiBo ? [w(fixed[k++]), w(fixed[k++]), w(fixed[k++])] : [];
     const images = showImages ? w(fixed[k++]) : 0;
     const approve = approveCol ? w(fixed[k++]) : 0;
     const pay = payCol ? w(fixed[k++]) : 0;
@@ -2375,13 +2390,14 @@ function GridTableInner(props: GridTableProps) {
       { w: amount, min: amount },
       { w: notes, min: notes },
       ...(internalNote ? [{ w: internal, min: internal }] : []),
+      ...noiBo.map((x) => ({ w: x, min: x })),
       ...(showImages ? [{ w: images, min: images }] : []),
       ...(approveCol ? [{ w: approve, min: approve }] : []),
       ...(payCol ? [{ w: pay, min: pay }] : []),
       ...(editable ? [{ w: act, min: act }] : []),
     ];
     return cols;
-  }, [wrapW, showDetail, usesDays, internalNote, showImages, approveCol, payCol, editable]);
+  }, [wrapW, showDetail, usesDays, internalNote, cotNoiBo, showImages, approveCol, payCol, editable]);
   // Hẹp hơn tổng min → .tbl-scroll CUỘN NGANG thay vì bóp méo. Trước đây .excel-table chỉ có
   // min-width bên trong @media (max-width:920px) nên desktop không hề có chốt chặn nào.
   const tableMinW = COLS.reduce((a, c) => a + c.min, 0);
@@ -2417,14 +2433,14 @@ function GridTableInner(props: GridTableProps) {
 
   // ── derived ───────────────────────────────────────────────────────────────────
   const sectionSum = tinhTongNhom().tong;
-  const extraCols = (internalNote ? 1 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
+  const extraCols = (internalNote ? 1 : 0) + (cotNoiBo ? 3 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   // Chữ ký dòng cho DongNho: cấu hình cột (đổi là vẽ lại MỌI dòng) + mọi trường dòng hiển thị.
-  const cauHinhSig = [editable, showDetail, usesDays, internalNote, showImages, approveCol, canApprove, payCol, canPay, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, !!onPayRow].join("|");
+  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, canPay, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, !!onPayRow].join("|");
   const chuKy = (i: number, them: string) => {
     const it = items[i] as Record<string, unknown>;
     return [cauHinhSig, i, them, it.kind, it.label, it.name, it.detail, it.unit, it.quantity, it.quantityExact, it.days, it.unitPrice,
-      it.notes, it.internalNote, it.approved, it.approvedAt, it.paid, it.paidAt, it.hasPaidProof,
+      it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, it.paid, it.paidAt, it.hasPaidProof,
       JSON.stringify(it.formulas || null), JSON.stringify(it._fxWarn || null), JSON.stringify(it._fxLoi || null),
       ((it.images as string[] | undefined) || []).map((x) => x.length).join(",")].join("\u0001");
   };
@@ -2614,6 +2630,16 @@ function GridTableInner(props: GridTableProps) {
       <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
+      {cotNoiBo && <>
+        <td className="col-ns">{taInput(i, "ns")}</td>
+        <td className="col-chung-tu">
+          <select value={String((items[i] as Record<string, unknown>).chungTu || "")} disabled={!editable} data-xl="chung-tu" onChange={xuLyO} aria-label="Chứng từ">
+            <option value="">—</option>
+            {CHUNG_TU.map(([v, nhan]) => <option key={v} value={v}>{nhan}</option>)}
+          </select>
+        </td>
+        <td className="col-luu-kho"><input type="checkbox" checked={!!(items[i] as Record<string, unknown>).luuKho} disabled={!editable} data-xl="luu-kho" onChange={xuLyO} aria-label="Lưu kho" /></td>
+      </>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
       {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
       {payCol && <td className="col-pay">{canPay
@@ -2688,6 +2714,7 @@ function GridTableInner(props: GridTableProps) {
               <th scope="col">THÀNH TIỀN</th>
               <th scope="col">GHI CHÚ</th>
               {internalNote && <th scope="col" className="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(không xuất Excel)</span></th>}
+              {cotNoiBo && <><th scope="col">NS</th><th scope="col">CHỨNG TỪ</th><th scope="col">LƯU KHO</th></>}
               {showImages && <th scope="col" className="th-images">HÌNH ẢNH<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(có xuất Excel)</span></th>}
               {approveCol && <th scope="col">DUYỆT</th>}
               {payCol && <th scope="col">THANH TOÁN</th>}
@@ -2715,6 +2742,7 @@ function GridTableInner(props: GridTableProps) {
                     <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{groupSubtotal ? M.fmtNumCell(subAmt * M.groupMult(it)) : ""}</td>
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
                     {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
+                    {cotNoiBo && <><td className="col-ns" /><td className="col-chung-tu" /><td className="col-luu-kho" /></>}
                     {showImages && <td className="col-images">{imagesCell(i)}</td>}
                     {approveCol && <td className="col-approve" />}
                     {payCol && <td className="col-pay" />}

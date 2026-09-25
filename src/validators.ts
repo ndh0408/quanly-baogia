@@ -299,6 +299,13 @@ const itemSchema = z.object({
   days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").max(9_999_999, "Số ngày quá lớn").optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   internalNote: z.string().max(2000).optional().nullable(),   // ghi chú nội bộ — KHÔNG xuất Excel
+  // BA CỘT CHỈ CỦA BẢNG NỘI BỘ (Chi phí HCM · Phí khách hàng · Hà Nội), người dùng yêu cầu 2026-09-25:
+  // "NS" chữ tự do như ô ghi chú, "LƯU KHO" tích chọn, "CHỨNG TỪ" một trong VAT / HĐNS / TM. Khai ở
+  // itemSchema chung vì bảng nội bộ dùng lại schema này — lưới chính không có cột nào đọc chúng, và
+  // `buildSheetsCreate` chỉ chép từng trường đã biết nên chúng không lọt xuống QuoteItem.
+  ns: z.string().max(2000).optional().nullable(),
+  luuKho: z.boolean().optional(),
+  chungTu: z.enum(["VAT", "HDNS", "TM"], { error: "Chứng từ chỉ nhận VAT, HĐNS hoặc TM" }).optional().nullable(),
   // Raw Excel-style formulas per numeric field (editor metadata only, e.g.
   // {"unitPrice":"=2000+3000"}). Declared so Zod KEEPS it instead of stripping it
   // (unknown keys are dropped by default), otherwise the "remember formula" feature
