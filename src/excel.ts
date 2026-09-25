@@ -946,30 +946,6 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     }
   }
 
-  // Công thức người dùng TỰ GÕ (it.formulas) → công thức Excel thật. Dựng bộ dịch theo
-  // sheet (slotRows đã chốt). Ô số nào dịch được + tự kiểm khớp thì ghi công thức; không
-  // thì ghi số như cũ (putNum bên dưới) — không bao giờ làm hỏng export.
-  // Bản đồ ĐỐI TƯỢNG item (item/sub đã đặt chỗ) → hàng Excel: tra theo địa chỉ đối tượng
-  // nên ref công thức dịch ĐÚNG bất kể CLF lọc dòng "info" làm lệch chỉ số mảng.
-  const rowByItem = new Map();
-  for (let j = 0; j < slotRows.length; j++) {
-    const it2 = items[j];
-    if (it2 && (it2.kind === "item" || it2.kind === "sub") && slotRows[j] != null) rowByItem.set(it2, slotRows[j]);
-  }
-  const fctx = buildFormulaContext({
-    cols,
-    items: editorItems,                                  // thứ tự editor (ref người dùng khớp)
-    rowToExcel: (idx0: any) => rowByItem.has(editorItems[idx0]) ? rowByItem.get(editorItems[idx0]) : null,
-  });
-  // Ghi 1 ô số: ưu tiên công thức người dùng (kết quả = giá trị đã tính), fallback ghi số.
-  const putNum = (it2: any, row: any, field: any, colX: any, value: any) => {
-    if (!colX) return;
-    const raw = it2 && it2.formulas && it2.formulas[field];
-    const fx = raw ? fctx.cellFormula(raw, value, { item: it2, field }) : null;   // self → chặn vòng khi ref Thành Tiền
-    if (fx) ws.getCell(`${colX}${row}`).value = { formula: fx, result: value };
-    else setCell(ws, `${colX}${row}`, value);
-  };
-
   let subtotal = 0;
   let itemNo = 0;
   let sectionIdx = -1;
@@ -1002,6 +978,91 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       }
     }
     return rows;
+  };
+  // HAI Ô TIỀN của hàng NHÓM (Đơn Giá nhóm, Thành Tiền nhóm) đúng như vòng ghi bên dưới đặt vào tệp;
+  // null = ô để TRỐNG. Là MỘT nguồn cho cả vòng ghi lẫn bộ dịch công thức: công thức người dùng trỏ vào
+  // ô tổng nhóm (báo giá #49: "=ROUND((SUM(G50;…;G6)*14%);-6)") chỉ được dịch khi ô Excel được trỏ tới
+  // mang đúng con số lưới web dùng — tách hai nơi tự tính thì một ngày nào đó sẽ lệch nhau mà không ai
+  // thấy. Mọi đầu vào (slotRows, sectionSum, cờ ×SL) đã chốt trước vòng ghi nên ghi nhớ được.
+  type ONhom = { formula: string; result: number } | number | null;
+  const daTinhONhom = new Map<number, { gq: number; gmult: number; looseSum: string | null; subRows: number[]; gia: ONhom; thanhTien: ONhom }>();
+  const oTienNhom = (i: number) => {
+    const daCo = daTinhONhom.get(i);
+    if (daCo) return daCo;
+    const r = slotRows[i];
+    const isSubSection = items[i].kind === "subsection";
+    const gq = qtyForAmount(items[i]);
+    const gmult = showGroupSub ? Math.max(1, gq || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
+    // Đơn Giá nhóm = SUM Thành Tiền các mục con (CÔNG THỨC SỐNG). Thành Tiền nhóm = Đơn Giá nhóm ×
+    // Số Lượng nhóm (sống, chỉ khi bật). Không có mục con → ghi số như cũ (an toàn).
+    const childRng = childExcelRange(i);
+    const looseSum = childRng ? `SUM(${cols.amount}${childRng[0]}:${cols.amount}${childRng[1]})` : null;   // mục TRỰC THUỘC nhóm này
+    // Bản BANNER + nhóm CHÍNH có nhóm con → Đơn Giá = Σ Thành Tiền mục lẻ trực thuộc + Σ đơn giá
+    // nhóm con (rời ô). Còn lại: Σ Thành Tiền mục con.
+    const subRows = (numberSubs && !isSubSection) ? subSectionRows(i) : [];
+    const subCells = cols.unitPrice ? subRows.map((rr) => `${cols.unitPrice}${rr}`) : [];
+    const hasGroupBody = subRows.length > 0 || !!(childRng && sectionSum[i]);
+    let gia: ONhom = null;
+    if (cols.unitPrice) {
+      // Nhóm cha có CẢ mục lẻ LẪN nhóm con: phải cộng cả hai vế. Bỏ vế mục lẻ là công thức hụt
+      // đúng phần đó — số ghi sẵn vẫn đủ nên lỗi chỉ lộ ra khi khách MỞ file, Excel tính lại.
+      const priceTerms: string[] = [];
+      if (subCells.length) { if (looseSum) priceTerms.push(looseSum); priceTerms.push(`SUM(${subCells.join(",")})`); }
+      else if (looseSum && sectionSum[i]) priceTerms.push(looseSum);
+      gia = priceTerms.length ? { formula: priceTerms.join("+"), result: sectionSum[i] } : (sectionSum[i] || null);
+    }
+    let thanhTien: ONhom = null;
+    if (cols.amount) {
+      if (showGroupSub && hasGroupBody) {
+        const fAmt = gmult > 1 ? `${cols.unitPrice}${r}*${cols.quantity}${r}` : `${cols.unitPrice}${r}`;   // ×SL khi SL>1; SL≤1 → = đơn giá nhóm
+        thanhTien = { formula: fAmt, result: sectionSum[i] * gmult };
+      } else {
+        thanhTien = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
+      }
+    }
+    const kq = { gq, gmult, looseSum, subRows, gia, thanhTien };
+    daTinhONhom.set(i, kq);
+    return kq;
+  };
+
+  // Công thức người dùng TỰ GÕ (it.formulas) → công thức Excel thật. Dựng bộ dịch theo
+  // sheet (slotRows đã chốt). Ô số nào dịch được + tự kiểm khớp thì ghi công thức; không
+  // thì ghi số như cũ (putNum bên dưới) — không bao giờ làm hỏng export.
+  // Bản đồ ĐỐI TƯỢNG item (item/sub đã đặt chỗ) → hàng Excel: tra theo địa chỉ đối tượng
+  // nên ref công thức dịch ĐÚNG bất kể CLF lọc dòng "info" làm lệch chỉ số mảng.
+  const rowByItem = new Map();
+  const viTriTrongItems = new Map<any, number>();   // đối tượng item → chỉ số trong `items` (đã lọc info)
+  for (let j = 0; j < slotRows.length; j++) {
+    const it2 = items[j];
+    if (it2 && (it2.kind === "item" || it2.kind === "sub") && slotRows[j] != null) rowByItem.set(it2, slotRows[j]);
+    if (it2 && effKind[j] === "section" && slotRows[j] != null) viTriTrongItems.set(it2, j);
+  }
+  const fctx = buildFormulaContext({
+    cols,
+    items: editorItems,                                  // thứ tự editor (ref người dùng khớp)
+    rowToExcel: (idx0: any) => rowByItem.has(editorItems[idx0]) ? rowByItem.get(editorItems[idx0]) : null,
+    // Ô tiền của hàng NHÓM: hàng Excel + con số ô đó mang (null khi ô trống / nhóm không có hàng Excel).
+    // Bộ dịch tự so con số này với số lưới web dùng cho ô ấy rồi mới cho tham chiếu.
+    nhom: {
+      groupSubtotal: showGroupSub,
+      numberSubs,
+      oExcel: (idx0: number, field: "unitPrice" | "_amount") => {
+        const j = viTriTrongItems.get(editorItems[idx0]);
+        if (j == null) return null;
+        const o = oTienNhom(j);
+        const v = field === "unitPrice" ? o.gia : o.thanhTien;
+        if (v == null) return null;
+        return { row: slotRows[j], value: typeof v === "number" ? v : v.result };
+      },
+    },
+  });
+  // Ghi 1 ô số: ưu tiên công thức người dùng (kết quả = giá trị đã tính), fallback ghi số.
+  const putNum = (it2: any, row: any, field: any, colX: any, value: any) => {
+    if (!colX) return;
+    const raw = it2 && it2.formulas && it2.formulas[field];
+    const fx = raw ? fctx.cellFormula(raw, value, { item: it2, field }) : null;   // self → chặn vòng khi ref Thành Tiền
+    if (fx) ws.getCell(`${colX}${row}`).value = { formula: fx, result: value };
+    else setCell(ws, `${colX}${row}`, value);
   };
   // Biểu thức cộng vào Tổng Cộng, kèm hàng để sắp xếp (khi bật ×SL). Thường là ô Thành Tiền của
   // hàng nhóm; bản BANNER có nhóm lồng nhau thì là ô của các nhóm CON + mục lẻ của cha ×SL cha.
@@ -1039,32 +1100,15 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
+      const o = oTienNhom(i);   // Đơn Giá / Thành Tiền nhóm: công thức sống hoặc số — xem oTienNhom
+      const { gq, gmult, looseSum, subRows } = o;
       // SL hàng nhóm: ghi số ĐÃ làm tròn (ô này không set numFmt nên thừa hưởng định dạng template
       // → ghi số thô là khách mở file thấy đủ 4 chữ số, khác hẳn lưới web).
-      const gq = qtyForAmount(it);
       if (cols.quantity) ws.getCell(`${cols.quantity}${r}`).value = (gq || 0) || null;
-      const gmult = showGroupSub ? Math.max(1, gq || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
       mult = gmult;
       if (!Number.isInteger(gmult)) coHeSoNhomLe = true;
       seenSection = true;
-      // Đơn Giá nhóm = SUM Thành Tiền các mục con (CÔNG THỨC SỐNG). Thành Tiền nhóm = Đơn Giá nhóm ×
-      // Số Lượng nhóm (sống, chỉ khi bật). Không có mục con → ghi số như cũ (an toàn).
-      const childRng = childExcelRange(i);
-      const looseSum = childRng ? `SUM(${cols.amount}${childRng[0]}:${cols.amount}${childRng[1]})` : null;   // mục TRỰC THUỘC nhóm này
-      // Bản BANNER + nhóm CHÍNH có nhóm con → Đơn Giá = Σ Thành Tiền mục lẻ trực thuộc + Σ đơn giá
-      // nhóm con (rời ô). Còn lại: Σ Thành Tiền mục con.
-      const subRows = (numberSubs && !isSubSection) ? subSectionRows(i) : [];
-      const subCells = cols.unitPrice ? subRows.map((rr) => `${cols.unitPrice}${rr}`) : [];
-      const hasGroupBody = subRows.length > 0 || !!(childRng && sectionSum[i]);
-      if (cols.unitPrice) {
-        // Nhóm cha có CẢ mục lẻ LẪN nhóm con: phải cộng cả hai vế. Bỏ vế mục lẻ là công thức hụt
-        // đúng phần đó — số ghi sẵn vẫn đủ nên lỗi chỉ lộ ra khi khách MỞ file, Excel tính lại.
-        const priceTerms: string[] = [];
-        if (subCells.length) { if (looseSum) priceTerms.push(looseSum); priceTerms.push(`SUM(${subCells.join(",")})`); }
-        else if (looseSum && sectionSum[i]) priceTerms.push(looseSum);
-        if (priceTerms.length) ws.getCell(`${cols.unitPrice}${r}`).value = { formula: priceTerms.join("+"), result: sectionSum[i] };
-        else ws.getCell(`${cols.unitPrice}${r}`).value = sectionSum[i] || null;
-      }
+      if (cols.unitPrice) ws.getCell(`${cols.unitPrice}${r}`).value = o.gia;
       if (showGroupSub && cols.amount) {
         // Tổng Cộng. BANNER + nhóm lồng nhau: Đơn Giá cha ĐÃ bao trùm nhóm con, nên cộng cả hàng
         // cha lẫn hàng con là cộng ĐÔI (2 nhóm con → gấp 3). Cộng các hàng nhóm CON (đã ×SL con)
@@ -1077,14 +1121,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
           groupAmtTerms.push({ row: r, expr: `${cols.amount}${r}` });
         }
       }
-      if (cols.amount) {
-        if (showGroupSub && hasGroupBody) {
-          const fAmt = gmult > 1 ? `${cols.unitPrice}${r}*${cols.quantity}${r}` : `${cols.unitPrice}${r}`;   // ×SL khi SL>1; SL≤1 → = đơn giá nhóm
-          ws.getCell(`${cols.amount}${r}`).value = { formula: fAmt, result: sectionSum[i] * gmult };
-        } else {
-          ws.getCell(`${cols.amount}${r}`).value = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
-        }
-      }
+      if (cols.amount) ws.getCell(`${cols.amount}${r}`).value = o.thanhTien;
       if (cols.notes) setCell(ws, `${cols.notes}${r}`, it.notes || null);
       for (const col of Object.values(cols)) {
         // Nhóm con: ô STT + Ghi Chú để TRẮNG (không tô nền) — chỉ tô dải giữa. Bản BANNER có

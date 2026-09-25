@@ -199,6 +199,21 @@ afterEach(async () => {
   document.body.innerHTML = "";
 });
 
+describe("Số ngày ẩn khi đổi mẫu", () => {
+  it("mở lại mẫu có ngày tính công thức ngày còn lưu trước khi người dùng xuất file", () => {
+    const row = { ...hang("A", "cái", 1, 100000), days: null, formulas: { days: "=1+2" } } as ItemK;
+    const items = [row];
+    moLuoi(items, { usesDays: true });
+    expect(row.days).toBe(3);
+    expect(M.lineAmount(row, true)).toBe(300000);
+  });
+  it("mẫu có ngày đã lưu số thì không tự tính lại công thức lúc mở", () => {
+    const row = { ...hang("A", "cái", 1, 100000), days: 7, formulas: { days: "=1+2" } } as ItemK;
+    moLuoi([row], { usesDays: true });
+    expect(row.days).toBe(7);
+  });
+});
+
 // ── (0) giàn dựng có thật sự chạm được component không ───────────────────────
 
 describe("GridTable — giàn dựng", () => {

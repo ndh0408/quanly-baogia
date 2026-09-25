@@ -117,7 +117,7 @@ export function ImportExcelModal({
     // Chế độ Thay: ảnh / liên kết sản phẩm / ghi chú nội bộ (bảng HN: cả rid + trạng thái duyệt – thanh
     // toán) của dòng khớp đi theo sang (L48) — PHẢI gọi y như nhánh nạp thật trong `apply` để bảng
     // đối chiếu nói đúng thứ sẽ xảy ra.
-    const giu = plan.mode !== "append" && target ? giuTruongChiApp(before, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote }) : null;
+    const giu = plan.mode !== "append" && target ? giuTruongChiApp(before, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote, giuCongThucNgayAn: !usesDays }) : null;
     const after = plan.mode === "append" ? [...before, ...conv.items] : (giu?.items ?? conv.items);
     const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0, tienDaTraDoi = giu?.tienDaTraDoi ?? [];
     const beforeTotal = M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
@@ -127,7 +127,7 @@ export function ImportExcelModal({
     const fileTotal = fs.totals?.subtotal ?? null;
     const moneyDelta = fileTotal == null ? null : importedTotal - fileTotal;
     const moneyMismatch = moneyDelta != null && Math.abs(moneyDelta) > Math.max(2, Math.abs(fileTotal || 0) * 0.005);
-    const formulaDropped = fs.stats.formulasDropped + conv.droppedFormulas;
+    const formulaDropped = fs.stats.formulasDropped + conv.droppedFormulas + (giu?.congThucNgayAnMat ?? 0);
     const rowWarnings = fs.items.reduce((n, it) => n + (it.warn?.length || 0), 0);
     const warnOf = (i: number) => {
       const k = plan.mode === "append" ? i - before.length : i;
@@ -193,7 +193,7 @@ export function ImportExcelModal({
       // Thay toàn bộ: dòng khớp giữ ảnh (+ productId, ghi chú nội bộ khi tệp không có cột đó; bảng HN:
       // rid + cờ duyệt / thanh toán) — tệp Excel không chở được chúng. Ảnh của dòng bị xoá thật thì
       // đếm để NÓI RA ở hộp xác nhận (L48).
-      const giu = plan.mode === "replace" && target ? giuTruongChiApp(target.items, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote }) : null;
+      const giu = plan.mode === "replace" && target ? giuTruongChiApp(target.items, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote, giuCongThucNgayAn: !usesDays }) : null;
       anhRisk += giu?.anhMat ?? 0;
       // Bảng HN: hàng đã duyệt / đã thanh toán không còn trong tệp → mất dấu duyệt, cờ đã trả, ảnh chứng từ.
       trangThaiRisk += giu?.trangThaiMat ?? 0;
@@ -208,7 +208,7 @@ export function ImportExcelModal({
       });
       const targetTemplate = templates.find((t) => t.id === tplId);
       if (fs.templateCode && targetTemplate?.code && fs.templateCode !== targetTemplate.code) templateRisk++;
-      formulaRisk += fs.stats.formulasDropped + conv.droppedFormulas;
+      formulaRisk += fs.stats.formulasDropped + conv.droppedFormulas + (giu?.congThucNgayAnMat ?? 0);
       rowRisk += fs.items.reduce((n, it) => n + (it.warn?.length || 0), 0);
       sheetRisk += fs.warnings.length;
       if (fs.totals?.subtotal != null) {
