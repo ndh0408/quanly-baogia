@@ -271,3 +271,100 @@ describe("(h) các chốt cũ giữ nguyên: vẫn ghi số", () => {
     expect(v).toMatchObject({ formula: `H${hang("A lẻ")}*10%`, result: 80000 });
   });
 });
+
+// ── (i) SOÁT CHÉO: công thức trỏ ô tổng nhóm — số Excel TÍNH LẠI phải TRÙNG số lưới web ─────────────
+// Tệp đặt fullCalcOnLoad: Excel tính lại mọi công thức khi mở. Bộ tự kiểm chừa dung sai 1e-3, còn số
+// lưu đã bị DB cắt (SL / Đơn Giá 4 số lẻ, Số Ngày 2 số lẻ). Công thức ra nhiều số lẻ hơn thế vẫn lọt tự
+// kiểm, nên tệp mang công thức mà Excel tính ra số KHÁC số lưới web / PDF dùng. Excel 16 đo được Thành
+// Tiền 76.469 so với web 76.466, lệch lan lên tổng nhóm và Tổng Cộng. Trên af17fe6 bốn ca "ghi SỐ" dưới
+// đây ra công thức (đỏ). Trên 8e1920d chúng ra số, vì tham chiếu ô nhóm khi đó luôn bị huỷ. Hai ca
+// "đối chứng" ra công thức: số khớp tuyệt đối thì không được chặn thừa.
+describe("(i) công thức trỏ ô tổng nhóm ra nhiều số lẻ hơn số lưu → ghi SỐ", () => {
+  const sheetTiLe = (x, tongA, code = "marico_decor") => baoGia(code, [x, nhom("Nhóm A"), muc("A1", 1, tongA)]);
+  async function oCua(code, q, ten, field) {
+    const ws = await mo(q);
+    const c = TEMPLATE_CONFIGS[code].items.columns;
+    const r = hangCua(ws, code, ten);
+    return { ws, c, r, v: ws.getCell(`${c[field]}${r}`).value };
+  }
+
+  it("SL chính xác \"=G2/1000000\": tổng nhóm 804.937 → 0,804937, số lưu 0,8049 → ghi SỐ", async () => {
+    const x = { ...muc("X", 0.8049, 95000, { quantity: "=G2/1000000" }), quantityExact: true };
+    const { ws, c, r, v } = await oCua("marico_decor", sheetTiLe(x, 804937), "X", "quantity");
+    expect(v, JSON.stringify(v)).toBe(0.8049);
+    // Thành Tiền mục vẫn là công thức sống, tính trên đúng SL web dùng → 76.466 như lưới.
+    expect(ws.getCell(`${c.amount}${r}`).value).toMatchObject({ formula: `ROUND(G${r}*F${r},0)`, result: 76466 });
+  });
+  it("đối chứng: SL chính xác, tổng nhóm 805.000 → 0,805 trùng số lưu → công thức sống", async () => {
+    const x = { ...muc("X", 0.805, 95000, { quantity: "=G2/1000000" }), quantityExact: true };
+    const { ws, v } = await oCua("marico_decor", sheetTiLe(x, 805000), "X", "quantity");
+    expect(v).toMatchObject({ formula: `H${hangCua(ws, "marico_decor", "Nhóm A")}/1000000`, result: 0.805 });
+  });
+  it("SL thường \"=G2/1000000\": 0,84996 lọt tự kiểm với số lưu 0,85, nhưng Excel ROUND ra 0,8 còn web 0,9 → ghi SỐ", async () => {
+    const x = muc("X", 0.85, 100000, { quantity: "=G2/1000000" });
+    const { v } = await oCua("marico_decor", sheetTiLe(x, 849960), "X", "quantity");
+    expect(v, JSON.stringify(v)).toBe(0.9);
+  });
+  it("Đơn Giá \"=G2/3\": 5.446.333,333… so với số lưu 4 số lẻ 5.446.333,3333 → ghi SỐ", async () => {
+    const x = muc("X", 1, 5446333.3333, { unitPrice: "=G2/3" });
+    const { v } = await oCua("marico_decor", sheetTiLe(x, 16339000), "X", "unitPrice");
+    expect(v, JSON.stringify(v)).toBe(5446333.3333);
+  });
+  it("Số Ngày \"=G2/1000000\" (unibenfood): 1,2304 so với số lưu 1,23 → ghi SỐ; đối chứng 1,5 → công thức sống", async () => {
+    // unibenfood: cột editor A stt · B tên · C ĐVT · D SL · E Số Ngày · F ĐG · G Thành Tiền.
+    const lech = { ...muc("X", 1, 10000000, { days: "=G2/1000000" }), days: 1.23 };
+    const a = await oCua("unibenfood", sheetTiLe(lech, 1230400, "unibenfood"), "X", "days");
+    expect(a.v, JSON.stringify(a.v)).toBe(1.23);
+    expect(a.ws.getCell(`${a.c.amount}${a.r}`).value).toMatchObject({ result: 12300000 });
+    const khop = { ...muc("X", 1, 10000000, { days: "=G2/1000000" }), days: 1.5 };
+    const b = await oCua("unibenfood", sheetTiLe(khop, 1500000, "unibenfood"), "X", "days");
+    expect(b.v).toMatchObject({ formula: `H${hangCua(b.ws, "unibenfood", "Nhóm A")}/1000000`, result: 1.5 });
+  });
+});
+
+// ── (j) SOÁT CHÉO: ô KHÔNG trỏ ô tổng nhóm phải giữ ĐÚNG tệp cũ (8e1920d), kể cả khi dính "vòng" gián tiếp
+// Ô A trỏ THÀNH TIỀN của mục B, B trỏ ô tổng nhóm chứa A. B dính vòng nên ghi số (như cũ). A thì không:
+// Excel thấy A trỏ một ô Thành Tiền tính từ SỐ của B, không có vòng. Trên af17fe6 A cũng bị ghi số chết,
+// vì bộ bắt vòng của A đi qua cả cạnh ô tổng nhóm (đỏ). Trên 8e1920d A giữ công thức (xanh).
+const chuCotEditor = (code) => {
+  const c = TEMPLATE_CONFIGS[code].items.columns;
+  const f = ["_stt", "name"]; if (c.detail) f.push("detail"); f.push("unit", "quantity"); if (c.days) f.push("days"); f.push("unitPrice", "_amount", "notes");
+  return { F: String.fromCharCode(65 + f.indexOf("unitPrice")), G: String.fromCharCode(65 + f.indexOf("_amount")), c };
+};
+describe("(j) vòng gián tiếp qua Thành Tiền MỤC: ô không trỏ tổng nhóm giữ công thức cũ", () => {
+  for (const code of ["marico_decor", "gn_banner", "unibenfood", "clofull_decor", "clofull_banner", "clofull_conngay"]) {
+    it(`${code}: XA "=G6*2" (Thành Tiền YB), YB "=F1*10%" (Đơn Giá nhóm X chứa XA)`, async () => {
+      const { F, G, c } = chuCotEditor(code);
+      // Tổng X = 1.000.000 + 250.000 = 1.250.000 → YB 125.000 → XA = 125.000 × 2 = 250.000: số tự khớp.
+      const items = [
+        nhom("Nhóm X"), muc("X1", 1, 1000000), muc("XA", 1, 250000, { unitPrice: `=${G}6*2` }),
+        nhom("Nhóm Y"), muc("Y1", 1, 1000000), muc("YB", 1, 125000, { unitPrice: `=${F}1*10%` }),
+      ];
+      const ws = await mo(baoGia(code, items));
+      const rXA = hangCua(ws, code, "XA"), rYB = hangCua(ws, code, "YB");
+      expect(ws.getCell(`${c.unitPrice}${rXA}`).value).toMatchObject({ formula: `${c.amount}${rYB}*2`, result: 250000 });
+      expect(ws.getCell(`${c.unitPrice}${rYB}`).value).toBe(125000);   // YB dính vòng qua tổng X → số
+    });
+  }
+  for (const code of ["marico_decor", "unibenfood", "clofull_decor", "clofull_conngay"]) {
+    it(`${code} (không banner): SA trong nhóm con S trỏ Thành Tiền QB, QB trỏ Đơn Giá nhóm cha P`, async () => {
+      // Không banner: tổng P chỉ gồm mục TRỰC THUỘC (p1) = 1.000.000 → QB 100.000 → SA 200.000.
+      const { F, G, c } = chuCotEditor(code);
+      const items = [
+        nhom("Nhóm P"), muc("p1", 1, 1000000), nhomCon("Nhóm con S"), muc("SA", 1, 200000, { unitPrice: `=${G}7*2` }),
+        nhom("Nhóm Q"), muc("q1", 1, 500000), muc("QB", 1, 100000, { unitPrice: `=${F}1*10%` }),
+      ];
+      const ws = await mo(baoGia(code, items));
+      const rSA = hangCua(ws, code, "SA"), rQB = hangCua(ws, code, "QB");
+      expect(ws.getCell(`${c.unitPrice}${rSA}`).value).toMatchObject({ formula: `${c.amount}${rQB}*2`, result: 200000 });
+    });
+  }
+  it("biến thể bài (e): A1-2 \"=G9*2,5\" trỏ THÀNH TIỀN Phí (Phí trỏ tổng A1) → A1-2 giữ công thức", async () => {
+    const items = sheetNho({ phi: "=G3*10%", giaPhi: 200000 });
+    items[4] = muc("A1-2", 2, 500000, { unitPrice: "=G9*2,5" });
+    const ws = await mo(baoGia("marico_decor", items));
+    const rPhi = hangCua(ws, "marico_decor", "Phí");
+    expect(ws.getCell(`G${rPhi}`).value).toBe(200000);
+    expect(ws.getCell(`G${hangCua(ws, "marico_decor", "A1-2")}`).value).toMatchObject({ formula: `H${rPhi}*2.5`, result: 500000 });
+  });
+});

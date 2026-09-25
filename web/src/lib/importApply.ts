@@ -332,17 +332,25 @@ const soTienHang = (it: Record<string, unknown>): string | null => {
   return `${Number(q) || 0}|${Number(dg) || 0}|${it.days != null ? Number(it.days) : ""}`;
 };
 
-export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; tienDaTraDoi: string[] } {
+export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean; giuCongThucNgayAn?: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; tienDaTraDoi: string[]; congThucNgayAnMat: number } {
   type ItemApp = M.Item & { productId?: unknown } & Record<string, unknown>;
   const items = after.slice();
   const daGhep = new Set<number>();
+  const ngayAnDaGiu = new Set<number>();
   const tienDaTraDoi: string[] = [];
+  const ngayAnConDungDiaChi = opts.giuCongThucNgayAn && before.length === after.length && before.every((it, i) => rowKey(it) === rowKey(after[i]));
   for (const [i, j] of ghepDong(before, after)) {
     daGhep.add(i);
     const cu = before[i] as ItemApp, moi = { ...items[j] } as ItemApp;
     if (cu.images?.length && !moi.images?.length) moi.images = cu.images.slice();
     if (cu.productId != null && moi.productId == null) moi.productId = cu.productId;
     if (opts.giuGhiChuNoiBo && cu.internalNote && !moi.internalNote) moi.internalNote = cu.internalNote;
+    // Mẫu không-ngày không có ô Excel để chở công thức Số Ngày. Chỉ mang metadata
+    // từ sheet cũ khi cấu trúc hàng giữ nguyên; thêm/dời hàng có thể làm ref A1 trỏ nhầm.
+    if (ngayAnConDungDiaChi && i === j && cu.formulas?.days && !moi.formulas?.days) {
+      moi.formulas = { ...(moi.formulas || {}), days: cu.formulas.days };
+    }
+    if (cu.formulas?.days && moi.formulas?.days === cu.formulas.days) ngayAnDaGiu.add(i);
     if (typeof cu.rid === "string" && cu.rid && moi.rid == null) {
       const nguon = cu as Record<string, unknown>, dich = moi as Record<string, unknown>;
       for (const k of TRUONG_TRANG_THAI) if (nguon[k] !== undefined) dich[k] = nguon[k];
@@ -351,13 +359,14 @@ export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGh
     }
     items[j] = moi;
   }
-  let anhMat = 0, trangThaiMat = 0;
+  let anhMat = 0, trangThaiMat = 0, congThucNgayAnMat = 0;
   before.forEach((cu, i) => {
+    if (opts.giuCongThucNgayAn && cu.formulas?.days && !ngayAnDaGiu.has(i)) congThucNgayAnMat++;
     if (daGhep.has(i)) return;
     anhMat += cu.images?.length || 0;
     if (coTrangThai(cu as ItemApp)) trangThaiMat++;
   });
-  return { items, anhMat, trangThaiMat, tienDaTraDoi };
+  return { items, anhMat, trangThaiMat, tienDaTraDoi, congThucNgayAnMat };
 }
 
 /** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */

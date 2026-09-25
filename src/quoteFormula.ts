@@ -727,7 +727,7 @@ export function buildFormulaContext(
     }
     return out;
   };
-  const depsOf = (row: number, field: string): { row: number; field: string }[] | null => {
+  const depsOf = (row: number, field: string, quaNhom: boolean): { row: number; field: string }[] | null => {
     let base: { row: number; field: string }[] | null;
     if (field === "_amount") {
       base = [{ row, field: "quantity" }, { row, field: "unitPrice" }];
@@ -741,7 +741,8 @@ export function buildFormulaContext(
     // web thêm cho tham chiếu nhóm (thuộc nhóm = chuCua/chuConCua, nên nhóm cha kéo theo cả nhóm con và
     // mục của chúng). Rộng hơn quan hệ cộng thật một chút là CHỦ Ý: thừa cạnh chỉ làm thêm ca "vòng"
     // → ghi số; thiếu cạnh là tệp mang vòng tròn Excel. Chỉ CỘNG thêm cạnh, không bỏ cạnh cũ nào.
-    if (laOTongNhom(row, field)) {
+    // Chỉ đi qua cạnh này khi soát cho công thức TRỎ ô tổng nhóm (quaNhom) — lý do ở hasCycle.
+    if (quaNhom && laOTongNhom(row, field)) {
       base.push({ row, field: "quantity" });
       for (const j of thanhVien.get(row) || []) {
         base.push({ row: j, field: "quantity" }, { row: j, field: "unitPrice" });
@@ -750,7 +751,14 @@ export function buildFormulaContext(
     }
     return base;
   };
-  const hasCycle = (row: number, field: string, raw: string) => {
+  // quaNhom — có đi qua cạnh ô tổng nhóm (depsOf) hay không:
+  //  • công thức TRỎ ô tổng nhóm → true: đủ cạnh, rộng hơn Excel thật (chủ ý, xem depsOf).
+  //  • công thức chỉ trỏ Thành Tiền MỤC → false: đúng đồ thị cũ, ô tổng nhóm là điểm cụt. Không bỏ sót
+  //    vòng: vòng Excel nào đi qua ô tổng nhóm cũng đi qua một ô TRỎ ô tổng nhóm, ô ấy tự soát với
+  //    quaNhom=true, thấy vòng và ghi số, nên Excel hết vòng. Cho đi qua cạnh nhóm ở đây là chặn thừa. Soát
+  //    chéo đo được: XA "=G6*2" trỏ Thành Tiền mục YB, YB "=F1*10%" trỏ Đơn Giá nhóm X chứa XA. XA không
+  //    trỏ ô tổng nhóm nào mà vẫn từ công thức sống thành số chết, trái luật chỉ đổi ô trỏ tổng nhóm.
+  const hasCycle = (row: number, field: string, raw: string, quaNhom: boolean) => {
     const start = `${row}|${field}`;
     const seen = new Set<string>();
     const stack = refsInFormula(raw);
@@ -763,8 +771,72 @@ export function buildFormulaContext(
       if (key === start) return true;
       if (seen.has(key)) continue;
       seen.add(key);
-      const deps = depsOf(n.row, n.field);
+      const deps = depsOf(n.row, n.field, quaNhom);
       if (deps === null) return true;   // hàng khác có công thức dải khổng lồ → dừng, đừng bung nó ra
+      stack.push(...deps);
+    }
+    return false;
+  };
+
+  // Dung sai của bộ TỰ KIỂM (kết quả công thức so với số đã lưu) — cellFormula và oThuanGhiSong dùng chung.
+  const lechTuKiem = (a: number, b: number) => Math.abs(a - b) > 1e-3 + 1e-6 * Math.max(Math.abs(a), Math.abs(b));
+
+  // ===== VÒNG THUẦN giữa các ô MỤC (SL / Đơn Giá / Số Ngày; không qua Thành Tiền, không qua ô tổng nhóm) =====
+  // Công thức kiểu này trước đây KHÔNG được soát vòng. "=ROUND(F2;-3)" gõ ngay ở F2, hay F2 "=F3" với F3
+  // "=F2" (số lưu tự khớp) lọt nguyên vào tệp, Excel báo circular reference khi mở, còn lưới web tô đỏ và
+  // giữ số đã lưu. Soát theo ĐÚNG đồ thị Excel sẽ có: chỉ đi tiếp qua ô cũng là công thức thuần VÀ sẽ được
+  // ghi sống (dịch được, tự kiểm khớp số lưu, mô phỏng đúng các lượt thử của excel.ts). Còn lại là điểm cụt:
+  //  • ô ghi SỐ thì Excel dừng ở đó;
+  //  • ô trỏ Thành Tiền / ô tổng nhóm đã tự soát bằng hasCycle trên đồ thị rộng hơn, nên vòng Excel nào đi
+  //    qua chúng đã bị cắt ngay tại chúng.
+  // Nhờ vậy chỉ ô NẰM TRÊN vòng mới đổi sang số. Ô chỉ ĐỌC từ vòng (vd F1 "=F2*2" với F2↔F3) giữ nguyên
+  // tệp cũ, vì ô nó trỏ tới nay là số và Excel không còn vòng. Ô trên một "vòng" có mắt xích tự kiểm trượt
+  // cũng giữ nguyên, vì mắt xích ấy vốn đã ghi số.
+  const laThuan = (refs: { row: number; field: string }[]) =>
+    refs.length > 0 && !refs.some((r) => r.field === "_amount" || laOTongNhom(r.row, r.field));
+  const daXetGhiSong = new Map<string, boolean>();
+  const oThuanGhiSong = (row: number, field: string): boolean => {
+    const key = `${row}|${field}`;
+    const daCo = daXetGhiSong.get(key);
+    if (daCo !== undefined) return daCo;
+    let kq = false;
+    const it = items[row];
+    const raw = it?.formulas?.[field];
+    if (it && raw && (field === "quantity" || field === "unitPrice" || (usesDays && field === "days"))) {
+      const refs = refsInFormula(String(raw));
+      if (refs && laThuan(refs) && translateFormula(raw, ctx)) {
+        const luu = evalBudget;
+        evalBudget = MAX_REF_ROWS;
+        const check = evalEditorFormula(raw, editorRefs);
+        evalBudget = luu;
+        // Đúng số excel.ts đưa vào cellFormula: SL thử số THÔ rồi (SL thường) số đã làm tròn 1 số;
+        // Số Ngày trống đọc là 1; Đơn Giá số lưu.
+        const soLuu = field === "quantity"
+          ? [Number(it.quantity) || 0, ...(it.quantityExact ? [] : [qtyRound1(it.quantity)])]
+          : field === "days" ? [Number(it.days) || 1] : [Number(it.unitPrice) || 0];
+        kq = check != null && isFinite(check) && soLuu.some((t) => !lechTuKiem(check, t));
+      }
+    }
+    daXetGhiSong.set(key, kq);
+    return kq;
+  };
+  const vongThuan = (row: number, field: string, raw: string) => {
+    const start = `${row}|${field}`;
+    const seen = new Set<string>();
+    const stack = refsInFormula(raw);
+    if (stack === null) return true;
+    let buoc = 0;
+    while (stack.length) {
+      const n = stack.pop()!;
+      const key = `${n.row}|${n.field}`;
+      if (key === start) return true;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!oThuanGhiSong(n.row, n.field)) continue;   // điểm cụt trong Excel (xem trên)
+      const deps = refsInFormula(String(items[n.row].formulas![n.field]));
+      if (deps === null) continue;                   // không xảy ra: oThuanGhiSong đã đòi dải hợp lệ
+      buoc += deps.length;
+      if (buoc > MAX_REF_ROWS) return true;           // đồ thị bất thường → coi như vòng (ghi số, an toàn)
       stack.push(...deps);
     }
     return false;
@@ -775,28 +847,45 @@ export function buildFormulaContext(
      * Trả công thức Excel cho ô có công thức gốc `raw` nếu DỊCH ĐƯỢC và TỰ KIỂM khớp
      * computedValue; ngược lại null (nơi gọi ghi số như cũ). `self` (item đang ghi + field)
      * để chặn VÒNG khi công thức tham chiếu cột Thành Tiền / ô tổng nhóm — thiếu self thì các ref
-     * đó bị từ chối.
+     * đó bị từ chối — và để soát vòng thuần giữa các ô mục (thiếu self thì bỏ qua bước này).
      */
     cellFormula(raw: string | null | undefined, computedValue: number, self?: { item: EditorItem; field: string }) {
       if (!raw) return null;
       evalBudget = MAX_REF_ROWS;   // ngân sách bung dải của bộ tự kiểm: mỗi công thức một suất
       const refs = refsInFormula(String(raw));
       if (refs === null) return null;   // dải ô khổng lồ → ghi số, KHÔNG bung ra bộ nhớ
+      const troNhom = refs.some((r) => laOTongNhom(r.row, r.field));
       // Trỏ vào Thành Tiền, hoặc vào ô TỔNG NHÓM (cả Đơn Giá nhóm) → phải soát vòng: mục nằm trong
       // nhóm X mà trỏ tổng X (trực tiếp hay qua ô khác) thì Excel báo "circular reference", còn lưới
       // web tô đỏ và giữ nguyên số đã lưu — tệp phải ghi SỐ đó.
-      const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && refs.some((r) => r.field === "_amount" || laOTongNhom(r.row, r.field));
+      const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && (troNhom || refs.some((r) => r.field === "_amount"));
+      const selfRow = self ? items.indexOf(self.item) : -1;
       if (usesAmount) {
-        const selfRow = self ? items.indexOf(self.item) : -1;
-        if (selfRow < 0 || !self || hasCycle(selfRow, self.field, String(raw))) return null;   // vòng lặp / không rõ ô → ghi số
+        if (selfRow < 0 || !self || hasCycle(selfRow, self.field, String(raw), troNhom)) return null;   // vòng lặp / không rõ ô → ghi số
       }
       const ex = translateFormula(raw, ctx);
       if (!ex) return null;
       // Tự kiểm: công thức (theo hệ editor) phải cho ra đúng giá trị đã tính.
       const check = evalEditorFormula(raw, editorRefs);
       if (check == null || !isFinite(check)) return null;
-      const target = Number(computedValue) || 0;
-      if (Math.abs(check - target) > 1e-3 + 1e-6 * Math.max(Math.abs(check), Math.abs(target))) return null;
+      if (lechTuKiem(check, Number(computedValue) || 0)) return null;
+      // CÔNG THỨC TRỎ Ô TỔNG NHÓM: số Excel tính lại cho CHÍNH ô này phải TRÙNG số lưới web dùng cho ô ấy,
+      // không chỉ "lệch dưới 1e-3". Tệp đặt fullCalcOnLoad nên Excel tính lại ngay khi mở. Số lưu thì đã
+      // cắt theo DB (SL/Đơn Giá 4 số lẻ, Số Ngày 2 số lẻ). Soát chéo đo bằng Excel 16: mục SL chính xác
+      // "=G2/1000000" với tổng nhóm 804.937 ra 0,804937, số lưu 0,8049; dung sai 1e-3 cho qua nên Excel ra
+      // Thành Tiền 76.469, web 76.466. Lệch lan vào tổng nhóm, Tổng Cộng, VAT. Số Ngày 1,2304/1,23 và SL
+      // thường 0,84996 (Excel ROUND ra 0,8, web đọc số lưu 0,85 ra 0,9) cùng một lớp lỗi. Không trùng thì
+      // ghi SỐ như trước khi có đường tham chiếu ô tổng nhóm. Công thức KHÔNG trỏ ô tổng nhóm giữ dung sai
+      // cũ: siết ở đó sẽ đổi tệp của báo giá đang có (lỗi gốc ấy tách thành việc riêng).
+      if (troNhom && self) {
+        const cot = fieldToColIndex[self.field];
+        if (cot == null) return null;
+        const soExcel = self.field === "quantity" && !self.item.quantityExact ? lamTronExcel(check, 1, "tron") : check;   // excel.ts bọc ROUND(…,1) cho SL thường
+        const soWeb = editorCellNum(colLetter(cot) + (selfRow + 1));
+        if (!(Math.abs(soExcel - soWeb) <= 1e-9 + 1e-12 * Math.max(Math.abs(soExcel), Math.abs(soWeb)))) return null;
+      }
+      // Vòng THUẦN giữa các ô mục (xem vongThuan): cần biết ô đang ghi nên chỉ soát khi có self.
+      if (!usesAmount && self && selfRow >= 0 && refs.length && vongThuan(selfRow, self.field, String(raw))) return null;
       return ex;
     },
     // Lộ ra cho test/soi.

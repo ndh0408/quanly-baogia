@@ -562,6 +562,18 @@ function GridTableInner(props: GridTableProps) {
       if (!ch) break;
     }
   };
+  const ngayDaKhoiPhucRef = useRef<ItemK[] | null>(null);
+  useEffect(() => {
+    if (!usesDays || ngayDaKhoiPhucRef.current === items) return;
+    ngayDaKhoiPhucRef.current = items;
+    const thieu = items.some((it) => it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info" && it.days == null && !!it.formulas?.days);
+    if (!thieu) return;
+    // Mẫu không-ngày lưu days=null nhưng giữ công thức ngày. Khi mở lại mẫu có-ngày,
+    // tính lại trước lần xuất/lưu kế tiếp; nhánh thường không tính lại lúc mở để giữ số đã lưu.
+    const truoc = items.map((it) => it.days);
+    recomputeAll();
+    if (items.some((it, i) => it.days !== truoc[i])) onChange();
+  });
   /* ── MỞ LƯỚI: CÔNG THỨC ĐÃ LƯU KHÔNG TÍNH ĐƯỢC PHẢI ĐỎ NGAY (soát toàn diện đợt 3) ──────────────
      Cờ đỏ chỉ sống trong phiên (zod máy chủ bỏ `_fxLoi`), còn lúc dựng lưới KHÔNG chạy recomputeAll —
      tính lại là ghi đè số đã lưu (số theo bộ làm tròn/đọc dấu phẩy cũ, chờ quyết riêng). Nên mở lại báo
