@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type * as M from "./quoteMath";
 import type { ImportedItem } from "./api";
-import { giuTruongChiApp, toGridItems } from "./importApply";
+import { diffItems, giuTruongChiApp, toGridItems } from "./importApply";
 
 type HangHn = M.Item & { rid?: string; paid?: boolean; paidAt?: string | null; paidById?: number | null; hasPaidProof?: boolean };
 const truoc = (): HangHn[] => [
@@ -111,11 +111,15 @@ describe("Thay toàn bộ giữ NS / CHỨNG TỪ / LƯU KHO của dòng khớp"
     expect(moi.chungTu ?? null).toBeNull();
   });
 
-  it("bảng đối chiếu nói THẬT: dòng khớp không đổi số thì vẫn 'Giữ nguyên' vì ba trường đã được giữ", () => {
-    const giu = giuTruongChiApp(cu(), toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true }).items as HangNb[];
+  it("bảng đối chiếu nói THẬT: mọi dòng nó ghi 'Giữ nguyên' đều còn đủ ba trường như trước", () => {
     const truocNb = cu();
-    for (const [i, j] of [[0, 0], [1, 1]] as const) {
-      expect([giu[j].ns, giu[j].luuKho, giu[j].chungTu]).toEqual([truocNb[i].ns, truocNb[i].luuKho, truocNb[i].chungTu]);
+    const giu = giuTruongChiApp(truocNb, toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true }).items as HangNb[];
+    const dong = diffItems(truocNb, giu, false);
+    const giuNguyen = dong.filter((d) => d.kind === "same");
+    expect(giuNguyen.length).toBeGreaterThan(0);
+    for (const d of giuNguyen) {
+      const a = truocNb[d.beforeNo! - 1], b = giu[d.afterNo! - 1];
+      expect([b.ns, b.luuKho, b.chungTu], `dòng "${d.name}" ghi 'Giữ nguyên' mà ba cột nội bộ đã đổi`).toEqual([a.ns, a.luuKho, a.chungTu]);
     }
   });
 

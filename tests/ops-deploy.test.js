@@ -226,14 +226,21 @@ describe("INFRA-14 — test-on-dev.sh", () => {
   // Script gói commit HEAD của THƯ MỤC ĐANG ĐỨNG (git bundle) và từ chối cây bẩn — nên mỗi lượt chạy trong
   // một repo tạm sạch, không phụ thuộc repo thật đang có thay đổi chưa commit (chạy `npm run verify` trước
   // khi commit là chuyện thường). Dockerfile vẫn đọc từ thư mục của script (ROOT).
-  function repoTam(dir, { ban = false } = {}) {
-    const repo = join(dir, "repo");
+  // Cấu hình git toàn cục của máy chạy test (ký commit, hook toàn cục, safecrlf…) không được làm hỏng
+  // repo tạm — và nếu vẫn hỏng thì NÓI RA ngay, đừng để 5 bài đỏ với thông báo trông như script hồi quy.
+  function repoTam(dir, { ban = false, ten = "repo", noiDung = "1\n" } = {}) {
+    const repo = join(dir, ten);
     mkdirSync(repo);
-    const g = (...a) => spawnSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a], { encoding: "utf8" });
+    const g = (...a) => {
+      const r = spawnSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+        "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", ...a], { encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`dựng repo tạm hỏng ở \`git ${a.join(" ")}\`: ${r.stderr}`);
+      return r;
+    };
     g("init", "-q");
-    writeFileSync(join(repo, "a.txt"), "1\n");
+    writeFileSync(join(repo, "a.txt"), noiDung);
     g("add", "a.txt");
-    g("commit", "-q", "-m", "t");
+    g("commit", "-q", "--no-verify", "-m", "t");
     if (ban) writeFileSync(join(repo, "a.txt"), "2\n");
     return { repo, sha: g("rev-parse", "HEAD").stdout.trim() };
   }
@@ -261,7 +268,7 @@ describe("INFRA-14 — test-on-dev.sh", () => {
 shift
 printf '%s\\n' "$*" >> "$STUB_DIR/ssh.log"
 case "$*" in
-  "cat > "*) cat > "$STUB_DIR/bundle"; exit "\${STUB_UPLOAD_RC:-0}" ;;
+  *"cat > "*) cat > "$STUB_DIR/bundle"; exit "\${STUB_UPLOAD_RC:-0}" ;;
 esac
 exit "\${STUB_RC:-0}"
 `;
@@ -310,7 +317,71 @@ exit "\${STUB_RC:-0}"
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/không gửi được git bundle/);
     expect(r.log.trim().split("\n")).toHaveLength(1);
-    expect(r.log).toMatch(/^cat > '\/tmp\/quanly-test-/);
+    expect(r.log).toMatch(/cat > '\/tmp\/quanly-test-[^']*\.bundle'/);
+  });
+
+  // ── CHẠY THẬT script VM ────────────────────────────────────────────────────────────────────────
+  // Các bài trên chỉ ĐỌC văn bản script gửi sang VM — mount lại /opt/stacks theo cách khác, nuốt mã thoát
+  // của container ở phía VM (đúng lỗi INFRA-14 #1 "luôn xanh"), hay bỏ `exit 89` sau bước so SHA đều lọt.
+  // Ở đây ssh giả THỰC THI script VM tại chỗ (thư mục tạm thay cho /tmp/quanly-test-…), docker giả ghi
+  // lại commit của thư mục được mount và trả mã thoát của "lượt vitest" (lệnh `docker run … sh -c`).
+  const SSH_CHAY_THAT = `#!/usr/bin/env bash
+shift
+cmd="\${*//\\/tmp\\/quanly-test-/$STUB_DIR/quanly-test-}"
+printf '%s\\n---\\n' "$cmd" >> "$STUB_DIR/ssh.log"
+case "$cmd" in
+  *"cat > "*) if [ -n "\${STUB_BUNDLE_KHAC:-}" ]; then cat >/dev/null; cmd="cat \\"$STUB_BUNDLE_KHAC\\" > \${cmd#*cat > }"; fi ;;
+esac
+cd "$STUB_DIR" && exec bash -c "$cmd"
+`;
+  const DOCKER_GIA = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$STUB_DIR/docker.log"
+case "$1" in
+  run) for a in "$@"; do case "$a" in *:/app) nguon="\${a%:/app}"; echo "MOUNT_SHA=$(git -C "$nguon" rev-parse HEAD)" >> "$STUB_DIR/docker.log";; esac; done
+       case "$*" in *" sh -c "*) exit "\${STUB_TEST_RC:-0}";; esac; exit 0;;
+  exec) case "$*" in *printenv*) echo x;; esac; exit 0;;
+  inspect) echo net; exit 0;;
+esac
+exit 0
+`;
+  function chayThat(env = {}, { bundleKhac = false } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "ops-tod-that-"));
+    rac.push(dir);
+    const bin = join(dir, "bin"), stub = join(dir, "stub");
+    for (const d of [bin, stub]) mkdirSync(d);
+    for (const [ten, noiDung] of [["ssh", SSH_CHAY_THAT], ["docker", DOCKER_GIA]]) {
+      writeFileSync(join(bin, ten), noiDung);
+      chmodSync(join(bin, ten), 0o755);
+    }
+    const { repo, sha } = repoTam(dir);
+    const them = {};
+    if (bundleKhac) {
+      const khac = repoTam(dir, { ten: "khac", noiDung: "khác\n" });
+      them.STUB_BUNDLE_KHAC = join(dir, "khac.bundle");
+      spawnSync("git", ["-C", khac.repo, "bundle", "create", them.STUB_BUNDLE_KHAC, "HEAD"]);
+    }
+    const r = spawnSync("bash", [join(ROOT, "test-on-dev.sh")], {
+      cwd: repo, timeout: 30_000, encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_DIR: stub, SSH: "staging-ts", ...them, ...env },
+    });
+    const docker = existsSync(join(stub, "docker.log")) ? readFileSync(join(stub, "docker.log"), "utf8") : "";
+    return { code: r.status, out: `${r.stdout}${r.stderr}`, docker, sha };
+  }
+
+  it("chạy thật: container mount checkout của ĐÚNG HEAD, mã thoát của vitest đi xuyên script VM về tới người gọi", () => {
+    const hong = chayThat({ STUB_TEST_RC: "3" });
+    expect(hong.code, hong.out).toBe(3);
+    expect(hong.docker).toContain(`MOUNT_SHA=${hong.sha}`);
+    expect(hong.docker).not.toMatch(/\/opt\/stacks/);
+    const xanh = chayThat({ STUB_TEST_RC: "0" });
+    expect(xanh.code, xanh.out).toBe(0);
+  });
+
+  it("chạy thật: VM nhận bundle của commit KHÁC → dừng ở bước so SHA (89), không `docker run` nào", () => {
+    const r = chayThat({}, { bundleKhac: true });
+    expect(r.code, r.out).toBe(89);
+    expect(r.out).toMatch(/HONG_checkout_khong_dung_SHA/);
+    expect(r.docker).not.toMatch(/^run /m);
   });
 });
 
