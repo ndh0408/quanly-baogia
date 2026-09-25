@@ -32,6 +32,8 @@ async function xuat(code, { info = [], notes = null } = {}) {
   }));
   return wb.worksheets[0];
 }
+/** Chữ của ô, kể cả richText (khối "Kính gửi" kèm dòng mã báo giá nghiêng — 2026-09-25). */
+const chuO = (v) => (Array.isArray(v?.richText) ? v.richText.map((x) => x.text).join("") : String(v ?? ""));
 /** Tổng bề rộng LƯU của các cột trong vùng gộp bắt đầu ở `addr` (thứ `soDongKhiXuongHang` nhận). */
 function beRongGop(ws, addr) {
   const vung = ws.model.merges.find((m) => m.startsWith(`${addr}:`));
@@ -43,12 +45,16 @@ function beRongGop(ws, addr) {
 
 describe("chữ cỡ 12: mỗi dòng 15,75pt như Excel", () => {
   for (const code of ["clofull_decor", "clofull_conngay", "clofull_banner"]) {
-    it(`${code} · khối "Kính gửi" 5 dòng cao ≥ 78,75pt (số đo Excel)`, async () => {
+    // Excel COM đo 5 dòng cần 78,75pt (15,75pt/dòng). Từ 2026-09-25 khối có thêm dòng CUỐI là mã báo
+    // giá "(Số://…)" cùng cỡ 12 ⇒ 6 dòng · 94,5pt — thiếu là chính dòng mã bị xén.
+    it(`${code} · khối "Kính gửi" 5 dòng + dòng mã cao ≥ 94,5pt (15,75pt/dòng — số đo Excel)`, async () => {
       const ws = await xuat(code);
       const o = ws.getCell("C3");
       expect(o.font?.size, "bài này giả định ô C3 cỡ 12 như tệp mẫu").toBe(12);
-      expect(String(o.value).split("\n")).toHaveLength(5);
-      expect(ws.getRow(3).height, "dòng Email bị xén").toBeGreaterThanOrEqual(78.75);
+      const dong = chuO(o.value).split("\n");
+      expect(dong).toHaveLength(6);
+      expect(dong[5]).toBe("(Số://CF26D3)");
+      expect(ws.getRow(3).height, "dòng mã báo giá bị xén").toBeGreaterThanOrEqual(94.5);
     });
 
     it(`${code} · dải thông tin chương trình nhiều dòng: đủ 15,75pt cho MỖI dòng ước lượng`, async () => {

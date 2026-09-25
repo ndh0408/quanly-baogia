@@ -174,6 +174,16 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // ── ĐỔI CÓ CHỦ Ý NHƯNG HASH KHÔNG ĐỔI: 2026-09-24 (soát toàn diện đợt 4 d4-excel 1) ──
       // HE_SO_TIEU_DE nâng lên (cỡ 14: 1,045 · cỡ 18: 1,025): chỉ tiêu đề DÀI sát ngưỡng đổi căn lề
       // (wrap) và chiều cao hàng tiêu đề. Tiêu đề các fixture ở đây ngắn nên không đổi gì.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-25 (Colorfull học bốn chỗ theo GN) ─────────
+      // Vẫn CHỈ fixture `clf`. ĐÃ ĐỐI CHIẾU TỪNG Ô (78 ô, trước và sau): khác đúng 9 ô, cả 9 là thứ
+      // người dùng yêu cầu —
+      //   · C3:I3 (một ô gộp, đọc ra 7 lần) khối "Kính gửi" thêm dòng CUỐI "(Số://GN26SNAP)";
+      //   · G4 "ĐƠN GIÁ" → "ĐƠN GIÁ\n(VNĐ)" · H4 "THÀNH TIỀN " → "THÀNH TIỀN\n(VNĐ)".
+      // Hai thay đổi còn lại KHÔNG có trong bản chụp (nó không chụp bề rộng cột lẫn màu chữ): cột STT
+      // 12,36 → 6,63 (bề rộng dồn cho Hạng Mục / Thành Tiền) và tên hạng mục chữ xanh ngọc FF227771 —
+      // chốt riêng ở cụm "bốn chỗ học theo GN" của tests/cf-colorfull-cot-chi-tiet.test.js.
+      // Bảy fixture GN giữ nguyên hash: GN không đổi.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

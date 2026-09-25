@@ -387,6 +387,26 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
   }
 }
 
+// ── NEO ẢNH KHÔNG ĐƯỢC LỆCH QUÁ BỀ RỘNG CỘT CỦA NÓ ───────────────────────────────────────────────
+// Logo COLORFUL của mẫu Colorfull neo ở cột B, lệch vào 62,7px. Thu cột B (STT) về bề rộng của GN
+// (6,63 ≈ 46px) thì độ lệch DÀI HƠN CẢ CỘT, mà Excel và LibreOffice xử lý chỗ đó mỗi bên một kiểu
+// (kẹp về mép cột hay tràn sang cột sau) ⇒ logo xô lệch và méo theo phần mềm người nhận mở. Dời
+// phần tràn sang cột kế tiếp: vị trí tuyệt đối trên trang giữ nguyên, file đọc ở đâu cũng như nhau.
+// Neo không tràn (mọi ảnh của GN, ảnh hạng mục lệch 1px) thì không đổi gì.
+function neoAnhTrongCot(ws: any, a: any) {
+  if (!a || !Number.isFinite(a.nativeCol) || !Number.isFinite(a.nativeColOff)) return;
+  for (let lan = 0; lan < 64; lan++) {
+    const w = Number(ws.getColumn(a.nativeCol + 1).width);
+    // Bề rộng px Excel vẽ cho bề rộng LƯU `w` (đã gồm đệm), chữ số rộng nhất 7px (Calibri 11 — font
+    // Normal của cả hai mẫu): trunc(((256·w + trunc(128/7)) / 256) · 7). Cột không khai → 64px.
+    const px = Number.isFinite(w) && w > 0 ? Math.trunc(((256 * w + 18) / 256) * 7) : 64;
+    const emu = px * 9525;
+    if (a.nativeColOff < emu) return;
+    a.nativeColOff -= emu;
+    a.nativeCol += 1;
+  }
+}
+
 function applyTemplateCleanup(ws: any, cfg: any) {
   const cleanup = cfg.cleanup || {};
 
@@ -484,13 +504,34 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   if (c.toContact) setCell(ws, c.toContact, clean(quote.toContact));
   if (c.toPhone) setCell(ws, c.toPhone, clean(quote.toPhone));
   if (c.toAddress) setCell(ws, c.toAddress, clean(quote.toAddress));
+  // MÃ SẢN XUẤT CỦA CHÍNH SHEET NÀY, không phải số GN của cả báo giá: mỗi tab Excel mang mã riêng
+  // ("FP_A26_003_02") để khớp với trang Hoá đơn và với màn hình soạn. GN in ở ô riêng
+  // (`cells.quoteNumber`), Colorfull in thành dòng cuối khối "Kính gửi" (`cells.toBlockCodeFormat`).
+  const maSheet = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
   // Combined recipient block (e.g. CLF "Kính gửi: Cty X  Mr/Ms Y  Email: Z")
   if (c.toBlockCell) {
     const txt = c.toBlockFormat
       ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail, phone: quote.toPhone, address: quote.toAddress })
       : (quote.toCompany || "");
     // Keep newlines (multi-line recipient block) — don't collapse via clean().
-    setCell(ws, c.toBlockCell, (txt || "").trim());
+    const khoi = (txt || "").trim();
+    const dongMa = c.toBlockCodeFormat ? c.toBlockCodeFormat(maSheet) : "";
+    if (dongMa) {
+      // ── MÃ BÁO GIÁ LÀ DÒNG CUỐI CỦA KHỐI "KÍNH GỬI", KHÔNG PHẢI HÀNG RIÊNG ─────────────────────
+      // Người dùng muốn mã "nằm dưới cùng mấy chỗ thông tin, y hệt GN" (GN: "(Số://…)" nghiêng, canh
+      // giữa, ngay trên bảng). Mẫu Colorfull không còn hàng trống nào giữa khối này (hàng 3) và tiêu
+      // đề cột (hàng 4), mà CHÈN hàng thì phải dời `infoBannerCell` — bộ nhập bám đúng toạ độ đó
+      // (src/excelImport.ts, `appBannerRow`) nên mọi tệp Colorfull đã gửi khách nạp lại sẽ mất ÂM
+      // THẦM hàng hạng mục đầu tiên. Dải B5 cũng không được: người dùng đã chốt nó chỉ mang thông tin
+      // chương trình. Ô C3 thì bộ nhập không đọc, nên thêm một dòng vào đây không đổi gì khi nạp lại.
+      // Hai đoạn chữ (richText) để dòng mã NGHIÊNG như GN mà các dòng trên vẫn đứng; đoạn nào cũng
+      // mang đủ font (thiếu font thì Excel vẽ đoạn đó bằng Calibri 11 mặc định).
+      const f = { ...(ws.getCell(c.toBlockCell).font || {}), color: { theme: 1 } };
+      const doan = khoi ? [{ text: `${neutralizeFormula(khoi)}\n`, font: f }] : [];
+      ws.getCell(c.toBlockCell).value = { richText: [...doan, { text: dongMa, font: { ...f, italic: true } }] };
+    } else {
+      setCell(ws, c.toBlockCell, khoi);
+    }
     ensureWrap(ws.getCell(c.toBlockCell));
     // ── MÀU CHỮ + CĂN LỀ CỦA KHỐI NÀY ────────────────────────────────────────────────────────
     // CHỮ PHẢI VỀ MÀU MẶC ĐỊNH. Ô C3 của mẫu Colorfull VỐN là chữ mồi "logo cty khách hàng" màu
@@ -556,12 +597,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     if (lbl) title = `${title} - ${lbl}`;
     setCell(ws, c.title, clean(title));
   }
-  if (c.quoteNumber) {
-    // MÃ SẢN XUẤT CỦA CHÍNH SHEET NÀY, không phải số GN của cả báo giá: mỗi tab Excel mang mã
-    // riêng ("FP_A26_003_02") để khớp với trang Hoá đơn và với màn hình soạn.
-    const maSheet = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
-    setCell(ws, c.quoteNumber, c.quoteNumberFormat ? c.quoteNumberFormat(maSheet) : maSheet);
-  }
+  if (c.quoteNumber) setCell(ws, c.quoteNumber, c.quoteNumberFormat ? c.quoteNumberFormat(maSheet) : maSheet);
   if (c.greeting) setCell(ws, c.greeting, quote.greeting || "");
 
   // Customer logo: if the template has an anchor cell and the quote carries a
@@ -651,10 +687,27 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   for (const [L, w] of Object.entries((itemsCfg.columnWidths || {}) as Record<string, number>)) {
     try { ws.getColumn(L).width = w; } catch { /* bỏ qua */ }
   }
+  // Ảnh còn lại lúc này chỉ là ảnh đầu trang của mẫu (logo) — xem `neoAnhTrongCot`.
+  for (const m of (Array.isArray(ws._media) ? ws._media : [])) {
+    neoAnhTrongCot(ws, m?.range?.tl);
+    neoAnhTrongCot(ws, m?.range?.br);
+  }
   // Đổi NỀN hàng tiêu đề cột (STT/Hạng Mục…) → f3c9a1 cho MỌI mẫu — chỉ đổi nền + chữ đen đậm,
   // giữ nguyên viền/căn lề baked trong file mẫu. Khớp màu header của web.
   if (itemsCfg.headerRow && itemsCfg.paintHeader !== false) {
     for (const col of Object.values(cols)) paintCell(ws.getCell(`${col}${itemsCfg.headerRow}`), { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
+  }
+  // NHÃN TIÊU ĐỀ CỘT THEO CẤU HÌNH, khoá theo VAI TRÒ cột (unitPrice/amount…) chứ không theo chữ cột:
+  // Colorfull có-ngày dời Đơn Giá/Thành Tiền sang H/I mà cùng một khai báo vẫn trúng. Bật wrap vì
+  // nhãn kiểu GN xuống dòng ("ĐƠN GIÁ\n(VNĐ)"); chiều cao hàng tự nới ở khối cuối hàm.
+  if (itemsCfg.headerRow && itemsCfg.headerLabels) {
+    for (const [vaiTro, nhan] of Object.entries(itemsCfg.headerLabels as Record<string, string>)) {
+      const L = cols[vaiTro];
+      if (!L) continue;
+      const o = ws.getCell(`${L}${itemsCfg.headerRow}`);
+      o.value = nhan;
+      datStyleRieng(o, (st) => ({ alignment: { ...(st.alignment || {}), wrapText: true } }));
+    }
   }
   // Cột "HÌNH ẢNH" (bật theo sheet): nằm NGAY SAU cột cuối của template — không dịch cột nào,
   // không đụng công thức. Header + width chỉ thêm khi bật (mặc định tắt → file y như cũ).
@@ -816,7 +869,9 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     if (!addr) return;
     try {
       const o = ws.getCell(addr);
-      const chu = typeof o.value === "string" ? o.value : "";
+      const v = o.value;
+      // Khối "Kính gửi" kèm dòng mã báo giá là richText — đo cả nó, không thì dòng mã bị xén.
+      const chu = typeof v === "string" ? v : Array.isArray(v?.richText) ? v.richText.map((x: any) => x.text).join("") : "";
       if (!chu) return;                       // ô rỗng: giữ nguyên (dải banner rỗng còn bị ẩn hàng)
       const r = parseInt(String(addr).replace(/^[A-Z]+/, ""), 10);
       if (!r) return;
@@ -1091,6 +1146,9 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         if (cols.name) {
           setCell(ws, `${cols.name}${r}`, it.name || "");
           ensureWrap(ws.getCell(`${cols.name}${r}`));
+          // Màu chữ tên hạng mục riêng của mẫu (Colorfull: xanh ngọc theo nền tiêu đề cột — GN nướng
+          // sẵn xanh 0070C0 trong tệp mẫu nên không khai). Hàng con dùng chung ô tên gộp của hàng này.
+          if (itemsCfg.nameTextColor) paintCell(ws.getCell(`${cols.name}${r}`), { fontColor: itemsCfg.nameTextColor });
         }
       }
       // Cột Chi Tiết đã bỏ khỏi bảng: không ghi dữ liệu; cuối vòng sẽ gộp vùng này vào Hạng Mục.

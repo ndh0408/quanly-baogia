@@ -151,6 +151,27 @@ describe("Colorfull — màu lưới khớp màu tệp Excel", () => {
     }
   });
 
+  it("TÊN HẠNG MỤC: màn hình tô đúng `items.nameTextColor` như tệp Excel — và vẫn đọc được ở bản tối", () => {
+    // 2026-09-25: tệp tô tên hạng mục xanh ngọc (theo nền tiêu đề cột) thay cho đen của tệp mẫu; lưới
+    // thì rơi về #0066cc chung của GN (`.excel-table td.col-hangmuc textarea`, public/style.css).
+    const mau = getConfig("clofull_decor").items.nameTextColor;
+    expect(mau, "cấu hình phải khai màu tên hạng mục").toBeTruthy();
+    expect(mauChuCuoiCung(".excel-table.clf-theme tr.grp-head td.col-hangmuc textarea"),
+      "màu tên hạng mục trên màn hình lệch với tệp Excel").toBe(argbSangCss(mau));
+    // Luật sáng (0,4,3) thắng luật tối chung `td:is(.col-stt, .col-hangmuc) :is(input, textarea)`
+    // (0,4,2) — thiếu luật tối riêng là xanh ngọc đậm vẽ trên nền tối.
+    const toi = mauChuCuoiCung(':root[data-theme="dark"] .excel-table.clf-theme tr.grp-head td.col-hangmuc textarea');
+    expect(toi, "thiếu màu tên hạng mục cho bản tối").toBeTruthy();
+    const L = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+      .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+      .reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const tuongPhan = (a, b) => { const [x, y] = [L(a), L(b)]; return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    expect(tuongPhan(argbSangCss(mau), "#ffffff"), "tên hạng mục khó đọc trên nền trắng").toBeGreaterThanOrEqual(4.5);
+    for (const nen of ["#141821", "#1a1f2a"]) {   // --surface / --surface-2 bản tối (public/style.css)
+      expect(tuongPhan(toi, nen), `bản tối: ${toi} trên ${nen}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("hàng TIÊU ĐỀ: màn hình dùng đúng màu nướng sẵn của tệp mẫu, không dùng màu Gia Nguyễn", async () => {
     // Đọc nền ô tiêu đề cột NGAY TỪ tệp mẫu thay vì đóng cứng: lần đổi màu 2026-09-23 (theme8 tint
     // 0.4 = #93cddd → 9DCCC9) cho thấy con số này có đổi thật, và đổi thì CSS phải theo.

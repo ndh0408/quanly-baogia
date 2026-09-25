@@ -188,6 +188,9 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         if (email) lines.push(`Email: ${email}`);
         return lines.join("\n");
       },
+      // Mã báo giá = dòng CUỐI của khối trên, đúng chuỗi của GN (`quoteNumberFormat` của marico_decor).
+      // Không có mã thì không in dòng nào. Vì sao không đặt ô riêng: xem chỗ đọc khoá này ở src/excel.ts.
+      toBlockCodeFormat: (n: string | null | undefined) => (n ? `(Số://${n})` : ""),
       // "TP.HCM , ngày …" footer date — written from the quote's date (was a
       // hard-coded 05/07/2018 in the template, never updated before).
       date:        "G17",
@@ -267,7 +270,23 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // ngược lại: tên dài ("Banner khu khách ngồi chờ: 8m2W x 2m9H") mà Chi Tiết ngắn (". PP in
       // KTS") — đo trên file xuất: cột Hạng Mục rộng 21 làm chữ bị cắt mất dòng, còn Chi Tiết rộng
       // 50 thì bỏ trống quá nửa. Chia lại cho hai bên cùng đủ chỗ; tổng bề ngang bảng KHÔNG tăng.
-      columnWidths: { C: 34, D: 30 },
+      //
+      // CỘT STT BẰNG ĐÚNG GN (6,63 — `cols` của Marico_Decor.xlsx). Mẫu để 12,36 cho một cột chỉ chứa
+      // "A" / "1".."99" — người dùng chỉ ra ô STT "bự quá" (2026-09-25). Phần bề rộng dôi ra dồn hết
+      // cho Hạng Mục, tính cho B + C giữ đúng số px cũ (87 + 238 = 46 + 279): mép cột D không xê dịch
+      // nên logo COLORFUL (neo B → D) giữ nguyên hình, và tổng bề ngang bảng vẫn không đổi.
+      //
+      // THÀNH TIỀN (H) 15 → 17,1, lấy đúng phần đó từ GHI CHÚ (I) 16,18 → 14 (105 + 113 = 120 + 98 px):
+      // nhãn nay xuống dòng "THÀNH TIỀN / (VNĐ)" như GN, mà ở cỡ 12 đậm (GN cỡ 10) chữ "THÀNH TIỀN" không
+      // vừa cột 15 — Excel COM đo ra nó tự ngắt "THÀNH / TIỀN" (tests/xl-cao-hang-tieu-de-cot.test.js),
+      // tức nhãn thành 3 dòng và hàng tiêu đề cao ~50pt. Ở 17,1 nó nằm gọn một dòng.
+      columnWidths: { B: 6.6328125, C: 39.8, D: 30, H: 17.1, I: 14 },
+      // "(VNĐ)" sau Đơn Giá / Thành Tiền, đúng cách GN viết (G11/H11 của Marico_Decor.xlsx).
+      headerLabels: { unitPrice: "ĐƠN GIÁ\n(VNĐ)", amount: "THÀNH TIỀN\n(VNĐ)" },
+      // Tên hạng mục có màu như GN (GN: xanh 0070C0), nhưng theo tông của chính Colorfull: cùng sắc
+      // độ với nền tiêu đề cột 9DCCC9 (176°), hạ độ sáng xuống 30% cho đọc được trên nền trắng
+      // (tương phản ≈ 5,3:1, ngang xanh GN). Mẫu để đen (theme 1).
+      nameTextColor: "FF227771",
       columns: {
         stt:       "B",
         name:      "C",
@@ -457,6 +476,9 @@ TEMPLATE_CONFIGS.clofull_conngay = {
     },
     // Cùng ý nghĩa với GN có-ngày (`G*E*F` = đơn giá × số lượng × số ngày), chỉ khác chữ cột.
     amountFormula: (r: number) => `H${r}*F${r}*G${r}`,
+    // `columnWidths` khoá theo CHỮ cột nên phải dịch như mọi toạ độ khác: Thành Tiền / Ghi Chú ở I / J.
+    // Tệp mẫu có-ngày để I 15 · J 16,18 — y cặp H/I của bản không-ngày, nên cùng số.
+    columnWidths: { B: 6.6328125, C: 39.8, D: 30, I: 17.1, J: 14 },
   },
   totals: {
     subtotal: {

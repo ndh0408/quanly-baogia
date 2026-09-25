@@ -3858,6 +3858,12 @@ textarea[aria-invalid="true"] {
 .excel-table.clf-theme tr.subgroup-row td.col-stt {
   color: #4f513e;
 }
+/* TÊN HẠNG MỤC Colorfull: tệp Excel tô `items.nameTextColor` (#227771, xanh ngọc theo nền tiêu đề
+   cột — 2026-09-25) cho tên của hàng hạng mục; lưới thì vẫn rơi về #0066cc chung của GN. Chỉ hàng
+   hạng mục (`grp-head` — hàng con dùng chung ô tên gộp của nó), không đụng nhóm / nhóm con / info. */
+.excel-table.clf-theme tr.grp-head td.col-hangmuc textarea {
+  color: #227771;
+}
 
 /* FE-06 BẮT ĐẦU — TƯƠNG PHẢN WCAG AA (4.5:1) cho nút/chữ trạng thái.
    Token gốc ở public/style.css (tệp đóng băng) đo được: chữ trắng trên nút cảnh báo #e9920b 2.45:1,
@@ -4030,6 +4036,11 @@ textarea[aria-invalid="true"] {
 :root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc),
 :root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc) :is(input, textarea) {
   color: #8ab8f0; /* xanh #0066cc của giấy chỉ 3:1 trên nền tối */
+}
+/* Tên hạng mục Colorfull bản tối: luật sáng #227771 ở trên có độ ưu tiên (0,4,3) THẮNG luật tối ngay
+   trên (0,4,2) và chỉ ~2:1 trên nền tối — nâng lên tông sáng cùng họ màu xanh ngọc. */
+:root[data-theme="dark"] .excel-table.clf-theme tr.grp-head td.col-hangmuc textarea {
+  color: #8fd3cd;
 }
 :root[data-theme="dark"] .excel-table td.col-internal-note textarea {
   color: #d9b36a;

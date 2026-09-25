@@ -82,17 +82,28 @@ async function caoHangCo(code, items, cot, chu) {
 }
 
 describe("L40: tệp xuất đặt hàng đủ cao cho chữ (số đo Excel thật)", () => {
+  // Số dòng Excel đo ở bề rộng W là CẬN DƯỚI cho mọi cột hẹp hơn hoặc bằng W (cột hẹp đi thì không
+  // bao giờ ít dòng hơn), nên mỗi ca mang bề rộng đã đo và chỉ hợp lệ khi cột của mẫu ≤ bề rộng đó —
+  // ca kiểm ngay dưới đòi điều ấy, đổi `columnWidths` rộng ra mà không đo lại là ĐỎ ở đây.
+  // 2026-09-25: Hạng Mục Colorfull 34 → 39,8 (cột STT thu về 6,63 như GN, phần dôi dồn sang). Hai ca
+  // đo ở C 34 không còn dùng được; thay bằng số đo ở 48/50 (≥ 39,8) và thêm cột Chi Tiết (D 30, đo đúng).
   const CA = [
-    // [mẫu, cột, chữ, loại hàng, đậm, cỡ, số dòng Excel cần]
-    ["unibenfood", "C", "Banner hàng rào: 0m8W x 0m5H x 8 tấm", "item", true, 11, 2],
-    ["unibenfood", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 3],
-    ["unibenfood", "C", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", true, 11, 3],
-    ["clofull_decor", "C", "Đã bao gồm VAT. Đã bao gồm VAT", "item", true, 11, 2],
-    ["clofull_decor", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 3],
+    // [mẫu, cột, chữ, loại hàng, đậm, cỡ, số dòng Excel cần, trường chứa chữ, bề rộng đã đo]
+    ["unibenfood", "C", "Banner hàng rào: 0m8W x 0m5H x 8 tấm", "item", true, 11, 2, "name", 38],
+    ["unibenfood", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 3, "name", 38],
+    ["unibenfood", "C", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", true, 11, 3, "name", 38],
+    ["clofull_decor", "C", "Sự kiện ra mắt sản phẩm mới Moana tại Vincom Đồng Khởi ngày 01/10/2026 - Booth chính + POSM", "item", true, 11, 3, "name", 48],
+    ["clofull_decor", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 2, "name", 50],
+    ["clofull_decor", "D", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", false, 10, 3, "detail", 30],
+    ["clofull_conngay", "D", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", false, 10, 3, "detail", 30],
   ];
-  for (const [code, cot, chu, kind, dam, co, dong] of CA) {
+  for (const [code, cot, chu, kind, dam, co, dong, truong, rongDo] of CA) {
     it(`${code} · ${kind} "${chu.slice(0, 30)}…" cao ≥ ${caoCan(dong, dam, co)}pt`, async () => {
-      const cao = await caoHangCo(code, [{ kind: "section", name: "NHÓM", quantity: 1 }, { kind, name: chu }], cot, chu);
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await buildQuoteBuffer(baoGia(code, [{ kind: "item", name: "X" }])));
+      expect(wb.worksheets[0].getColumn(cot).width, "cột rộng hơn bề rộng đã đo — số đo Excel không còn là cận dưới").toBeLessThanOrEqual(rongDo);
+      const muc = truong === "name" ? { kind, name: chu } : { kind, name: "Hạng mục", [truong]: chu };
+      const cao = await caoHangCo(code, [{ kind: "section", name: "NHÓM", quantity: 1 }, muc], cot, chu);
       expect(cao, "không thấy hàng").not.toBeNull();
       expect(cao, `hàng cao ${cao}pt — Excel cần ${caoCan(dong, dam, co)}pt, dòng cuối bị che`).toBeGreaterThanOrEqual(caoCan(dong, dam, co));
     });

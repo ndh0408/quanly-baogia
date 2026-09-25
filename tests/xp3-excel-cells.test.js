@@ -82,8 +82,10 @@ describe("payload customerLogo của client cũ không lọt vào file xuất", 
     ]);
     const base = new ExcelJS.Workbook(), legacy = new ExcelJS.Workbook();
     await Promise.all([base.xlsx.load(baseBuf), legacy.xlsx.load(legacyBuf)]);
-    const baseC3 = String(base.worksheets[0].getCell("C3").value || "");
-    const legacyC3 = String(legacy.worksheets[0].getCell("C3").value || "");
+    // C3 là richText khi báo giá có mã (dòng mã nghiêng cuối khối "Kính gửi") — so theo CHỮ.
+    const chuO = (v) => (Array.isArray(v?.richText) ? v.richText.map((x) => x.text).join("") : String(v || ""));
+    const baseC3 = chuO(base.worksheets[0].getCell("C3").value);
+    const legacyC3 = chuO(legacy.worksheets[0].getCell("C3").value);
     expect(legacyC3).toBe(baseC3);
     expect(legacyC3).toContain("Kính gửi:");
     expect(legacyC3).not.toContain("logo cty khách hàng");

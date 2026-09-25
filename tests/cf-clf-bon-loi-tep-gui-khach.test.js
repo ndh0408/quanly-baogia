@@ -104,7 +104,7 @@ describe("Colorfull — bốn lỗi của tệp gửi khách", () => {
       const oCon = timO(ws, /^Nhom con B1$/);
       expect(oCon, `${ma}: không thấy hàng nhóm con trong tệp xuất`).toBeTruthy();
       const rCon = +oCon.address.replace(/^[A-Z]+/, "");
-      // GN ghi tiêu đề là "ĐƠN GIÁ\n(VNĐ)" (có xuống dòng + đơn vị), CLF ghi gọn "ĐƠN GIÁ" —
+      // Tiêu đề là "ĐƠN GIÁ\n(VNĐ)" (có xuống dòng + đơn vị — GN từ đầu, Colorfull từ 2026-09-25) —
       // nên khớp theo TIỀN TỐ, đừng đòi kết thúc ngay sau "GIÁ". Và KHÔNG dùng `\b`: trong regex
       // JS, `\b` định nghĩa qua `\w` = [A-Za-z0-9_] thuần ASCII, nên sau chữ "Á" KHÔNG hề có
       // ranh giới từ — `/GIÁ\b/` không khớp cả "ĐƠN GIÁ" lẫn "ĐƠN GIÁ (VNĐ)".

@@ -247,7 +247,7 @@ describe("Colorfull đủ BA mẫu như GN — và mẫu nào cũng có Chi Ti�
     const ws = await moFile(await buildQuoteBuffer(baoGiaNgay()));
     const tieuDe = ["B", "C", "D", "E", "F", "G", "H", "I", "J"].map((c) =>
       chu(ws.getCell(`${c}${HANG_TIEU_DE}`).value).replace(/\s+/g, " ").trim().toUpperCase());
-    expect(tieuDe).toEqual(["STT", "HẠNG MỤC", "CHI TIẾT", "ĐVT", "SỐ LƯỢNG", "SỐ NGÀY", "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ"]);
+    expect(tieuDe).toEqual(["STT", "HẠNG MỤC", "CHI TIẾT", "ĐVT", "SỐ LƯỢNG", "SỐ NGÀY", "ĐƠN GIÁ (VNĐ)", "THÀNH TIỀN (VNĐ)", "GHI CHÚ"]);
   }, 120_000);
 
   it("có ngày: thành tiền = ĐƠN GIÁ × SỐ LƯỢNG × SỐ NGÀY (cùng ý nghĩa với GN có-ngày)", async () => {
@@ -397,7 +397,8 @@ describe("Colorfull — bốn lỗ hổng tìm được khi soi chéo với GN",
  * ĐẦU TRANG & KHỐI TỔNG CỦA COLORFULL — CHO GIỐNG BẢN GIA NGUYỄN.
  *
  * Người dùng so hai file cạnh nhau và chỉ ra năm chỗ Colorfull chưa bằng GN:
- *   1. không in MÃ DỰ ÁN (GN in "(Số://…)" ngay dưới tiêu đề);
+ *   1. không in MÃ DỰ ÁN (GN in "(Số://…)" ngay dưới tiêu đề) — lượt đầu nhét vào dải B5, người
+ *      dùng bỏ; 2026-09-25 họ chốt chỗ đúng: dòng CUỐI khối "Kính gửi" (xem cụm "bốn chỗ học theo GN");
  *   2. không in LỜI CHÀO;
  *   3. còn nguyên chữ mồi đỏ "logo cty khách hàng" của file mẫu;
  *   4. dải "* Thông tin chương trình" rỗng vẫn tô màu vắt ngang bảng;
@@ -435,13 +436,16 @@ describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn",
     return hit;
   };
 
+  /** Chỉ những ô từ hàng tiêu đề cột trở xuống — tức TRONG bảng, không phải đầu trang. */
+  const trongBang = (hits) => hits.filter((a) => Number(a.replace(/^[A-Z]+/, "")) >= HANG_TIEU_DE);
+
   it("dải trên bảng CHỈ mang thông tin chương trình — không mã, không lời chào", async () => {
     // Có một lượt dải này gánh thêm mã dự án + lời chào, vì mẫu Colorfull không còn hàng trống nào
     // ở đầu trang. Người dùng xem file thật rồi chốt BỎ dòng đó. Bài này khoá quyết định ấy để bản
-    // sau không lặng lẽ nhét lại.
+    // sau không lặng lẽ nhét lại. (Mã nay nằm ở khối "Kính gửi" hàng 3 — ngoài bảng, xem cụm cuối tệp.)
     for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
       const ws = await moFile(await buildQuoteBuffer(baoGiaDau(ma)));
-      expect(tim(ws, "Số://"), `${ma}: dòng mã vẫn in ra trên bảng`).toEqual([]);
+      expect(trongBang(tim(ws, "Số://")), `${ma}: dòng mã vẫn in ra trên bảng`).toEqual([]);
       expect(tim(ws, "Chân thành cảm ơn"), `${ma}: lời chào vẫn in ra trên bảng`).toEqual([]);
       // Và hàng đó phải ẨN, không để lại dải màu rỗng vắt ngang bảng.
       expect(ws.getRow(5).hidden, `${ma}: dải rỗng vẫn hiện`).toBe(true);
@@ -452,7 +456,7 @@ describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn",
     const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor", { info: true })));
     expect(tim(ws, "Thông tin chương trình").length, "mất dòng thông tin chương trình").toBeGreaterThan(0);
     expect(ws.getRow(5).hidden, "có nội dung mà hàng vẫn bị ẩn").toBeFalsy();
-    expect(tim(ws, "Số://"), "mã lại bám theo dòng thông tin chương trình").toEqual([]);
+    expect(trongBang(tim(ws, "Số://")), "mã lại bám theo dòng thông tin chương trình").toEqual([]);
   }, 300_000);
 
   it("KHÔNG còn chữ mồi \"logo cty khách hàng\" — tính năng logo khách đã gỡ", async () => {
@@ -809,6 +813,165 @@ describe("Colorfull — màu nền đúng như file mẫu người dùng chỉnh
           expect(nenCua(ws, `${cotTien}${r}`), `${ma}${discount ? " +discount" : ""} r${r}: ô tiền mất nền`).not.toBe("-");
         }
       }
+    }
+  }, 300_000);
+});
+
+/**
+ * ============================================================================
+ * BỐN CHỖ COLORFULL HỌC THEO GIA NGUYỄN (người dùng chỉ ra trên ảnh chụp, 2026-09-25).
+ *
+ *   1. ô STT "bự quá": mẫu để cột B 12,36 cho một cột chỉ chứa "A" / "1".."99" — GN 6,63;
+ *   2. chưa có MÃ BÁO GIÁ — "nằm dưới cùng mấy chỗ thông tin, y hệt GN": dòng "(Số://…)" nghiêng;
+ *   3. tên hạng mục có màu như GN (GN xanh 0070C0), theo tông nền tiêu đề cột của Colorfull;
+ *   4. "(VNĐ)" sau Đơn Giá / Thành Tiền như GN.
+ * Cả BA mẫu Colorfull. Cột dôi ra của STT dồn cho Hạng Mục sao cho mép cột D không xê dịch — logo
+ * COLORFUL neo B → D, nên nó giữ nguyên hình; ca logo bên dưới khoá đúng điều đó.
+ * ============================================================================
+ */
+describe("Colorfull — bốn chỗ học theo GN (2026-09-25)", () => {
+  const MAU_CLF = ["clofull_decor", "clofull_banner", "clofull_conngay"];
+  // [mẫu, cột Đơn Giá, cột Thành Tiền]
+  const COT_TIEN = { clofull_decor: ["G", "H"], clofull_banner: ["G", "H"], clofull_conngay: ["H", "I"] };
+  const baoGia4 = (code, over = {}) => ({
+    quoteNumber: "CLF26070", projectCode: "FP_A26_002", projectVersion: 1,
+    title: "Trại Buôn Người", toCompany: "CTY CP PHIM THIÊN NGÂN", toContact: "Ms. Ninh", city: "TP. Hồ Chí Minh",
+    quoteDate: new Date("2026-09-25"), vatPercent: 8, hnTables: [], ...over,
+    sheets: over.sheets || [{
+      order: 1, name: "Booth", groupSubtotal: false, discount: 0, extraTables: [], templateCode: code,
+      items: [
+        { order: 1, kind: "section", name: "Booth 3m5W x 2m7H x 1m2D", quantity: 9 },
+        { order: 2, kind: "item", name: "Vách giữa: 2m5W x 2m6H", detail: ". KS, ốp formex dán PP in KTS", unit: "m2", quantity: 12.7, days: 1, unitPrice: 504_000 },
+        { order: 3, kind: "sub", name: "", detail: "Hàng con", unit: "m2", quantity: 1, days: 1, unitPrice: 1_000 },
+        { order: 4, kind: "subsection", name: "Chi phí vận chuyển", quantity: 1 },
+        { order: 5, kind: "item", name: "HCM: GLXND, BHDLVV", detail: "", unit: "bộ", quantity: 5, days: 1, unitPrice: 2_945_656 },
+      ],
+    }],
+  });
+  const hangCo = (ws, ten) => {
+    let r = null;
+    ws.eachRow({ includeEmpty: false }, (row, i) => { if (r == null && chu(row.getCell("C").value).trim() === ten) r = i; });
+    return r;
+  };
+  /** Bề rộng px Excel vẽ cho bề rộng LƯU `w` (chữ số rộng nhất 7px — font Normal Calibri 11 của mẫu). */
+  const px = (w) => Math.trunc(((256 * w + 18) / 256) * 7);
+  const mauChu = (ws, addr) => {
+    const c = ws.getCell(addr).font?.color || {};
+    return c.argb ?? (c.theme != null ? `theme${c.theme}/t${Math.round((c.tint || 0) * 100) / 100}` : "(auto)");
+  };
+
+  it("cột STT rộng ĐÚNG bằng GN; phần dôi chỉ chuyển sang cột khác — mép bảng không đổi", async () => {
+    const gn = await moFile(await buildQuoteBuffer(baoGia4("marico_decor", { sheets: [{ ...baoGia4("x").sheets[0], templateCode: "marico_decor" }] })));
+    const rongGN = gn.getColumn("B").width;
+    for (const ma of MAU_CLF) {
+      const ws = await moFile(await buildQuoteBuffer(baoGia4(ma)));
+      expect(ws.getColumn("B").width, `${ma}: cột STT không bằng GN`).toBe(rongGN);
+      // Mép trái cột D (= A + B + C) giữ đúng px của bản trước (B 12,36 · C 34 → 87 + 238): logo neo
+      // tới D nên đây là thứ giữ logo nguyên hình. Mép phải bảng (tới hết Ghi Chú) cũng không đổi.
+      expect(px(ws.getColumn("B").width) + px(ws.getColumn("C").width), `${ma}: mép cột D xê dịch`).toBe(87 + 238);
+      const [, cotTT] = COT_TIEN[ma];
+      const cotGC = String.fromCharCode(cotTT.charCodeAt(0) + 1);
+      expect(px(ws.getColumn(cotTT).width) + px(ws.getColumn(cotGC).width), `${ma}: mép phải bảng xê dịch`).toBe(105 + 113);
+    }
+  }, 300_000);
+
+  it("logo COLORFUL giữ nguyên chỗ và kích thước — neo không tràn khỏi cột của nó", async () => {
+    // Tệp mẫu neo logo ở cột B, lệch 596900 EMU (62,7px). B còn 46px thì độ lệch dài hơn cả cột, và
+    // Excel / LibreOffice xử lý chỗ tràn mỗi bên một kiểu (kẹp về mép cột hay tràn sang C).
+    const EMU_PX = 9525;
+    for (const ma of MAU_CLF) {
+      const ws = await moFile(await buildQuoteBuffer(baoGia4(ma)));
+      expect(ws.getImages().length, `${ma}: mất logo`).toBe(1);
+      const { tl, br } = ws.getImages()[0].range;
+      const x = (a) => { let s = 0; for (let c = 1; c <= a.nativeCol; c++) s += px(ws.getColumn(c).width); return s + a.nativeColOff / EMU_PX; };
+      for (const a of [tl, br]) {
+        expect(a.nativeColOff / EMU_PX, `${ma}: neo lệch dài hơn cả cột của nó`).toBeLessThan(px(ws.getColumn(a.nativeCol + 1).width));
+      }
+      // Mép trái: A (27px) + 62,67px như tệp mẫu. Mép phải: mép cột D (27 + 325) + 22px như bản trước.
+      expect(x(tl), `${ma}: logo xê dịch ngang`).toBeCloseTo(27 + 596900 / EMU_PX, 5);
+      expect(x(br), `${ma}: logo đổi bề rộng`).toBeCloseTo(27 + 87 + 238 + 209550 / EMU_PX, 5);
+      expect([tl.nativeRow, tl.nativeRowOff, br.nativeRow, br.nativeRowOff], `${ma}: logo đổi chiều cao`).toEqual([0, 0, 0, 774700]);
+    }
+  }, 300_000);
+
+  it("nhãn \"(VNĐ)\" sau Đơn Giá / Thành Tiền đúng cách GN viết — và nhập lại vẫn nhận đúng cột", async () => {
+    const gn = await moFile(await buildQuoteBuffer(baoGia4("x", { sheets: [{ ...baoGia4("x").sheets[0], templateCode: "marico_decor" }] })));
+    const gon = (v) => chu(v).replace(/\s+/g, " ").trim();
+    for (const ma of MAU_CLF) {
+      const buf = await buildQuoteBuffer(baoGia4(ma));
+      const ws = await moFile(buf);
+      const [cDG, cTT] = COT_TIEN[ma];
+      expect(ws.getCell(`${cDG}4`).value, `${ma}: nhãn Đơn Giá`).toBe("ĐƠN GIÁ\n(VNĐ)");
+      expect(ws.getCell(`${cTT}4`).value, `${ma}: nhãn Thành Tiền`).toBe("THÀNH TIỀN\n(VNĐ)");
+      // Cùng chữ với GN (G11/H11 — GN có thêm một dấu cách thừa trước "\n", không phải chủ ý).
+      expect(gon(ws.getCell(`${cDG}4`).value)).toBe(gon(gn.getCell("G11").value));
+      expect(gon(ws.getCell(`${cTT}4`).value)).toBe(gon(gn.getCell("H11").value));
+      const sheet = (await parseQuoteWorkbook(buf)).sheets.find((s) => !s.skipped);
+      const muc = sheet.items.find((it) => it.name === "HCM: GLXND, BHDLVV");
+      expect(Number(muc?.unitPrice), `${ma}: nhập lại mất cột Đơn Giá`).toBe(2_945_656);
+    }
+  }, 300_000);
+
+  it("MÃ BÁO GIÁ là dòng CUỐI khối \"Kính gửi\", nghiêng, đúng chuỗi GN in — không lọt vào bảng", async () => {
+    const gn = await moFile(await buildQuoteBuffer(baoGia4("x", { sheets: [{ ...baoGia4("x").sheets[0], templateCode: "marico_decor" }] })));
+    for (const ma of MAU_CLF) {
+      const ws = await moFile(await buildQuoteBuffer(baoGia4(ma)));
+      const v = ws.getCell("C3").value;
+      expect(Array.isArray(v?.richText), `${ma}: khối Kính gửi không có dòng mã`).toBe(true);
+      const dong = chu(v).split("\n");
+      expect(dong[0]).toBe("Kính gửi: CTY CP PHIM THIÊN NGÂN");
+      expect(dong[1]).toBe("Ms. Ninh");
+      expect(dong.at(-1), `${ma}: dòng mã sai`).toBe("(Số://FP_A26_002)");
+      expect(dong.at(-1), `${ma}: khác chuỗi GN in ở B8`).toBe(chu(gn.getCell("B8").value));
+      const [dau, cuoi] = [v.richText[0], v.richText.at(-1)];
+      expect(cuoi.font?.italic, `${ma}: dòng mã không nghiêng như GN`).toBe(true);
+      expect(dau.font?.italic ?? false, `${ma}: cả khối bị nghiêng lây`).toBe(false);
+      for (const d of v.richText) {
+        expect(d.font?.name, `${ma}: một đoạn thiếu font — Excel vẽ bằng Calibri`).toBe("Times New Roman");
+        expect(d.font?.size).toBe(12);
+        expect(d.font?.color, `${ma}: chữ đỏ của ô mồi lại lọt vào`).toEqual({ theme: 1 });
+      }
+      // Hàng 3 đủ cao cho cả dòng mã (Times 12: 15,75pt/dòng).
+      expect(ws.getRow(3).height, `${ma}: dòng mã bị xén`).toBeGreaterThanOrEqual(dong.length * 15.75);
+    }
+  }, 300_000);
+
+  it("nhiều sheet: mỗi tab mang mã RIÊNG của nó (_01, _02); không có mã thì không in dòng nào", async () => {
+    const s = baoGia4("clofull_decor").sheets[0];
+    const q = baoGia4("clofull_decor", { sheets: [s, { ...s, order: 2, name: "Lightbox", templateCode: "clofull_conngay" }] });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(q));
+    expect(chu(wb.worksheets[0].getCell("C3").value).split("\n").at(-1)).toBe("(Số://FP_A26_002_01)");
+    expect(chu(wb.worksheets[1].getCell("C3").value).split("\n").at(-1)).toBe("(Số://FP_A26_002_02)");
+
+    const ws = await moFile(await buildQuoteBuffer(baoGia4("clofull_decor", { quoteNumber: null, projectCode: null })));
+    expect(ws.getCell("C3").value, "không có mã mà vẫn in dòng mã rỗng").toBe("Kính gửi: CTY CP PHIM THIÊN NGÂN\nMs. Ninh");
+  }, 300_000);
+
+  it("tên HẠNG MỤC có màu xanh ngọc theo nền tiêu đề cột — chỉ hàng hạng mục, nhóm / GN giữ nguyên", async () => {
+    const mau = getConfig("clofull_decor").items.nameTextColor;
+    expect(mau, "cấu hình phải khai màu tên hạng mục").toMatch(/^FF[0-9A-F]{6}$/);
+    for (const ma of MAU_CLF) {
+      expect(getConfig(ma).items.nameTextColor, `${ma}: lệch màu với bản không-ngày`).toBe(mau);
+      const ws = await moFile(await buildQuoteBuffer(baoGia4(ma)));
+      const [rNhom, rMuc, rCon, rMuc2] = ["Booth 3m5W x 2m7H x 1m2D", "Vách giữa: 2m5W x 2m6H", "Chi phí vận chuyển", "HCM: GLXND, BHDLVV"].map((t) => hangCo(ws, t));
+      expect(rNhom && rMuc && rCon && rMuc2, `${ma}: không thấy đủ hàng`).toBeTruthy();
+      expect(mauChu(ws, `C${rMuc}`), `${ma}: tên hạng mục chưa có màu`).toBe(mau);
+      expect(mauChu(ws, `C${rMuc2}`), `${ma}: tên hạng mục dưới nhóm con chưa có màu`).toBe(mau);
+      expect(ws.getCell(`C${rMuc}`).font?.bold, `${ma}: tên mất đậm`).toBe(true);
+      // Hàng con (sub) dùng chung ô tên GỘP của hàng hạng mục → cùng màu.
+      expect(ws.getCell(`C${rMuc + 1}`).master?.address, `${ma}: hàng con không gộp tên`).toBe(`C${rMuc}`);
+      // Không đụng: nhóm, nhóm con, STT, Chi Tiết của hàng hạng mục.
+      expect(mauChu(ws, `C${rNhom}`)).toBe("theme5/t-0.25");
+      expect(mauChu(ws, `C${rCon}`)).toBe("FF4F513E");
+      expect(mauChu(ws, `B${rMuc}`), `${ma}: màu STT bị đổi lây`).toBe("theme9/t-0.5");
+      expect(mauChu(ws, `D${rMuc}`), `${ma}: màu Chi Tiết bị đổi lây`).not.toBe(mau);
+    }
+    // GN không khai khoá này — tên vẫn xanh 0070C0 nướng sẵn trong tệp mẫu.
+    for (const ma of ["marico_decor", "gn_banner", "unibenfood"]) {
+      expect(getConfig(ma).items.nameTextColor, `${ma}: GN bị gắn màu Colorfull`).toBeUndefined();
+      const ws = await moFile(await buildQuoteBuffer(baoGia4("x", { sheets: [{ ...baoGia4("x").sheets[0], templateCode: ma }] })));
+      expect(mauChu(ws, `C${hangCo(ws, "Vách giữa: 2m5W x 2m6H")}`), `${ma}: GN đổi màu tên`).toBe("FF0070C0");
     }
   }, 300_000);
 });

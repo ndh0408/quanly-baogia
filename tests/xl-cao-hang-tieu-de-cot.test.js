@@ -7,11 +7,14 @@
 //     wrap) không vừa bề rộng cột nên Excel ngắt hai dòng "THÀNH / TIỀN", cần 31,5pt — hàng 25pt
 //     xén mất nửa trên dòng đầu và nửa dưới dòng hai. Đúng ở cả ba mẫu Colorfull (bản có ngày thì ô
 //     đó dịch sang cột I).
+//     2026-09-25: nhãn nay là "THÀNH TIỀN\n(VNĐ)" như GN, và cột nới 15 → 17,1 để "THÀNH TIỀN" nằm
+//     gọn MỘT dòng — không thì Excel ngắt ba dòng "THÀNH / TIỀN / (VNĐ)". Vẫn đúng hai dòng, nên ngưỡng
+//     31,5pt (số đo COM cho hai dòng TNR 12 đậm) giữ nguyên.
 //   · GN, hàng tiêu đề "BẢNG BÁO GIÁ …" (B7, Times New Roman 14 đậm) cao 17,5pt trong khi MỘT dòng
 //     cỡ 14 cần 18,75pt — tiêu đề ngắn (không kích hoạt nhánh xuống dòng của L44) bị hụt 1,25pt.
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
-import { buildQuoteBuffer } from "../src/excel.js";
+import { buildQuoteBuffer, soDongKhiXuongHang } from "../src/excel.js";
 
 async function xuat(code, { anh = false, title = "Moana" } = {}) {
   const wb = new ExcelJS.Workbook();
@@ -23,16 +26,19 @@ async function xuat(code, { anh = false, title = "Moana" } = {}) {
   return wb.worksheets[0];
 }
 
-describe("Colorfull: hàng tiêu đề cột đủ cao cho 'THÀNH TIỀN' xuống hai dòng", () => {
+describe("Colorfull: hàng tiêu đề cột đủ cao cho 'THÀNH TIỀN / (VNĐ)' hai dòng", () => {
   // [mẫu, cột Thành Tiền]
   for (const [code, cot] of [["clofull_decor", "H"], ["clofull_banner", "H"], ["clofull_conngay", "I"]]) {
     for (const anh of [false, true]) {
       it(`${code}${anh ? " + cột ảnh" : ""}`, async () => {
         const ws = await xuat(code, { anh });
         const o = ws.getCell(`${cot}4`);
-        expect(String(o.value).trim()).toBe("THÀNH TIỀN");
+        expect(o.value).toBe("THÀNH TIỀN\n(VNĐ)");
         expect(o.alignment?.wrapText, "bài giả định ô bật wrap như tệp mẫu").toBe(true);
+        expect(soDongKhiXuongHang("THÀNH TIỀN", ws.getColumn(cot).width, { dam: true, co: 12 }),
+          "cột Thành Tiền hẹp — 'THÀNH TIỀN' tự ngắt, nhãn thành 3 dòng").toBe(1);
         expect(ws.getRow(4).height, "Excel cần 31,5pt cho hai dòng TNR 12 đậm").toBeGreaterThanOrEqual(31.5);
+        expect(ws.getRow(4).height, "hàng tiêu đề nới cho 3 dòng trong khi nhãn chỉ 2").toBeLessThan(3 * 15.75);
       });
     }
   }
