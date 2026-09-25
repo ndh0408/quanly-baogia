@@ -316,6 +316,10 @@ export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] 
  *                      chủ vẫn tự quyết cờ theo CSDL + ghim số tiền hàng đã duyệt / đã trả (đổi số tiền
  *                      → từ chối cả lần lưu, hỏng TO chứ không âm thầm). Cờ mang theo để màn hình khỏi
  *                      nói sai trước khi Lưu, và để người CÓ quyền không vô tình bỏ dấu đã trả.
+ *   · `ns` / `luuKho` / `chungTu` — ba cột NỘI BỘ của bảng Chi phí HCM / Phí khách hàng / Hà Nội. Bảng nội
+ *                      bộ không xuất ra Excel và excelImport không đọc ba cột này, nên tệp nạp vào KHÔNG
+ *                      BAO GIỜ chở chúng: không mang sang là Lưu xong ba cột về rỗng ở MỌI hàng khớp
+ *                      (sanitizeExtraTables ghi null/false), trong khi bảng đối chiếu vẫn ghi "Giữ nguyên".
  * `trangThaiMat` = số hàng đã duyệt / đã thanh toán KHÔNG ghép được (sẽ mất cùng dòng) — hộp xác nhận nói ra.
  * `tienDaTraDoi` = tên các hàng ĐÃ THANH TOÁN ghép được mà tệp đổi SL / Đơn Giá / Số Ngày (soát toàn diện
  *   đợt 3). rid đi theo nên máy chủ nhận ra hàng đã trả, và người không có quyền thanh toán bị TỪ CHỐI cả
@@ -323,6 +327,7 @@ export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] 
  *   đúng thứ reconcileExtraPayments đã chọn tránh; chỉ NÓI RA trước khi nạp.
  */
 const TRUONG_TRANG_THAI = ["rid", "approved", "approvedAt", "approvedBy", "paid", "paidAt", "paidById", "hasPaidProof"] as const;
+const TRUONG_NOI_BO = ["ns", "luuKho", "chungTu"] as const;
 const coTrangThai = (it: Record<string, unknown>) => !!(it.approved || it.paid || it.hasPaidProof || it.paidAt);
 /** Dấu vân tay SỐ TIỀN của một hàng — PHẢI khớp `soTienHang` (src/services/quoteService.ts), nơi máy
  *  chủ so hàng đã trả. `null` = hàng KHÔNG ghi số tiền (bản trước chuẩn hoá) → máy chủ không so. */
@@ -345,6 +350,7 @@ export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGh
     if (cu.images?.length && !moi.images?.length) moi.images = cu.images.slice();
     if (cu.productId != null && moi.productId == null) moi.productId = cu.productId;
     if (opts.giuGhiChuNoiBo && cu.internalNote && !moi.internalNote) moi.internalNote = cu.internalNote;
+    for (const k of TRUONG_NOI_BO) if (cu[k] != null && moi[k] == null) (moi as Record<string, unknown>)[k] = cu[k];
     // Mẫu không-ngày không có ô Excel để chở công thức Số Ngày. Chỉ mang metadata
     // từ sheet cũ khi cấu trúc hàng giữ nguyên; thêm/dời hàng có thể làm ref A1 trỏ nhầm.
     if (ngayAnConDungDiaChi && i === j && cu.formulas?.days && !moi.formulas?.days) {

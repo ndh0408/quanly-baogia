@@ -86,3 +86,42 @@ describe("L48 (bảng HN): đếm hàng ĐÃ THANH TOÁN bị tệp đổi số 
     expect(giuTruongChiApp(cuKhongSo, toGridItems(tep, OPTS).items, { giuGhiChuNoiBo: true }).tienDaTraDoi).toEqual([]);
   });
 });
+
+// Ba cột NỘI BỘ của bảng HCM / Phí KH / Hà Nội (4e24308) — bảng nội bộ không xuất ra Excel và
+// excelImport không đọc chúng, nên tệp nạp vào KHÔNG BAO GIỜ chở NS / CHỨNG TỪ / LƯU KHO. Trước bản vá,
+// "Thay toàn bộ" trả hàng khớp không còn ba trường; Lưu xong sanitizeExtraTables ghi null/false ở MỌI
+// hàng khớp, trong khi bảng đối chiếu vẫn ghi "Giữ nguyên" và hộp xác nhận không báo gì.
+describe("Thay toàn bộ giữ NS / CHỨNG TỪ / LƯU KHO của dòng khớp", () => {
+  type HangNb = HangHn & { ns?: string | null; luuKho?: boolean; chungTu?: "VAT" | "HDNS" | "TM" | null };
+  const cu = (): HangNb[] => [
+    { kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", ns: "Anh Tuấn", luuKho: true, chungTu: "VAT" },
+    { kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2", ns: "Chị Lan", luuKho: false, chungTu: "TM" },
+    { kind: "item", name: "Bàn bị khách xoá", unit: "cái", quantity: 1, unitPrice: 100000, rid: "r-3", ns: "Anh Nam", chungTu: "HDNS" },
+  ];
+
+  it("dòng khớp giữ nguyên ba trường; dòng mới của tệp không bịa giá trị", () => {
+    const r = giuTruongChiApp(cu(), toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true });
+    const [bd, st, moi] = r.items as HangNb[];
+    expect(bd).toMatchObject({ rid: "r-1", ns: "Anh Tuấn", luuKho: true, chungTu: "VAT" });
+    // Số liệu vẫn theo TỆP (320.000); luuKho=false cũng là giá trị phải giữ, không phải "không có".
+    expect(st).toMatchObject({ rid: "r-2", unitPrice: 320000, ns: "Chị Lan", luuKho: false, chungTu: "TM" });
+    expect(moi.name).toBe("Hạng mục mới");
+    expect(moi.ns ?? null).toBeNull();
+    expect(moi.luuKho ?? false).toBe(false);
+    expect(moi.chungTu ?? null).toBeNull();
+  });
+
+  it("bảng đối chiếu nói THẬT: dòng khớp không đổi số thì vẫn 'Giữ nguyên' vì ba trường đã được giữ", () => {
+    const giu = giuTruongChiApp(cu(), toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true }).items as HangNb[];
+    const truocNb = cu();
+    for (const [i, j] of [[0, 0], [1, 1]] as const) {
+      expect([giu[j].ns, giu[j].luuKho, giu[j].chungTu]).toEqual([truocNb[i].ns, truocNb[i].luuKho, truocNb[i].chungTu]);
+    }
+  });
+
+  it("không sửa tại chỗ mảng đầu vào", () => {
+    const sau = toGridItems(nhap, OPTS).items as HangNb[];
+    giuTruongChiApp(cu(), sau, { giuGhiChuNoiBo: true });
+    expect(sau.every((it) => it.ns === undefined && it.chungTu === undefined)).toBe(true);
+  });
+});

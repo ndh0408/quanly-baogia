@@ -43,6 +43,16 @@ describe("extraTableHasData — sheet nào đáng hỏi trước khi xoá", () =
   it("khoảng trắng không tính là dữ liệu", () => {
     expect(extraTableHasData(table("x", [item({ name: "   " })]))).toBe(false);
   });
+
+  it("ba cột nội bộ NS / CHỨNG TỪ / LƯU KHO cũng là dữ liệu — bảng chỉ điền chúng vẫn phải hỏi", () => {
+    const nb = (o: Record<string, unknown>) => table("x", [item(o as Partial<ItemK>)]);
+    expect(extraTableHasData(nb({ ns: "Anh Tuấn" }))).toBe(true);
+    expect(extraTableHasData(nb({ chungTu: "VAT" }))).toBe(true);
+    expect(extraTableHasData(nb({ luuKho: true }))).toBe(true);
+    // giá trị mặc định sau sanitizeExtraTables (ns=null, luuKho=false, chungTu=null) không phải dữ liệu
+    expect(extraTableHasData(nb({ ns: null, luuKho: false, chungTu: null }))).toBe(false);
+    expect(extraTableHasData(nb({ ns: "  " }))).toBe(false);
+  });
 });
 
 describe("removeExtraTableAt — không xoá sheet có dữ liệu khi chưa được đồng ý", () => {

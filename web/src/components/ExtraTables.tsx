@@ -52,6 +52,8 @@ export function extraTableHasData(t: ExtraTable | null | undefined): boolean {
     const chu = (v: unknown) => typeof v === "string" && v.trim() !== "";
     if (chu(it.name) || chu(it.detail) || it.quantity || it.unitPrice) return true;
     if (chu(it.unit) || chu(it.notes) || chu(it.internalNote) || chu(r.label)) return true;
+    // ba cột nội bộ (NS · CHỨNG TỪ · LƯU KHO) — bảng chỉ mới điền chúng vẫn là bảng CÓ dữ liệu
+    if (chu(r.ns) || chu(r.chungTu) || r.luuKho === true) return true;
     if (Array.isArray(it.images) && it.images.length > 0) return true;
     if (it.formulas && Object.keys(it.formulas).length > 0) return true;
     // cờ duyệt (approveCol) + cờ thanh toán nội bộ (payCol, xem PayDialog bên dưới)
