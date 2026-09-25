@@ -4038,7 +4038,7 @@ textarea[aria-invalid="true"] {
   color: #8ab8f0; /* xanh #0066cc của giấy chỉ 3:1 trên nền tối */
 }
 /* Tên hạng mục Colorfull bản tối: luật sáng #227771 ở trên có độ ưu tiên (0,4,3) THẮNG luật tối ngay
-   trên (0,4,2) và chỉ ~2:1 trên nền tối — nâng lên tông sáng cùng họ màu xanh ngọc. */
+   trên (0,4,2) và chỉ ~3:1 trên nền tối (dưới 4,5:1 AA) — nâng lên tông sáng cùng họ xanh ngọc. */
 :root[data-theme="dark"] .excel-table.clf-theme tr.grp-head td.col-hangmuc textarea {
   color: #8fd3cd;
 }

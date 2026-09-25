@@ -19,8 +19,10 @@ import ExcelJS from "exceljs";
 import { buildQuoteBuffer, soDongKhiXuongHang } from "../src/excel.js";
 
 // [bề rộng cột LƯU trong .xlsx, đậm?, cỡ chữ, nghiêng?, số dòng Excel cần, chữ] — bề rộng lấy
-// đúng các cột của mẫu: 38 (GN Hạng Mục), 48 (GN C:D gộp), 16,82 (GN Ghi chú), 34/30 (CLF Hạng
-// Mục/Chi Tiết), 29, 21,18 và 16,18 (CLF Ghi chú cỡ 10) · Chi Tiết của CLF là chữ nghiêng cỡ 10.
+// đúng các cột của mẫu LÚC ĐO: 38 (GN Hạng Mục), 48 (GN C:D gộp), 16,82 (GN Ghi chú), 34/30 (CLF Hạng
+// Mục trước 2026-09-25 / Chi Tiết), 29, 21,18 và 16,18 (CLF Ghi chú cỡ 10) · Chi Tiết của CLF là chữ
+// nghiêng cỡ 10. Hạng Mục CLF nay 39,8 — CHƯA đo bằng Excel (máy dev Linux không có COM); xem các ca
+// xuất tệp bên dưới.
 const BAN_DO = [
   [38, true, 11, false, 2, "Banner hàng rào: 0m8W x 0m5H x 8 tấm"],
   [21.1796875, true, 11, false, 3, "Banner hàng rào: 0m8W x 0m5H x 8 tấm"],
@@ -86,7 +88,10 @@ describe("L40: tệp xuất đặt hàng đủ cao cho chữ (số đo Excel th�
   // bao giờ ít dòng hơn), nên mỗi ca mang bề rộng đã đo và chỉ hợp lệ khi cột của mẫu ≤ bề rộng đó —
   // ca kiểm ngay dưới đòi điều ấy, đổi `columnWidths` rộng ra mà không đo lại là ĐỎ ở đây.
   // 2026-09-25: Hạng Mục Colorfull 34 → 39,8 (cột STT thu về 6,63 như GN, phần dôi dồn sang). Hai ca
-  // đo ở C 34 không còn dùng được; thay bằng số đo ở 48/50 (≥ 39,8) và thêm cột Chi Tiết (D 30, đo đúng).
+  // đo ở C 34 không còn dùng được; thay bằng số đo ở 48/50 (≥ 39,8) — kể cả một hàng NHÓM 3 dòng, để
+  // đường tô đậm hàng nhóm vẫn bị soi ở mức 3 dòng như ca cũ — và thêm cột Chi Tiết (D 30, đo đúng).
+  // Riêng "HẠNG MỤC SÂN KHẤU…": Excel cần 3 dòng ở 38 và 2 ở 50; ở 39,8 bộ ước lượng cho 2 dòng khi hệ
+  // số chữ thật ≤ 1,071 — tức còn ~2% biên NGOÀI hệ số an toàn 1,05 đã kiểm trên 523 chuỗi.
   const CA = [
     // [mẫu, cột, chữ, loại hàng, đậm, cỡ, số dòng Excel cần, trường chứa chữ, bề rộng đã đo]
     ["unibenfood", "C", "Banner hàng rào: 0m8W x 0m5H x 8 tấm", "item", true, 11, 2, "name", 38],
@@ -94,6 +99,7 @@ describe("L40: tệp xuất đặt hàng đủ cao cho chữ (số đo Excel th�
     ["unibenfood", "C", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", true, 11, 3, "name", 38],
     ["clofull_decor", "C", "Sự kiện ra mắt sản phẩm mới Moana tại Vincom Đồng Khởi ngày 01/10/2026 - Booth chính + POSM", "item", true, 11, 3, "name", 48],
     ["clofull_decor", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 2, "name", 50],
+    ["clofull_decor", "C", "Sự kiện ra mắt sản phẩm mới Moana tại Vincom Đồng Khởi ngày 01/10/2026 - Booth chính + POSM", "section", true, 11, 3, "name", 48],
     ["clofull_decor", "D", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", false, 10, 3, "detail", 30],
     ["clofull_conngay", "D", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", false, 10, 3, "detail", 30],
   ];

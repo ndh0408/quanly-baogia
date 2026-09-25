@@ -389,9 +389,11 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
 
 // ── NEO ẢNH KHÔNG ĐƯỢC LỆCH QUÁ BỀ RỘNG CỘT CỦA NÓ ───────────────────────────────────────────────
 // Logo COLORFUL của mẫu Colorfull neo ở cột B, lệch vào 62,7px. Thu cột B (STT) về bề rộng của GN
-// (6,63 ≈ 46px) thì độ lệch DÀI HƠN CẢ CỘT, mà Excel và LibreOffice xử lý chỗ đó mỗi bên một kiểu
-// (kẹp về mép cột hay tràn sang cột sau) ⇒ logo xô lệch và méo theo phần mềm người nhận mở. Dời
-// phần tràn sang cột kế tiếp: vị trí tuyệt đối trên trang giữ nguyên, file đọc ở đâu cũng như nhau.
+// (6,63 ≈ 46px) thì độ lệch DÀI HƠN CẢ CỘT — trạng thái tệp do Excel ghi không bao giờ có, và mỗi
+// trình đọc xử lý một kiểu: ExcelJS KẸP về mép cột (anchor.js, `Math.min(colWidth - 1, …)`),
+// LibreOffice cho TRÀN sang cột sau (soát chéo 2026-09-25 đo được). Dời phần tràn sang cột kế tiếp —
+// cách XlsxWriter vẫn làm — tính theo bề rộng px của Excel ở 96dpi: ở đó vị trí đúng y như cũ; trình
+// đo cột khác đi (LibreOffice ~7,4px/đơn vị, Excel ở DPI khác) lệch vài px (dưới 1%), không thấy được.
 // Neo không tràn (mọi ảnh của GN, ảnh hạng mục lệch 1px) thì không đổi gì.
 function neoAnhTrongCot(ws: any, a: any) {
   if (!a || !Number.isFinite(a.nativeCol) || !Number.isFinite(a.nativeColOff)) return;

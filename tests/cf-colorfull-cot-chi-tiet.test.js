@@ -142,12 +142,13 @@ describe("Colorfull — cột Chi Tiết hiện ra trong file xuất", () => {
   }, 120_000);
 
   it("HAI cột Hạng Mục và Chi Tiết đều đủ rộng — không cột nào bị bỏ đói", async () => {
-    // Ba lần chỉnh, mỗi lần vì một số đo:
+    // Bốn lần chỉnh, mỗi lần vì một số đo:
     //   C 38 / D 10  — thời gộp cột: Chi Tiết chỉ là khe địa chỉ, không hiện.
     //   C 21 / D 50  — theo đúng file mẫu: hợp cách Colorfull tự soạn (tên ngắn, mô tả dài ở Chi Tiết).
     //   C 34 / D 30  — sau khi chạy dữ liệu THẬT chuyển từ nếp Gia Nguyễn sang: tên dài
     //                  ("Banner khu khách ngồi chờ: 8m2W x 2m9H") mà Chi Tiết ngắn (". PP in KTS"),
     //                  nên cột Hạng Mục rộng 21 bị CẮT CHỮ còn Chi Tiết bỏ trống quá nửa.
+    //   C 39,8 / D 30 — 2026-09-25: cột STT thu về 6,63 như GN, phần dôi dồn hết cho Hạng Mục.
     // Bài này vì thế không khoá "cột nào rộng hơn" — nó khoá điều thật sự quan trọng: cả hai đều
     // đủ chỗ, và tổng bề ngang bảng không phình ra.
     const ws = await moFile(await buildQuoteBuffer(baoGia("clofull_decor")));
@@ -877,7 +878,8 @@ describe("Colorfull — bốn chỗ học theo GN (2026-09-25)", () => {
 
   it("logo COLORFUL giữ nguyên chỗ và kích thước — neo không tràn khỏi cột của nó", async () => {
     // Tệp mẫu neo logo ở cột B, lệch 596900 EMU (62,7px). B còn 46px thì độ lệch dài hơn cả cột, và
-    // Excel / LibreOffice xử lý chỗ tràn mỗi bên một kiểu (kẹp về mép cột hay tràn sang C).
+    // mỗi trình đọc xử lý chỗ tràn một kiểu (ExcelJS kẹp về mép cột, LibreOffice cho tràn sang C).
+    // Các số px dưới đây theo cách Excel đo cột ở 96dpi — xem `neoAnhTrongCot`.
     const EMU_PX = 9525;
     for (const ma of MAU_CLF) {
       const ws = await moFile(await buildQuoteBuffer(baoGia4(ma)));
@@ -914,13 +916,17 @@ describe("Colorfull — bốn chỗ học theo GN (2026-09-25)", () => {
 
   it("MÃ BÁO GIÁ là dòng CUỐI khối \"Kính gửi\", nghiêng, đúng chuỗi GN in — không lọt vào bảng", async () => {
     const gn = await moFile(await buildQuoteBuffer(baoGia4("x", { sheets: [{ ...baoGia4("x").sheets[0], templateCode: "marico_decor" }] })));
+    // ĐỦ năm dòng người nhận + dòng mã = 6 dòng · 94,5pt, cao hơn 67pt nướng sẵn trong mẫu — ít dòng
+    // hơn thì hàng mẫu vốn đã đủ cao và phép đo chiều cao cuối bài không bao giờ đỏ được.
+    const du = { toPhone: "0909 123 456", toAddress: "123 Nguyễn Văn Linh, Q.7", toEmail: "ninh@thienngan.vn" };
     for (const ma of MAU_CLF) {
-      const ws = await moFile(await buildQuoteBuffer(baoGia4(ma)));
+      const ws = await moFile(await buildQuoteBuffer(baoGia4(ma, du)));
       const v = ws.getCell("C3").value;
       expect(Array.isArray(v?.richText), `${ma}: khối Kính gửi không có dòng mã`).toBe(true);
       const dong = chu(v).split("\n");
       expect(dong[0]).toBe("Kính gửi: CTY CP PHIM THIÊN NGÂN");
       expect(dong[1]).toBe("Ms. Ninh");
+      expect(dong, `${ma}: khối Kính gửi phải đủ 5 dòng + dòng mã`).toHaveLength(6);
       expect(dong.at(-1), `${ma}: dòng mã sai`).toBe("(Số://FP_A26_002)");
       expect(dong.at(-1), `${ma}: khác chuỗi GN in ở B8`).toBe(chu(gn.getCell("B8").value));
       const [dau, cuoi] = [v.richText[0], v.richText.at(-1)];

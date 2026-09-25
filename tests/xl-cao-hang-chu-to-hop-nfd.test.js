@@ -17,7 +17,8 @@ const CHU = [
   "Bàn check in: bàn dán AW, kích thước 1m2W x 0m75H x 0m5D",
   "Vận chuyển, lắp đặt và tháo dỡ trong ngày tại Vincom Đồng Khởi",
 ];
-// Bề rộng lấy từ các cột thật của mẫu: 16,82 (GN Ghi chú), 21,18 (CLF), 34 và 38 (Hạng Mục).
+// Bề rộng lấy từ các cột thật của mẫu: 16,82 (GN Ghi chú), 21,18 (CLF), 34 (Hạng Mục CLF trước
+// 2026-09-25, nay 39,8) và 38 (Hạng Mục GN).
 const COT = [16.81640625, 21.1796875, 34, 38];
 
 describe("chữ NFD ước lượng số dòng như chữ NFC", () => {
