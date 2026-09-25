@@ -249,7 +249,7 @@ function GridTableInner(props: GridTableProps) {
   // CẮT kiểu Excel: Ctrl+X chỉ ĐÁNH DẤU vùng nguồn (viền nét đứt) — dữ liệu chỉ bị xoá khi DÁN
   // xong (di chuyển), Esc thì huỷ. Không như cut của trình soạn thảo (xoá ngay).
   // keys: `_k` của từng hàng nguồn — finishCutMove tìm lại hàng theo khoá, không theo chỉ số (L7).
-  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number; images?: boolean; keys?: (number | undefined)[]; catId?: string } | null>(null);
+  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number; images?: boolean; noiBo?: boolean; keys?: (number | undefined)[]; catId?: string } | null>(null);
   // Point-mode BÀN PHÍM: đang gõ công thức, ký tự trước con trỏ là toán tử → mũi tên CHỌN Ô THAM
   // CHIẾU (=  ↑ → "=H3", Shift+mũi tên kéo thành vùng "=H3:H5") — đúng thao tác gõ công thức Excel.
   const kbRefRef = useRef<{ el: HTMLInputElement | HTMLTextAreaElement; base: string; after: string; start: { row: number; col: number }; cur: { row: number; col: number }; fresh: boolean } | null>(null);
@@ -1061,12 +1061,19 @@ function GridTableInner(props: GridTableProps) {
     // qexact: cờ SL CHÍNH XÁC (quantityExact — SL 4 số lẻ nạp từ Excel) của từng hàng. Không mang theo thì
     // hàng dán tính Thành Tiền theo SL làm tròn 1 số lẻ: 0,9075 × 1.000.000 ra 900.000 (soát toàn diện L19).
     const qexact = Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => !!items[rc.r0 + k]?.quantityExact);
+    // CHỨNG TỪ + LƯU KHO của bảng nội bộ: hai ô chọn không nằm trong FIELDS (không gõ/chọn vùng được), nên
+    // như ảnh, chép "cái hạng mục" (khối trải từ Hạng Mục tới NS) mà không mang chúng thì NS sang đích còn
+    // CHỨNG TỪ / LƯU KHO ở lại hàng cũ — hạng mục mang nhầm chứng từ của hàng khác.
+    const oKhoi = FIELDS.slice(rc.c0, rc.c1 + 1);
+    const noiBo = cotNoiBo && oKhoi.includes("name") && oKhoi.includes("ns")
+      ? Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => { const it = items[rc.r0 + k] as Record<string, unknown> | undefined; return [(it?.chungTu as string | null | undefined) ?? null, !!it?.luuKho] as [string | null, boolean]; })
+      : undefined;
     const catId = cut && editable ? `${Date.now().toString(36)}-${++demCat}` : undefined;   // xem CAT_DA_XONG
-    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images, qexact, catId })); } catch { /* */ }
+    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images, qexact, noiBo, catId })); } catch { /* */ }
     copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0 };
     // CẮT kiểu Excel: chưa xoá gì — chỉ đánh dấu vùng nguồn (viền nét đứt). Dán xong mới xoá
     // nguồn (= DI CHUYỂN); Esc huỷ cắt. Copy thường thì bỏ dấu cắt cũ (nếu có).
-    if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images, keys: items.slice(rc.r0, rc.r1 + 1).map((it) => it._k), catId };
+    if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images, noiBo: !!noiBo, keys: items.slice(rc.r0, rc.r1 + 1).map((it) => it._k), catId };
     else cutPendingRef.current = null;
     paintSel();
   };
@@ -1079,7 +1086,7 @@ function GridTableInner(props: GridTableProps) {
   // anhDaSang: ảnh của khối THỰC SỰ đã được ghi sang đích (soát toàn diện L21). cp.images chỉ chốt lúc
   // Ctrl+X; tới lúc dán mà cột Hình ảnh đã tắt, hay khối rơi vào nhánh 1 ô (không bao giờ chép ảnh) thì
   // ảnh không sang được — xoá ở nguồn là ảnh mất hẳn. Không sang → ảnh ở lại hàng nguồn.
-  const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }, anhDaSang = false) => {
+  const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }, anhDaSang = false, noiBoDaSang = false) => {
     const cp = cutPendingRef.current; if (!cp) return;
     cutPendingRef.current = null;
     if (cp.catId) { CAT_DA_XONG.add(cp.catId); if (CAT_DA_XONG.size > 50) CAT_DA_XONG.delete(CAT_DA_XONG.values().next().value as string); }
@@ -1099,6 +1106,8 @@ function GridTableInner(props: GridTableProps) {
       }
       // Ảnh đã theo khối sang đích (xem onCopyCut) → hàng nguồn nằm ngoài vùng dán thì bỏ ảnh.
       if (cp.images && anhDaSang && !(r >= dest.r0 && r <= dest.r1)) delete it.images;
+      // Chứng từ / lưu kho đã theo khối sang đích → hàng nguồn ngoài vùng dán về mặc định.
+      if (cp.noiBo && noiBoDaSang && !(r >= dest.r0 && r <= dest.r1)) { it.chungTu = null; it.luuKho = false; }
     }
   };
   // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
@@ -1388,7 +1397,7 @@ function GridTableInner(props: GridTableProps) {
     const COL_NAME = FIELDS.indexOf("name");   // cột DỮ LIỆU đầu tiên (FIELDS[0] là "_stt", ô tính)
     let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : COL_NAME);
     if (RO_FIELDS.has(FIELDS[startCol])) startCol = COL_NAME;   // vùng chọn bắt đầu ở cột STT → dán từ Hạng Mục
-    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][]; qexact?: boolean[]; catId?: string } | null = null;
+    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][]; qexact?: boolean[]; noiBo?: [string | null, boolean][]; catId?: string } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
     // Khối là vùng CẮT đang chờ của CHÍNH lưới này → dán = DI CHUYỂN. So bằng mã cắt duy nhất, không
     // bằng token (bộ đếm riêng từng lưới — trùng giữa hai lưới). Tính TRƯỚC finishCutMove (nó xoá dấu cắt).
@@ -1629,6 +1638,9 @@ function GridTableInner(props: GridTableProps) {
     // khác) không có `images`, mà bản cũ rơi về bộ đệm chép CŨ của lưới đích → hàng đầu nhận ảnh của lần
     // chép trước, các hàng sau bị xoá ảnh đang có. Payload không mang ảnh → không đụng ảnh đích.
     const blockImgs = sameBlock && showImages ? (internal?.images ?? null) : null;
+    // Chứng từ / lưu kho của từng hàng (onCopyCut chỉ gửi khi khối trải Hạng Mục → NS của bảng nội bộ).
+    // Đích cũng phải là bảng nội bộ — lưới chính không có hai cột này.
+    const blockNoiBo = sameBlock && cotNoiBo ? (internal?.noiBo ?? null) : null;
     // Quy ước số của khối NGOÀI (GRID-01); khối chép trong lưới luôn đọc số thô.
     const quDan = internal ? null : suyQuyUocSo(rows, (c) => FIELDS[startCol + c] === "unitPrice");
     // Khối NGOÀI (Excel/Sheets) chép theo cột ĐANG HIỆN — có Thành Tiền ngay sau Đơn Giá, cột mà FIELDS
@@ -1670,6 +1682,7 @@ function GridTableInner(props: GridTableProps) {
       // Nhãn nhóm người dùng TỰ đặt thì mang theo; nhãn tự động (A/B/1/2) để render tính lại theo vị trí mới.
       if (labels && labels[r]) it.label = labels[r];
       if (blockImgs) { const im = blockImgs[r] || []; if (im.length) it.images = [...im]; else delete it.images; }
+      if (blockNoiBo) { const [ct, lk] = blockNoiBo[r] ?? [null, false]; it.chungTu = ct; it.luuKho = lk; }
       cells.forEach((val, c) => {
         const f = truongDich(c);
         if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
@@ -1693,7 +1706,7 @@ function GridTableInner(props: GridTableProps) {
     const dc1 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotCuoi : Math.min(FIELDS.length - 1, startCol + rows[0].length - 1);
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
     if (sameBlock && laCatCuaLuoi) {
-      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs);
+      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs, !!blockNoiBo);
     }
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();
