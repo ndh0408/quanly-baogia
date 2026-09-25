@@ -11,9 +11,10 @@
 #   bash test-on-dev.sh            # mặc định SSH staging-ts (= dev.gianguyen.cloud VM)
 #   SSH=staging-ts bash test-on-dev.sh
 #
-# Cách hoạt động: SSH vào VM dev → tạo DB test RIÊNG (quanly_test, không đụng data dev) →
-# chạy 1 container Node (ĐÚNG ảnh nền của Dockerfile) trên ĐÚNG mạng + ĐÚNG Postgres của dev + code
-# đã ship (git archive ở $DIR) → npm ci + prisma migrate + vitest (REQUIRE_DB_TESTS=1) → dọn sạch.
+# Cách hoạt động: đóng gói commit HEAD (git bundle, có cả lịch sử) → SSH vào VM dev → checkout vào
+# thư mục tạm RIÊNG → tạo DB test RIÊNG (quanly_test, không đụng data dev) → chạy 1 container Node
+# (ĐÚNG ảnh nền của Dockerfile) trên ĐÚNG mạng + ĐÚNG Postgres của dev + đúng mã HEAD → npm ci +
+# prisma migrate + vitest (REQUIRE_DB_TESTS=1) → dọn sạch. Không test nhầm source cũ đang deploy ở $DIR.
 # KHÔNG hardcode bí mật: lấy mật khẩu Postgres ĐỘNG từ container đang chạy.
 #
 # ── BA CHỖ ĐÃ VÁ (audit 2026-09-22, INFRA-14) ─────────────────────────────
@@ -38,9 +39,25 @@ NODE_IMG="$(sed -n 's/^ARG NODE_IMAGE=//p' "$(dirname "$0")/Dockerfile" | head -
 MC_IMG="quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112"
 echo "▶ Chạy test trên Docker dev qua [$SSH] ($NODE_IMG) ..."
 
-ssh "$SSH" "NODE_IMG='$NODE_IMG'; MC_IMG='$MC_IMG';"'
+TEST_SHA="$(git rev-parse HEAD)" || { echo "❌ phải chạy trong repo git"; exit 1; }
+[ -z "$(git status --porcelain)" ] || { echo "❌ cây git đang bẩn: commit bản sửa trước khi kiểm HEAD"; exit 1; }
+TEST_ID="${TEST_SHA:0:12}-$$"
+BUNDLE="/tmp/quanly-test-$TEST_ID.bundle"
+DIR="/tmp/quanly-test-$TEST_ID"
+git bundle create - HEAD | ssh "$SSH" "cat > '$BUNDLE'" || { echo "❌ không gửi được git bundle tới $SSH"; exit 1; }
+
+ssh "$SSH" "NODE_IMG='$NODE_IMG'; MC_IMG='$MC_IMG'; BUNDLE='$BUNDLE'; DIR='$DIR'; TEST_SHA='$TEST_SHA';"'
   set -uo pipefail
-  DIR=/opt/stacks/quanly/quanly
+  PGUSER=""
+  cleanup_test() {
+    if [ -n "${PGUSER:-}" ]; then
+      docker exec quanly-postgres psql -U "$PGUSER" -d "$PGUSER" -c "DROP DATABASE IF EXISTS quanly_test;" >/dev/null 2>&1 || true
+    fi
+    rm -rf -- "$DIR" "$BUNDLE" 2>/dev/null || true
+  }
+  trap cleanup_test EXIT
+  git -c init.defaultBranch=master -c advice.detachedHead=false clone --quiet "$BUNDLE" "$DIR" || { echo HONG_git_clone_bundle; exit 89; }
+  [ "$(git -C "$DIR" rev-parse HEAD)" = "$TEST_SHA" ] || { echo HONG_checkout_khong_dung_SHA; exit 89; }
   PGUSER=$(docker exec quanly-postgres printenv POSTGRES_USER 2>/dev/null || echo quanly)
   PGPASS=$(docker exec quanly-postgres printenv POSTGRES_PASSWORD)
   # Nạp KHO OBJECT + KHOÁ PII của DEV vào bộ test. Thiếu chúng thì test đụng lưu trữ lặng lẽ đi
@@ -68,6 +85,7 @@ ssh "$SSH" "NODE_IMG='$NODE_IMG'; MC_IMG='$MC_IMG';"'
   docker run --rm --network "$NET" -v "$DIR":/app -w /app \
     -e DATABASE_URL="postgresql://$PGUSER:$PGPASS@quanly-postgres:5432/quanly_test?schema=public" \
     -e REDIS_URL="redis://127.0.0.1:6379/0" \
+    -e TRUST_PROXY="" -e METRICS_TOKEN="" \
     -e SESSION_SECRET="ondev-test-secret-needs-to-be-at-least-32-characters-long-ok" \
     -e NODE_ENV="test" -e REQUIRE_DB_TESTS="1" \
     -e S3_ENDPOINT="$S3EP" -e S3_ACCESS_KEY="$S3AK" -e S3_SECRET_KEY="$S3SK" \
@@ -90,6 +108,9 @@ ssh "$SSH" "NODE_IMG='$NODE_IMG'; MC_IMG='$MC_IMG';"'
       # cờ đó nên script ngã — máy chủ thật chạy GNU findutils 4.10 nên đây thuần là chuyện container).
       set -u
       apk add --no-cache openssl libc6-compat bash postgresql16-client redis font-dejavu curl tar git findutils >/dev/null 2>&1 || { echo HONG_apk_add; exit 90; }
+      git rev-parse --show-toplevel >/dev/null 2>&1 || { echo HONG_git_khong_nhin_thay_repo_trong_container; exit 97; }
+      find --version 2>&1 | head -1 | grep -q GNU || { echo HONG_khong_co_GNU_find; exit 98; }
+      find . -maxdepth 0 -printf ok 2>/dev/null | grep -qx ok || { echo HONG_find_printf; exit 98; }
       redis-server --daemonize yes --save \"\" --appendonly no >/dev/null 2>&1 || echo CANH_BAO_khong_bat_duoc_redis_cuc_bo
 
       # helm: chỉ cần binary — các bài chỉ chạy helm lint / helm template, không cần cluster.
@@ -128,17 +149,19 @@ ssh "$SSH" "NODE_IMG='$NODE_IMG'; MC_IMG='$MC_IMG';"'
       grep -aE \"Test Files|Tests \" /tmp/quanly-vitest.log | tail -6
       echo ===== BAI BI BO QUA =====
       grep -aE \"^ *[↓v] |skipped\" /tmp/quanly-vitest.log | head -40
+      if grep -aFq \"[xg-doc-numbers] BỎ QUA:\" /tmp/quanly-vitest.log; then
+        echo HONG_xg_doc_numbers_bi_bo_qua_do_khong_co_git
+        code=97
+      fi
       echo ===== EXIT=\$code =====
 
-      # Thư mục mã nguồn được mount THẲNG từ VM (không phải bản sao) — mọi thứ vừa dựng phải dọn,
-      # nếu không lần deploy sau ship nhầm artefact của bộ test.
+      # Mã nguồn là checkout tạm — dọn artefact để container kết thúc gọn.
       rm -rf node_modules web/node_modules dist public/app2 fonts/Times.ttf fonts/Times-Bold.ttf fonts/Times-Italic.ttf 2>/dev/null
       exit \$code
     "
   rc=$?
 
   echo "▶ [3/3] dọn DB test"
-  docker exec quanly-postgres psql -U "$PGUSER" -d "$PGUSER" -c "DROP DATABASE IF EXISTS quanly_test;" >/dev/null 2>&1
   exit $rc
 '
 rc=$?
