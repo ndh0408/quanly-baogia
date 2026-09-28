@@ -174,6 +174,14 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // ── ĐỔI CÓ CHỦ Ý NHƯNG HASH KHÔNG ĐỔI: 2026-09-24 (soát toàn diện đợt 4 d4-excel 1) ──
       // HE_SO_TIEU_DE nâng lên (cỡ 14: 1,045 · cỡ 18: 1,025): chỉ tiêu đề DÀI sát ngưỡng đổi căn lề
       // (wrap) và chiều cao hàng tiêu đề. Tiêu đề các fixture ở đây ngắn nên không đổi gì.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-25 (Colorfull theo ảnh chụp so với GN) ──
+      // Vẫn CHỈ fixture `clf`. ĐÃ ĐỐI CHIẾU TỪNG Ô: khác đúng bốn loại ô, không gì khác —
+      //   · C3:I3 khối "Kính gửi": thêm dòng cuối "(Số://GN26SNAP)" — mã báo giá như GN in ở B8;
+      //   · G4 "ĐƠN GIÁ" → "ĐƠN GIÁ\n(VNĐ)", H4 "THÀNH TIỀN " → "THÀNH TIỀN\n(VNĐ)" — như GN G11/H11;
+      //   · C6 chữ Hạng Mục theme1 → theme9 tint -0.5, cùng màu số STT ở B6 (bản chụp không chụp màu
+      //     chữ nên dòng này không góp vào hash, ghi ra cho đủ).
+      // Bề rộng B 12,4 → 7, D 30 → 32,4, H 15 → 18 (tổng B:I giữ nguyên) không hiện trong snapshot.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

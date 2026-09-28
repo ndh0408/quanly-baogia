@@ -247,7 +247,7 @@ describe("Colorfull đủ BA mẫu như GN — và mẫu nào cũng có Chi Ti�
     const ws = await moFile(await buildQuoteBuffer(baoGiaNgay()));
     const tieuDe = ["B", "C", "D", "E", "F", "G", "H", "I", "J"].map((c) =>
       chu(ws.getCell(`${c}${HANG_TIEU_DE}`).value).replace(/\s+/g, " ").trim().toUpperCase());
-    expect(tieuDe).toEqual(["STT", "HẠNG MỤC", "CHI TIẾT", "ĐVT", "SỐ LƯỢNG", "SỐ NGÀY", "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ"]);
+    expect(tieuDe).toEqual(["STT", "HẠNG MỤC", "CHI TIẾT", "ĐVT", "SỐ LƯỢNG", "SỐ NGÀY", "ĐƠN GIÁ (VNĐ)", "THÀNH TIỀN (VNĐ)", "GHI CHÚ"]);
   }, 120_000);
 
   it("có ngày: thành tiền = ĐƠN GIÁ × SỐ LƯỢNG × SỐ NGÀY (cùng ý nghĩa với GN có-ngày)", async () => {
@@ -439,9 +439,14 @@ describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn",
     // Có một lượt dải này gánh thêm mã dự án + lời chào, vì mẫu Colorfull không còn hàng trống nào
     // ở đầu trang. Người dùng xem file thật rồi chốt BỎ dòng đó. Bài này khoá quyết định ấy để bản
     // sau không lặng lẽ nhét lại.
+    // Sau đó (2026-09-25) người dùng xin lại MÃ, nhưng "ở dưới cùng mấy chỗ thông tin, y hệt GN":
+    // mã là dòng CUỐI của khối "Kính gửi" (hàng 3), KHÔNG quay lại dải vắt ngang bảng ở hàng 5.
     for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
       const ws = await moFile(await buildQuoteBuffer(baoGiaDau(ma)));
-      expect(tim(ws, "Số://"), `${ma}: dòng mã vẫn in ra trên bảng`).toEqual([]);
+      const ma3 = tim(ws, "Số://");
+      expect(ma3.length, `${ma}: mất mã báo giá`).toBeGreaterThan(0);
+      expect(ma3.filter((a) => !/^[A-Z]+3$/.test(a)), `${ma}: mã in ra ngoài khối Kính gửi`).toEqual([]);
+      expect(chu(ws.getCell("C3").value).split("\n").at(-1), `${ma}: mã phải là dòng cuối khối Kính gửi`).toBe("(Số://FP_A26_002)");
       expect(tim(ws, "Chân thành cảm ơn"), `${ma}: lời chào vẫn in ra trên bảng`).toEqual([]);
       // Và hàng đó phải ẨN, không để lại dải màu rỗng vắt ngang bảng.
       expect(ws.getRow(5).hidden, `${ma}: dải rỗng vẫn hiện`).toBe(true);
@@ -452,7 +457,7 @@ describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn",
     const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor", { info: true })));
     expect(tim(ws, "Thông tin chương trình").length, "mất dòng thông tin chương trình").toBeGreaterThan(0);
     expect(ws.getRow(5).hidden, "có nội dung mà hàng vẫn bị ẩn").toBeFalsy();
-    expect(tim(ws, "Số://"), "mã lại bám theo dòng thông tin chương trình").toEqual([]);
+    expect(chu(ws.getCell("B5").value), "mã lại bám theo dòng thông tin chương trình").not.toContain("Số://");
   }, 300_000);
 
   it("KHÔNG còn chữ mồi \"logo cty khách hàng\" — tính năng logo khách đã gỡ", async () => {
@@ -466,6 +471,21 @@ describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn",
     const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor")));
     expect(oChu(ws, "I3"), "khối Kính gửi chưa phủ tới I — vẫn dạt sang phải như cũ").toBe("C3");
     expect(ws.getCell("C3").alignment?.horizontal, "khối Kính gửi không canh giữa").toBe("center");
+  }, 300_000);
+
+  it("cột STT hẹp như GN, Hạng Mục cùng màu chữ với STT, tiêu đề tiền có \"(VNĐ)\"", async () => {
+    // Người dùng so ảnh chụp với GN (2026-09-25): ô STT "bự quá", chữ Hạng Mục đen trong khi số
+    // STT màu nâu cam (GN để STT và tên cùng một màu), ĐƠN GIÁ / THÀNH TIỀN thiếu "(VNĐ)".
+    for (const [ma, cotGia, cotTien] of [["clofull_decor", "G", "H"], ["clofull_banner", "G", "H"], ["clofull_conngay", "H", "I"]]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaDau(ma)));
+      expect(ws.getColumn("B").width, `${ma}: cột STT vẫn rộng như mẫu gốc`).toBeLessThanOrEqual(8);
+      expect(ws.getCell("C6").font?.color, `${ma}: chữ Hạng Mục khác màu số STT`).toEqual(ws.getCell("B6").font?.color);
+      expect(chu(ws.getCell(`${cotGia}4`).value), `${ma}: tiêu đề Đơn Giá`).toBe("ĐƠN GIÁ\n(VNĐ)");
+      expect(chu(ws.getCell(`${cotTien}4`).value), `${ma}: tiêu đề Thành Tiền`).toBe("THÀNH TIỀN\n(VNĐ)");
+    }
+    // GN không đổi: tên vẫn xanh #0070C0 của tệp mẫu.
+    const gn = await moFile(await buildQuoteBuffer(baoGiaDau("marico_decor")));
+    expect(gn.getCell("C12").font?.color).toEqual({ argb: "FF0070C0" });
   }, 300_000);
 
   it("hộp nhãn khối tổng GỌN ở F:G, các ô bên trái SẠCH nền — đúng như mẫu GN", async () => {

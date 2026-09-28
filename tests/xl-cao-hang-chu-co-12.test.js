@@ -43,12 +43,13 @@ function beRongGop(ws, addr) {
 
 describe("chữ cỡ 12: mỗi dòng 15,75pt như Excel", () => {
   for (const code of ["clofull_decor", "clofull_conngay", "clofull_banner"]) {
-    it(`${code} · khối "Kính gửi" 5 dòng cao ≥ 78,75pt (số đo Excel)`, async () => {
+    // 5 dòng thông tin + dòng mã "(Số://…)" ở cuối (thêm 2026-09-25) = 6 dòng × 15,75pt.
+    it(`${code} · khối "Kính gửi" 6 dòng cao ≥ 94,5pt (số đo Excel)`, async () => {
       const ws = await xuat(code);
       const o = ws.getCell("C3");
       expect(o.font?.size, "bài này giả định ô C3 cỡ 12 như tệp mẫu").toBe(12);
-      expect(String(o.value).split("\n")).toHaveLength(5);
-      expect(ws.getRow(3).height, "dòng Email bị xén").toBeGreaterThanOrEqual(78.75);
+      expect(String(o.value).split("\n")).toHaveLength(6);
+      expect(ws.getRow(3).height, "dòng mã cuối khối bị xén").toBeGreaterThanOrEqual(6 * 15.75);
     });
 
     it(`${code} · dải thông tin chương trình nhiều dòng: đủ 15,75pt cho MỖI dòng ước lượng`, async () => {

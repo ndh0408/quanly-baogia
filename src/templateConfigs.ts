@@ -180,12 +180,15 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       toBlockCenter: true,
       // 3-line recipient block matching the template (Cty / người liên hệ / Email).
       // Only lines with data are emitted, so it never prints empty "…" placeholders.
-      toBlockFormat: ({ company, contact, email, phone, address }: { company: string | null | undefined; contact: string | null | undefined; email: string | null | undefined; phone: string | null | undefined; address: string | null | undefined }) => {
+      // Dòng CUỐI là mã báo giá "(Số://…)" — y cách GN in ở B8 (`quoteNumberFormat` của
+      // `marico_decor`), đặt dưới cùng khối thông tin, ngay trên bảng.
+      toBlockFormat: ({ company, contact, email, phone, address, quoteNumber }: { company: string | null | undefined; contact: string | null | undefined; email: string | null | undefined; phone: string | null | undefined; address: string | null | undefined; quoteNumber?: string | null }) => {
         const lines = [`Kính gửi: ${company || "….."}`];
         if (contact) lines.push(contact);
         if (phone) lines.push(`ĐT: ${phone}`);
         if (address) lines.push(`Đ/c: ${address}`);
         if (email) lines.push(`Email: ${email}`);
+        if (quoteNumber) lines.push(`(Số://${quoteNumber})`);
         return lines.join("\n");
       },
       // "TP.HCM , ngày …" footer date — written from the quote's date (was a
@@ -267,7 +270,20 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // ngược lại: tên dài ("Banner khu khách ngồi chờ: 8m2W x 2m9H") mà Chi Tiết ngắn (". PP in
       // KTS") — đo trên file xuất: cột Hạng Mục rộng 21 làm chữ bị cắt mất dòng, còn Chi Tiết rộng
       // 50 thì bỏ trống quá nửa. Chia lại cho hai bên cùng đủ chỗ; tổng bề ngang bảng KHÔNG tăng.
-      columnWidths: { C: 34, D: 30 },
+      // CỘT STT HẸP LẠI như GN (6.6): mẫu Colorfull để B = 12.4, gần gấp đôi số cần cho "STT"/"10"/"A".
+      // THÀNH TIỀN 15 → 18: tiêu đề nay thêm dòng "(VNĐ)" (xem `headerLabels`), mà ở 15 chữ "THÀNH
+      // TIỀN" (TNR 12 đậm) đã tự ngắt hai dòng (đo COM) ⇒ ba dòng, hàng tiêu đề cao 50pt. Ở 18 nó
+      // nằm một dòng, tiêu đề hai dòng như GN.
+      // Phần còn dư trả cho Chi Tiết để TỔNG BỀ NGANG B:I GIỮ NGUYÊN (12,36 + 30 + 15 = 7 + 32,36 + 18):
+      // dải tiêu đề B2:I2 gộp suốt bảng, và số đo Excel thật về chỗ nó xuống dòng
+      // (tests/xl-tieu-de-dai-xuong-dong.test.js) chỉ đúng ở đúng bề ngang đó. Hạng Mục giữ 34 cũng vì
+      // lý do ấy (tests/xl-cao-hang-theo-be-rong-chu.test.js đo ở 34).
+      columnWidths: { B: 7, C: 34, D: 32.36328125, H: 18 },
+      // Chữ Hạng Mục của hàng mục thường cùng màu với số STT (theme 9 tint -0.5, nâu cam — đo ở B6 của
+      // mẫu), như GN để STT và tên cùng một màu xanh #0070C0.
+      nameTextColor: { theme: 9, tint: -0.499984740745262 },
+      // "(VNĐ)" dưới Đơn Giá / Thành Tiền, y chữ tiêu đề của mẫu GN (Marico_Decor.xlsx G11/H11).
+      headerLabels: { unitPrice: "ĐƠN GIÁ\n(VNĐ)", amount: "THÀNH TIỀN\n(VNĐ)" },
       columns: {
         stt:       "B",
         name:      "C",
@@ -444,6 +460,8 @@ TEMPLATE_CONFIGS.clofull_conngay = {
   },
   items: {
     ...TEMPLATE_CONFIGS.clofull_decor.items,
+    // Như bản không-ngày, chỉ khác cột Thành Tiền nay là I (không phải H — H là Đơn Giá).
+    columnWidths: { B: 7, C: 34, D: 32.36328125, I: 18 },
     columns: {
       stt:       "B",
       name:      "C",
