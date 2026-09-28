@@ -484,10 +484,13 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   if (c.toContact) setCell(ws, c.toContact, clean(quote.toContact));
   if (c.toPhone) setCell(ws, c.toPhone, clean(quote.toPhone));
   if (c.toAddress) setCell(ws, c.toAddress, clean(quote.toAddress));
+  // MÃ SẢN XUẤT CỦA CHÍNH SHEET NÀY, không phải số GN của cả báo giá: mỗi tab Excel mang mã
+  // riêng ("FP_A26_003_02") để khớp với trang Hoá đơn và với màn hình soạn.
+  const maSheet = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
   // Combined recipient block (e.g. CLF "Kính gửi: Cty X  Mr/Ms Y  Email: Z")
   if (c.toBlockCell) {
     const txt = c.toBlockFormat
-      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail, phone: quote.toPhone, address: quote.toAddress })
+      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail, phone: quote.toPhone, address: quote.toAddress, quoteNumber: maSheet })
       : (quote.toCompany || "");
     // Keep newlines (multi-line recipient block) — don't collapse via clean().
     setCell(ws, c.toBlockCell, (txt || "").trim());
@@ -557,9 +560,6 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     setCell(ws, c.title, clean(title));
   }
   if (c.quoteNumber) {
-    // MÃ SẢN XUẤT CỦA CHÍNH SHEET NÀY, không phải số GN của cả báo giá: mỗi tab Excel mang mã
-    // riêng ("FP_A26_003_02") để khớp với trang Hoá đơn và với màn hình soạn.
-    const maSheet = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
     setCell(ws, c.quoteNumber, c.quoteNumberFormat ? c.quoteNumberFormat(maSheet) : maSheet);
   }
   if (c.greeting) setCell(ws, c.greeting, quote.greeting || "");
@@ -655,6 +655,18 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // giữ nguyên viền/căn lề baked trong file mẫu. Khớp màu header của web.
   if (itemsCfg.headerRow && itemsCfg.paintHeader !== false) {
     for (const col of Object.values(cols)) paintCell(ws.getCell(`${col}${itemsCfg.headerRow}`), { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
+  }
+  // Nhãn tiêu đề cột ghi đè theo VAI TRÒ cột (không theo chữ cột) — Colorfull thêm "(VNĐ)" dưới
+  // ĐƠN GIÁ / THÀNH TIỀN như mẫu GN (Marico_Decor.xlsx G11/H11). Khai theo vai trò nên bản có-ngày
+  // (cột dịch sang H/I) tự đúng.
+  if (itemsCfg.headerRow && itemsCfg.headerLabels) {
+    for (const [role, text] of Object.entries(itemsCfg.headerLabels as Record<string, string>)) {
+      const L = cols[role];
+      if (!L) continue;
+      const o = ws.getCell(`${L}${itemsCfg.headerRow}`);
+      datStyleRieng(o, (st) => ({ alignment: { ...(st.alignment || {}), wrapText: true } }));
+      o.value = text;
+    }
   }
   // Cột "HÌNH ẢNH" (bật theo sheet): nằm NGAY SAU cột cuối của template — không dịch cột nào,
   // không đụng công thức. Header + width chỉ thêm khi bật (mặc định tắt → file y như cũ).
@@ -1091,6 +1103,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         if (cols.name) {
           setCell(ws, `${cols.name}${r}`, it.name || "");
           ensureWrap(ws.getCell(`${cols.name}${r}`));
+          // Chữ Hạng Mục cùng màu với số STT của hàng (kiểu GN: STT + tên cùng một màu xanh).
+          if (itemsCfg.nameTextColor) paintCell(ws.getCell(`${cols.name}${r}`), { fontColor: itemsCfg.nameTextColor });
         }
       }
       // Cột Chi Tiết đã bỏ khỏi bảng: không ghi dữ liệu; cuối vòng sẽ gộp vùng này vào Hạng Mục.

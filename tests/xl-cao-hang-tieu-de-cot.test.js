@@ -30,7 +30,8 @@ describe("Colorfull: hàng tiêu đề cột đủ cao cho 'THÀNH TIỀN' xuố
       it(`${code}${anh ? " + cột ảnh" : ""}`, async () => {
         const ws = await xuat(code, { anh });
         const o = ws.getCell(`${cot}4`);
-        expect(String(o.value).trim()).toBe("THÀNH TIỀN");
+        // Có thêm "(VNĐ)" như GN (2026-09-25) — nên tiêu đề luôn đủ hai dòng.
+        expect(String(o.value).trim()).toBe("THÀNH TIỀN\n(VNĐ)");
         expect(o.alignment?.wrapText, "bài giả định ô bật wrap như tệp mẫu").toBe(true);
         expect(ws.getRow(4).height, "Excel cần 31,5pt cho hai dòng TNR 12 đậm").toBeGreaterThanOrEqual(31.5);
       });
