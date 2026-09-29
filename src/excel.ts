@@ -399,19 +399,38 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
 // Nên: `chupAnhMau` CHỤP hình học tuyệt đối (EMU) của từng ảnh mẫu ngay khi vừa nạp tệp, theo bề rộng
 // cột / chiều cao hàng GỐC; `datLaiAnhMau` — chạy SAU mọi bước đổi kích thước — tính lại neo theo kích
 // thước MỚI:
-//   · KÍCH THƯỚC luôn giữ đúng như trong tệp mẫu — một dòng cấu hình bề rộng cột không được làm méo logo;
+//   · KÍCH THƯỚC giữ đúng như trong tệp mẫu — một dòng cấu hình bề rộng cột không được làm méo logo
+//     (mẫu bật `anhMau.giuTiLeAnhGoc` thì bề ngang theo tỉ lệ ẢNH GỐC, xem cuối khối chú thích này);
 //   · VỊ TRÍ theo `editAs` của chính ảnh trong tệp mẫu: "absolute" đứng yên trên trang; còn lại ("oneCell"
 //     — mọi mẫu hiện có — hay "twoCell") đi theo Ô chứa góc trên-trái, lệch đúng bấy nhiêu EMU so với
 //     mép trái/trên của ô ấy như trong mẫu: nghĩa "di chuyển nhưng không co giãn theo ô" của Excel.
 // Neo mới luôn nằm TRONG cột/hàng của nó và không rơi vào cột/hàng ẩn (bề rộng 0).
-//   · Colorfull: cột A và hàng 1 không đổi ⇒ logo về ĐÚNG hình trong tệp mẫu (neo C+13,7px → C+208px).
+//   · Colorfull: cột A và hàng 1 không đổi ⇒ logo về đúng CHỖ và CHIỀU CAO trong tệp mẫu, bề ngang theo
+//     tỉ lệ ảnh gốc (neo C+13,7px → C+219,6px: 205,96 × 81,33px, tỉ lệ 2,532 như PNG 471×186).
 //   · GN: `columnWidths` chỉ đổi C/D, bên trái logo "GIA NGUYỄN" (F2 → G2); F, G, hàng 2 không đổi ⇒
 //     neo ra y hệt như cũ — logo vẫn đi theo khối "From:" ở E2 như mọi tệp GN đã gửi.
-// Đổi px theo đúng cách Excel đo ở 96dpi — Excel COM (Shapes.Left/Width) đọc tệp xuất ra đúng
-// 89,67 → 284 × 81,33px của tệp mẫu, khớp tới 0,01px; trình đo khác (LibreOffice ~7,4px/đơn vị, Excel ở
-// DPI khác) lệch vài px, dưới 1%.
+// Đổi px theo đúng cách Excel đo ở 96dpi — Excel COM (Shapes.Left/Width/Height) đọc logo Colorfull của
+// tệp xuất ra đúng x 89,67 → 295,62, 205,96 × 81,33px (tỉ lệ 2,532), khớp số tính ở đây tới 0,01px;
+// trình đo khác (LibreOffice ~7,4px/đơn vị, Excel ở DPI khác) lệch vài px, dưới 1%.
 // Ảnh hạng mục (`insertItemImages`) thêm vào SAU lúc chụp nên không bị đụng.
+//
+// ── TUỲ CHỌN `giuTiLeAnhGoc` (cấu hình mẫu: `anhMau.giuTiLeAnhGoc`) ─────────────────────────────────
+// "Đúng hình tệp mẫu" chưa chắc là đúng hình ẢNH: chính tệp mẫu Colorfull đã bóp logo — vẽ 194,33 ×
+// 81,33px (tỉ lệ 2,389) trong khi PNG nhúng `xl/media/image1.png` là 471×186 (2,532; pHYs hai chiều
+// bằng nhau) ⇒ hẹp ngang 5,6%. Mẫu nào bật cờ này thì ảnh của nó giữ CHIỀU CAO và GÓC TRÊN-TRÁI như
+// tệp mẫu, còn BỀ NGANG tính lại = cao × tỉ lệ pixel của chính tệp ảnh (đọc đầu tệp PNG/GIF/JPEG trong
+// workbook — không ghi cứng số nào). Đọc không ra kích thước thì giữ hình tệp mẫu như không bật.
+// Mép phải dời ra vài px nên mẫu bật cờ phải còn chỗ trống bên phải ảnh: tests/xl-anh-mau-giu-hinh
+// .test.js khoá việc logo Colorfull không đè ô có chữ / ô gộp nào ở hàng 1–4.
 const EMU_MOI_PX_ANH = 9525, EMU_MOI_PT_ANH = 12700;
+/** Tỉ lệ rộng / cao theo PIXEL của tệp ảnh mà `anh` (một phần tử `ws._media`) trỏ tới; không đọc được → null. */
+function tiLeAnhGoc(ws: any, anh: any): number | null {
+  const media = ws.workbook?.getImage?.(anh?.imageId);
+  if (!media?.buffer) return null;
+  const ext = String(media.extension || "").toLowerCase();
+  const d = imgDims(Buffer.from(media.buffer), ext === "jpg" ? "jpeg" : ext);
+  return d && d.w > 0 && d.h > 0 ? d.w / d.h : null;
+}
 /** Bề rộng px Excel vẽ cho cột `c` (1-based): trunc(((256·w + trunc(128/7)) / 256) · 7) — `w` là bề rộng
  *  LƯU (đã gồm đệm), chữ số rộng nhất 7px (Calibri 11, font Normal của mọi mẫu). Ẩn → 0; không khai → 64. */
 function pxCotExcel(ws: any, c: number): number {
@@ -442,19 +461,33 @@ function datNeoTuyetDoi(ws: any, a: any, x: number, y: number) {
   a.nativeCol = c; a.nativeColOff = Math.round(x - trai);
   a.nativeRow = r; a.nativeRowOff = Math.round(y - tren);
 }
-export type AnhMau = { anh: any; tuyetDoi: boolean; cot: number; hang: number; dx: number; dy: number; x: number; y: number; rong: number | null; cao: number | null };
-export function chupAnhMau(ws: any): AnhMau[] {
+export type AnhMau = {
+  anh: any; tuyetDoi: boolean; cot: number; hang: number; dx: number; dy: number; x: number; y: number;
+  rong: number | null; cao: number | null;
+  /** oneCellAnchor + `giuTiLeAnhGoc`: `ext` (px) mới, bề ngang theo tỉ lệ ảnh gốc. */
+  ext: { width: number; height: number } | null;
+};
+export type TuyChonAnhMau = { giuTiLeAnhGoc?: boolean };
+export function chupAnhMau(ws: any, tuyChon: TuyChonAnhMau = {}): AnhMau[] {
   const ds: AnhMau[] = [];
   for (const anh of (Array.isArray(ws._media) ? ws._media : [])) {
-    const { tl, br, editAs } = anh?.range || {};
+    const { tl, br, editAs, ext } = anh?.range || {};
     if (anh?.type !== "image" || !tl || !Number.isFinite(tl.nativeCol) || !Number.isFinite(tl.nativeRow)) continue;
     const x = mepTraiCot(ws, tl.nativeCol) + tl.nativeColOff, y = mepTrenHang(ws, tl.nativeRow) + tl.nativeRowOff;
-    // Ảnh neo kiểu oneCellAnchor (tl + ext) không có br: kích thước nằm sẵn trong `ext` (px), tự giữ nguyên.
+    // Ảnh neo kiểu oneCellAnchor (tl + ext) không có br: kích thước nằm sẵn trong `ext` (px), tự giữ nguyên
+    // (trừ khi `giuTiLeAnhGoc` — khi đó `ext` mới giữ chiều cao, bề ngang theo ảnh gốc).
     const coBr = br && Number.isFinite(br.nativeCol) && Number.isFinite(br.nativeRow);
+    let rong = coBr ? mepTraiCot(ws, br.nativeCol) + br.nativeColOff - x : null;
+    const cao = coBr ? mepTrenHang(ws, br.nativeRow) + br.nativeRowOff - y : null;
+    let extMoi: AnhMau["ext"] = null;
+    const tiLe = tuyChon.giuTiLeAnhGoc ? tiLeAnhGoc(ws, anh) : null;
+    if (tiLe) {
+      if (cao != null && cao > 0) rong = cao * tiLe;
+      else if (!coBr && Number(ext?.height) > 0) extMoi = { width: Number(ext.height) * tiLe, height: Number(ext.height) };
+    }
     ds.push({
       anh, tuyetDoi: editAs === "absolute", cot: tl.nativeCol, hang: tl.nativeRow, dx: tl.nativeColOff, dy: tl.nativeRowOff, x, y,
-      rong: coBr ? mepTraiCot(ws, br.nativeCol) + br.nativeColOff - x : null,
-      cao: coBr ? mepTrenHang(ws, br.nativeRow) + br.nativeRowOff - y : null,
+      rong, cao, ext: extMoi,
     });
   }
   return ds;
@@ -468,6 +501,7 @@ export function datLaiAnhMau(ws: any, ds: AnhMau[]) {
     const { tl, br } = m.anh.range;
     datNeoTuyetDoi(ws, tl, x, y);
     if (br && m.rong != null && m.cao != null) datNeoTuyetDoi(ws, br, x + m.rong, y + m.cao);
+    if (!br && m.ext) m.anh.range.ext = m.ext;
   }
 }
 
@@ -536,7 +570,7 @@ function unmergeTotals(ws: any, cfg: any, lastItemRow: any) {
  *  sheetLabel: khi báo giá có NHIỀU sheet, tên sheet được nối vào tiêu đề ("… - Banner"). */
 function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, sheetLabel?: string, sheetIdx = 0, tongSheet = 1) {
   // Hình học ảnh của tệp mẫu theo kích thước GỐC — trước MỌI bước đổi cột/hàng (xem `chupAnhMau`).
-  const anhMau = chupAnhMau(ws);
+  const anhMau = chupAnhMau(ws, cfg.anhMau);
   applyTemplateCleanup(ws, cfg);
 
   const c = cfg.cells;

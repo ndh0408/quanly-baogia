@@ -170,6 +170,12 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       extraCellsToClear: ["J5", "J8", "G22", "C3"],
       keepImagesAboveRow: 3,
     },
+    // LOGO COLORFUL THEO ĐÚNG TỈ LỆ ẢNH GỐC. Chính tệp mẫu đã bóp nó: vẽ 194,33 × 81,33px (2,389) trong
+    // khi PNG nhúng là 471×186 (2,532) — hẹp ngang 5,6%, chủ repo thấy "méo". Giữ chiều cao 81,33px
+    // (hàng 1 dựng cho nó) và góc trên-trái như mẫu, bề ngang tính lại từ kích thước PNG thật: 205,96px.
+    // Mép phải vẫn cách ô chữ gần nhất (khối người gửi F1:I1) hơn 300px. Xem `chupAnhMau` (src/excel.ts).
+    // Kế thừa sang `clofull_banner` / `clofull_conngay` qua spread. Ba mẫu GN không bật.
+    anhMau: { giuTiLeAnhGoc: true },
     cells: {
       title:       "B2",
       titleFormat: baoGiaTitle,
@@ -284,7 +290,8 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // đúng ở đúng bề ngang đó. Hạng Mục giữ 34 cũng vì lý do ấy (tests/xl-cao-hang-theo-be-rong-chu
       // .test.js đo ở 34), Ghi Chú giữ bề rộng của tệp mẫu.
       // Thu cột B làm mép cột C/D dịch trái — logo COLORFUL của mẫu neo B → D nên KHÔNG được để neo
-      // của nó đi theo: src/excel.ts (`chupAnhMau` / `datLaiAnhMau`) giữ nguyên hình của logo.
+      // của nó đi theo: src/excel.ts (`chupAnhMau` / `datLaiAnhMau`) giữ chỗ và chiều cao của logo như
+      // tệp mẫu (bề ngang theo tỉ lệ ảnh gốc — `anhMau` ở trên).
       columnWidths: { B: 7, C: 34, D: 32.36328125, H: 18 },
       // Chữ Hạng Mục của hàng mục thường cùng màu với số STT (theme 9 tint -0.5 — accent6 F79646 của
       // tệp mẫu tối đi một nửa, Excel vẽ ra #974706 nâu cam; đọc ở B6 của mẫu), như GN để STT và tên
