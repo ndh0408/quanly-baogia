@@ -184,6 +184,15 @@ Prisma sinh ra thì vài tháng sau ta đang EXPLAIN một truy vấn không cò
 Nó đã tìm ra một index thiếu thật (trang Mã khách hàng sắp theo `createdAt` mà
 không có index nào phục vụ).
 
+Dữ liệu thử có `createdAt` **hoán vị** so với thứ tự chèn (correlation ≈ 0), và
+trang SÂU chỉ bỏ qua ~10% số hàng dựng. Giá của một Index Scan đọc nhiều hàng do
+thứ tự vật lý của bảng quyết định, mà thứ tự đó do lượt trước và autovacuum định
+đoạt: trước đây trang 100 (bỏ qua 40% bảng) lật sang Seq Scan mỗi khi autovacuum
+rơi vào giữa lúc script đang chèn — bộ hoạch định chọn đúng, cổng đỏ vì lịch sử
+của bảng chứ không vì thiếu index. Khi đỏ, chẩn đoán (SQL, nút Seq Scan với số
+hàng ước lượng/thật, thống kê bảng, correlation của cột sắp xếp, kế hoạch bị gạt
+đi) ra **stderr** — `verify-local.sh` đổ stdout vào `/dev/null`.
+
 `PRISMA_LOG_QUERIES` **không được bật ở production**: câu SQL kèm tham số, tức
 tên khách, số điện thoại và mọi thứ người dùng gõ vào ô tìm kiếm sẽ nằm trong
 nhật ký.

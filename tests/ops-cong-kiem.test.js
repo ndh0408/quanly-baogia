@@ -7,8 +7,9 @@
  * GAP1-08: rc-qa.mjs coi 404 là đạt khi mong 200, và bỏ qua 403 khi đo hiệu năng.
  * INFRA-10: app không khai stop_grace_period (Docker SIGKILL sau 10s = đúng lưới tắt 10s của app).
  * INFRA-11: không đường nào đang chạy quét lỗ hổng của IMAGE.
+ * §17: explain-hot-paths đỏ/xanh theo LỊCH SỬ của bảng (thứ tự vật lý), không theo index.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { dongVoNghia } from "../scripts/ci/check-line-refs.mjs";
@@ -101,5 +102,76 @@ describe("INFRA-08 — CronJob backup (k8s) không bị NetworkPolicy của chí
     const cron = doc("infra/k8s/backup-cronjob.yaml");
     expect(doc("infra/k8s/networkpolicy.yaml")).toMatch(/matchLabels: \{ app: quanly \}/);
     expect(cron).toMatch(/template:\s*\n(?:\s*#.*\n)*\s*metadata:\s*\n\s*labels: \{ app: quanly, component: db-backup \}/);
+  });
+});
+
+// Cổng [5/13] của verify đỏ trong lượt đầy đủ rồi xanh khi chạy riêng (2026-09-29). Gốc rễ, đo trên
+// CSDL test: autovacuum rơi vào giữa lúc script chèn 5.000 báo giá → các lô sau vào ĐẦU bảng →
+// correlation(createdAt) 0,98 → −0,46 → trang 100 (bỏ qua 40% bảng) lật sang Seq Scan + Sort, chi phí
+// 779 so với 851 của đường index. Bộ hoạch định chọn ĐÚNG; cổng đỏ vì lịch sử của bảng, không vì
+// thiếu index. Khối THỨ TỰ VẬT LÝ đầu script có đủ số đo.
+describe("§17 — explain-hot-paths: phán quyết theo INDEX, không theo thứ tự vật lý của bảng", () => {
+  const TEP = "scripts/db/explain-hot-paths.mjs";
+  const src = doc(TEP);
+  // Chỉ import khi phần CHẠY cổng đã được chốt: thiếu chốt thì chính lần import sẽ dựng 5.000 dòng
+  // vào CSDL test ngay giữa bộ test song song (rồi process.exit giết luôn worker).
+  const coChot = /^if \(process\.argv\[1\] && import\.meta\.url === pathToFileURL\(path\.resolve\(process\.argv\[1\]\)\)\.href\) await chayCong\(\);$/m.test(src);
+  let m = {};
+  beforeAll(async () => {
+    if (coChot) m = await import("../scripts/db/explain-hot-paths.mjs");
+  });
+  const tuongQuan = (x, y) => {
+    const n = x.length;
+    const tb = (a) => a.reduce((s, v) => s + v, 0) / n;
+    const mx = tb(x), my = tb(y);
+    let sxy = 0, sx = 0, sy = 0;
+    for (let i = 0; i < n; i++) {
+      sxy += (x[i] - mx) * (y[i] - my);
+      sx += (x[i] - mx) ** 2;
+      sy += (y[i] - my) ** 2;
+    }
+    return sxy / Math.sqrt(sx * sy);
+  };
+
+  it("phần chạy cổng nằm sau chốt import.meta.url === argv[1] — import từ test không chạm CSDL", () => {
+    expect(coChot).toBe(true);
+  });
+
+  it("trang SÂU bỏ qua ~10% số dòng dựng: ở 40% (trang 100 cũ) Seq Scan là lựa chọn ĐÚNG khi thứ tự lệch", () => {
+    for (const n of [5000, 20000]) {
+      const boQua = (m.trangSau(n) - 1) * m.CO_TRANG;
+      expect(boQua, `${n} dòng: vẫn phải là trang SÂU`).toBeGreaterThanOrEqual(10 * m.CO_TRANG);
+      // Điểm hoà đo được ở correlation ≈ 0 là ~30–35% bảng; 15% là trần có biên.
+      expect((boQua + m.CO_TRANG) / n, `${n} dòng: trang SÂU đọc quá sâu`).toBeLessThanOrEqual(0.15);
+    }
+    expect(src, "đường trang SÂU phải lấy số trang từ trangSau()").toMatch(/const sau = trangSau\(SO_DONG\);/);
+    expect(src).not.toMatch(/page: 100\b/);
+  });
+
+  it("createdAt dữ liệu thử KHÔNG tương quan với thứ tự chèn — cả toàn bộ lẫn trong từng lô 500", () => {
+    const goc = Date.UTC(2026, 0, 1);
+    for (const n of [5000, 20000]) {
+      const chiSo = Array.from({ length: n }, (_, i) => i);
+      const t = chiSo.map((i) => m.thoiDiemTao(i, n, goc).getTime());
+      expect(new Set(t).size, "mỗi dòng một thời điểm riêng").toBe(n);
+      expect(Math.max(...t)).toBeLessThan(goc);
+      expect(Math.abs(tuongQuan(chiSo, t))).toBeLessThan(0.05);
+      // FSM xếp được các LÔ vào bất cứ đâu trong bảng; bên trong một lô thì thứ tự chèn giữ nguyên.
+      for (let lo = 0; lo < n; lo += 500) {
+        expect(Math.abs(tuongQuan(chiSo.slice(lo, lo + 500), t.slice(lo, lo + 500)))).toBeLessThan(0.1);
+      }
+    }
+  });
+
+  it("mã dựng dữ liệu dùng thoiDiemTao cho CẢ khách hàng lẫn báo giá", () => {
+    expect(src.match(/createdAt: thoiDiemTao\(lo \+ i, SO_DONG, goc\)/g) ?? []).toHaveLength(2);
+  });
+
+  it("timSeqScan đếm số dòng ĐỌC (ra + bị lọc bỏ, nhân số vòng), không phải số dòng ra", () => {
+    const ke = {
+      "Node Type": "Limit",
+      Plans: [{ "Node Type": "Seq Scan", "Relation Name": "Quote", "Actual Rows": 1, "Rows Removed by Filter": 4999, "Actual Loops": 2 }],
+    };
+    expect(m.timSeqScan(ke).map((s) => [s.bang, s.dong])).toEqual([["Quote", 10000]]);
   });
 });
