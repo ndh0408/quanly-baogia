@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
-import { type ItemK, nextK, autoGrow, chuaDoCao, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
+import { type ItemK, nextK, autoGrow, chuaDoCao, caretIndexAtPoint, dangGoIME, CHUNG_TU, COT_NOI_BO } from "../lib/gridShared";
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, khopCotThanhTien, laPhanTram, chuKhongRaSo, coBoiSo, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
@@ -76,8 +76,6 @@ type Addr = { row: number; field: string; L: string };
 /** Cảnh báo gom trong MỘT lượt dán (xem pasteCellVal) — onPaste báo một lần khi dán xong. */
 type BaoDan = { moHo: string[]; khongSo: string[]; boiSo: [string, number][] };
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote", "ns"]);
-/** Lựa chọn của cột CHỨNG TỪ — giá trị lưu khớp `chungTu` trong src/validators.ts. */
-const CHUNG_TU: Array<[string, string]> = [["VAT", "VAT"], ["HDNS", "HĐNS"], ["TM", "TM"]];
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
 // Bấm vào những vùng này KHÔNG được coi là "rời lưới" → GIỮ vùng chọn.
@@ -2739,7 +2737,7 @@ function GridTableInner(props: GridTableProps) {
               <th scope="col">THÀNH TIỀN</th>
               <th scope="col">GHI CHÚ</th>
               {internalNote && <th scope="col" className="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(không xuất Excel)</span></th>}
-              {cotNoiBo && <><th scope="col">NS</th><th scope="col">CHỨNG TỪ</th><th scope="col">LƯU KHO</th></>}
+              {cotNoiBo && COT_NOI_BO.map((nhan) => <th scope="col" key={nhan}>{nhan}</th>)}
               {showImages && <th scope="col" className="th-images">HÌNH ẢNH<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(có xuất Excel)</span></th>}
               {approveCol && <th scope="col">DUYỆT</th>}
               {payCol && <th scope="col">THANH TOÁN</th>}

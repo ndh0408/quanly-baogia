@@ -37,6 +37,14 @@ export function dangGoIME(e: {
 let _kSeq = 1;
 export const nextK = () => _kSeq++;
 
+// BA CỘT CHỈ CỦA BẢNG NỘI BỘ (Chi phí HCM · Phí khách hàng · Hà Nội — GridTable `cotNoiBo`). Lưới soạn
+// và màn kế toán chỉ-xem (InternalQuoteView) đọc CÙNG hai hằng này: kế toán đối chiếu chứng từ theo đúng
+// chữ người soạn nhìn thấy, hai nơi tự gõ nhãn là hai bản sẽ trôi khỏi nhau.
+/** Tiêu đề ba cột, đúng thứ tự trên lưới (sau GHI CHÚ, trước DUYỆT / THANH TOÁN). */
+export const COT_NOI_BO = ["NS", "CHỨNG TỪ", "LƯU KHO"] as const;
+/** Lựa chọn của cột CHỨNG TỪ — giá trị lưu khớp `chungTu` trong src/validators.ts. */
+export const CHUNG_TU: ReadonlyArray<readonly [string, string]> = [["VAT", "VAT"], ["HDNS", "HĐNS"], ["TM", "TM"]];
+
 // Ô nhiều dòng tự cao theo nội dung. Đọc `scrollHeight` BUỘC trình duyệt tính lại bố cục NGAY lúc
 // đó, nếu trước đó có thao tác GHI làm bố cục hết hiệu lực. Gộp về cuối khung hình bằng rAF để gõ
 // 20 ký tự trong một frame chỉ đo một lần. Ô đang chờ giữ trong Set nên không xếp trùng.

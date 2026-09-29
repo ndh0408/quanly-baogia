@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Me } from "../lib/api";
-import type { ItemK } from "../lib/gridShared";
+import { CHUNG_TU, COT_NOI_BO, type ItemK } from "../lib/gridShared";
 import * as M from "../lib/quoteMath";
 import { ExtraPayDialog, extraTableSum } from "../components/ExtraTables";
 import { mauBangHn } from "../components/HnTables";
@@ -20,6 +20,13 @@ const rowTotal = (it: any, coNgay: boolean) => {
   const qty = M.qtyForAmount(it), price = Number(it.unitPrice) || 0, days = coNgay && it.days != null ? Number(it.days) : null;
   return Math.round(days && days > 0 ? qty * days * price : qty * price);
 };
+
+// Ba cột NS · CHỨNG TỪ · LƯU KHO của bảng nội bộ (4e24308) — màn này là nơi KẾ TOÁN làm việc (tích thanh
+// toán), mà chứng từ (VAT / HĐNS / TM) và lưu kho chính là thứ kế toán cần để đối chiếu. Máy chủ đã gửi
+// đủ ba trường (presentQuoteForInternal chỉ lược ảnh chứng từ) nên chỉ việc vẽ. CHỈ ĐỌC: sửa là việc của
+// người soạn trên lưới — quyền quote:internal:view không mở thêm đường ghi nào.
+const nhanChungTu = (v: unknown) => CHUNG_TU.find(([ma]) => ma === v)?.[1] ?? null;
+const SO_COT = 5 + COT_NOI_BO.length;
 
 // Hàng bảng Hà Nội nằm ở `Quote.hnTables` (cấp báo giá, 2026-09-15) nên KHÔNG có sheetId —
 // đường thanh toán của nó là POST /:id/hn/:rid/pay. Hai dạng đích, một hộp thoại.
@@ -66,15 +73,18 @@ export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) 
           <div key={`${s.hn ? "hn" : s.sheetId}-${ti}`} className="list-wrap" style={{ marginBottom: 18 }}>
             <h3 style={{ margin: "4px 0 8px" }}><span className={`extra-cat-badge cat-${t.category}`}>{catLabel(t.category)}</span>{t.name ? ` — ${t.name}` : ""} {s.sheetName ? <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>({s.sheetName})</span> : null}</h3>
             <table className="list-table">
-              <thead><tr><th scope="col">Hạng mục</th><th scope="col" className="num" style={{ width: 80 }}>SL</th><th scope="col" className="num" style={{ width: 120 }}>Đơn giá</th><th scope="col" className="num" style={{ width: 130 }}>Thành tiền</th><th scope="col" style={{ width: 150 }}>Thanh toán</th></tr></thead>
+              <thead><tr><th scope="col">Hạng mục</th><th scope="col" className="num" style={{ width: 80 }}>SL</th><th scope="col" className="num" style={{ width: 120 }}>Đơn giá</th><th scope="col" className="num" style={{ width: 130 }}>Thành tiền</th>{COT_NOI_BO.map((nhan) => <th scope="col" key={nhan}>{nhan}</th>)}<th scope="col" style={{ width: 150 }}>Thanh toán</th></tr></thead>
               <tbody>
-                {rows.length === 0 ? <tr><td colSpan={5} className="muted" style={{ textAlign: "center", padding: 14 }}>(không có hàng)</td></tr>
+                {rows.length === 0 ? <tr><td colSpan={SO_COT} className="muted" style={{ textAlign: "center", padding: 14 }}>(không có hàng)</td></tr>
                   : rows.map((it: any, ri: number) => (
                     <tr key={it.rid || ri}>
                       <td>{it.name || dash}</td>
                       <td className="num">{M.fmtNumCell(it.quantity, !!it.quantityExact)}</td>
                       <td className="num">{M.fmtMoney(Number(it.unitPrice) || 0)}</td>
                       <td className="num">{M.fmtMoney(rowTotal(it, ngay))}</td>
+                      <td className="col-ns" style={{ whiteSpace: "pre-line", minWidth: 120 }}>{typeof it.ns === "string" && it.ns.trim() ? it.ns : dash}</td>
+                      <td className="col-chung-tu">{nhanChungTu(it.chungTu) ?? dash}</td>
+                      <td className="col-luu-kho">{it.luuKho ? <span role="img" aria-label="Có lưu kho" title="Có lưu kho">✓</span> : dash}</td>
                       <td className="col-pay">
                         {canPay
                           ? <button type="button" className={`btn btn-xs ${it.paid ? "btn-success" : ""}`} title={it.paid && it.paidAt ? `Đã thanh toán ${fmtDate(it.paidAt)}` : undefined} onClick={() => setPay(s.hn ? { hn: true, item: it } : { sheetId: s.sheetId, item: it })}>{it.paid ? "✓ Đã TT" : "Thanh toán"}</button>
@@ -89,7 +99,7 @@ export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) 
                   <tr>
                     <td colSpan={3} style={{ textAlign: "right", fontWeight: 600 }}>Tổng</td>
                     <td className="num" style={{ fontWeight: 600 }}>{M.fmtMoney(extraTableSum(t, ngay))}</td>
-                    <td />
+                    <td colSpan={SO_COT - 4} />
                   </tr>
                 </tfoot>
               )}
