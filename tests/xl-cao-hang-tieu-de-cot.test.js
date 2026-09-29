@@ -7,9 +7,9 @@
 //     wrap) không vừa bề rộng cột nên Excel ngắt hai dòng "THÀNH / TIỀN", cần 31,5pt — hàng 25pt
 //     xén mất nửa trên dòng đầu và nửa dưới dòng hai. Đúng ở cả ba mẫu Colorfull (bản có ngày thì ô
 //     đó dịch sang cột I).
-//     2026-09-25: nhãn nay là "THÀNH TIỀN\n(VNĐ)" như GN, và cột nới 15 → 17,1 để "THÀNH TIỀN" nằm
-//     gọn MỘT dòng — không thì Excel ngắt ba dòng "THÀNH / TIỀN / (VNĐ)". Vẫn đúng hai dòng, nên ngưỡng
-//     31,5pt (số đo COM cho hai dòng TNR 12 đậm) giữ nguyên.
+//     Sau đó nhãn thành "THÀNH TIỀN\n(VNĐ)" như GN, và cột nới 15 → 18 để "THÀNH TIỀN" nằm gọn MỘT
+//     dòng — không thì Excel ngắt ba dòng "THÀNH / TIỀN / (VNĐ)". Excel COM đo ở 18 (2026-09-29):
+//     "THÀNH TIỀN" một dòng 15,75pt, cả nhãn hai dòng 31,5pt — nên ngưỡng 31,5pt giữ nguyên.
 //   · GN, hàng tiêu đề "BẢNG BÁO GIÁ …" (B7, Times New Roman 14 đậm) cao 17,5pt trong khi MỘT dòng
 //     cỡ 14 cần 18,75pt — tiêu đề ngắn (không kích hoạt nhánh xuống dòng của L44) bị hụt 1,25pt.
 import { describe, it, expect } from "vitest";

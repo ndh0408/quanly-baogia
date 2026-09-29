@@ -3808,14 +3808,16 @@ textarea[aria-invalid="true"] {
    `public/style.css` tô chữ hàng nhóm #9a5b14 và nhóm con #1f4e79: đúng hai màu mà tệp Excel
    CŨ dùng. Tệp nay theo mẫu người dùng chỉnh tay (`sectionTextColor` / `subTextColor` trong
    `src/templateConfigs.ts`):
-     hàng nhóm     = theme5 tint -0.25 → accent2 #C0504D tối đi 25% = #953735 (đỏ gạch)
+     hàng nhóm     = theme5 tint -0.25 → accent2 #C0504D tối đi 25% = #963634 (đỏ gạch — đúng số Excel
+                     vẽ, đo bằng Excel COM; bảng màu Office in #953735 vì tính HSL số thực, Excel tính
+                     HLS nguyên thang 240 — xem tests/cf-clf-mau-man-hinh-khop-tep.test.js)
      hàng nhóm con = #4F513E (xanh rêu)
    Thêm lớp `.clf-theme` nên độ ưu tiên cao hơn bộ chọn gốc, thắng bất kể thứ tự nạp. */
 .excel-table.clf-theme tr.section-row input,
 .excel-table.clf-theme tr.section-row td.col-price,
 .excel-table.clf-theme tr.section-row td.col-amount,
 .excel-table.clf-theme tr.section-row td.col-notes textarea {
-  color: #953735;
+  color: #963634;
 }
 .excel-table.clf-theme tr.subgroup-row input,
 .excel-table.clf-theme tr.subgroup-row td.col-hangmuc textarea,
@@ -3853,16 +3855,17 @@ textarea[aria-invalid="true"] {
    để yên theo chủ repo. `:not(.subgroup-row)` vì hàng nhóm con cũng mang lớp section-row. */
 .excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-stt,
 .excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-hangmuc textarea {
-  color: #953735;
+  color: #963634;
 }
 .excel-table.clf-theme tr.subgroup-row td.col-stt {
   color: #4f513e;
 }
-/* TÊN HẠNG MỤC Colorfull: tệp Excel tô `items.nameTextColor` (#227771, xanh ngọc theo nền tiêu đề
-   cột — 2026-09-25) cho tên của hàng hạng mục; lưới thì vẫn rơi về #0066cc chung của GN. Chỉ hàng
-   hạng mục (`grp-head` — hàng con dùng chung ô tên gộp của nó), không đụng nhóm / nhóm con / info. */
+/* TÊN HẠNG MỤC Colorfull: tệp Excel tô `items.nameTextColor` = theme 9 tint -0.5 (accent6 #F79646
+   của tệp mẫu tối đi một nửa — Excel vẽ ra #974706 nâu cam, cùng màu số STT) cho tên của hàng hạng
+   mục; lưới thì vẫn rơi về #0066cc chung của GN. Chỉ hàng hạng mục (`grp-head` — hàng con dùng chung
+   ô tên gộp của nó), không đụng nhóm / nhóm con / info. */
 .excel-table.clf-theme tr.grp-head td.col-hangmuc textarea {
-  color: #227771;
+  color: #974706;
 }
 
 /* FE-06 BẮT ĐẦU — TƯƠNG PHẢN WCAG AA (4.5:1) cho nút/chữ trạng thái.
@@ -4037,10 +4040,11 @@ textarea[aria-invalid="true"] {
 :root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc) :is(input, textarea) {
   color: #8ab8f0; /* xanh #0066cc của giấy chỉ 3:1 trên nền tối */
 }
-/* Tên hạng mục Colorfull bản tối: luật sáng #227771 ở trên có độ ưu tiên (0,4,3) THẮNG luật tối ngay
-   trên (0,4,2) và chỉ ~3:1 trên nền tối (dưới 4,5:1 AA) — nâng lên tông sáng cùng họ xanh ngọc. */
+/* Tên hạng mục Colorfull bản tối: luật sáng #974706 ở trên có độ ưu tiên (0,4,3) THẮNG luật tối ngay
+   trên (0,4,2) và chỉ ~2,6:1 trên nền tối — nâng lên tông sáng CÙNG họ màu: accent6 sáng lên 20%
+   (theme 9 tint +0.2 = #F9AA6A), ~8,5–9,2:1 trên --surface / --surface-2 tối. */
 :root[data-theme="dark"] .excel-table.clf-theme tr.grp-head td.col-hangmuc textarea {
-  color: #8fd3cd;
+  color: #f9aa6a;
 }
 :root[data-theme="dark"] .excel-table td.col-internal-note textarea {
   color: #d9b36a;

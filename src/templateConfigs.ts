@@ -180,17 +180,19 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       toBlockCenter: true,
       // 3-line recipient block matching the template (Cty / người liên hệ / Email).
       // Only lines with data are emitted, so it never prints empty "…" placeholders.
-      toBlockFormat: ({ company, contact, email, phone, address }: { company: string | null | undefined; contact: string | null | undefined; email: string | null | undefined; phone: string | null | undefined; address: string | null | undefined }) => {
+      // Dòng CUỐI là mã báo giá "(Số://…)" — y chuỗi GN in ở B8 (`quoteNumberFormat` của
+      // `marico_decor`), đặt dưới cùng khối thông tin, ngay trên bảng. Chuỗi THƯỜNG như các dòng trên
+      // (không nghiêng). Không có mã thì không in dòng nào. Vì sao không đặt ô riêng: xem chỗ gọi hàm
+      // này ở src/excel.ts.
+      toBlockFormat: ({ company, contact, email, phone, address, quoteNumber }: { company: string | null | undefined; contact: string | null | undefined; email: string | null | undefined; phone: string | null | undefined; address: string | null | undefined; quoteNumber?: string | null }) => {
         const lines = [`Kính gửi: ${company || "….."}`];
         if (contact) lines.push(contact);
         if (phone) lines.push(`ĐT: ${phone}`);
         if (address) lines.push(`Đ/c: ${address}`);
         if (email) lines.push(`Email: ${email}`);
+        if (quoteNumber) lines.push(`(Số://${quoteNumber})`);
         return lines.join("\n");
       },
-      // Mã báo giá = dòng CUỐI của khối trên, đúng chuỗi của GN (`quoteNumberFormat` của marico_decor).
-      // Không có mã thì không in dòng nào. Vì sao không đặt ô riêng: xem chỗ đọc khoá này ở src/excel.ts.
-      toBlockCodeFormat: (n: string | null | undefined) => (n ? `(Số://${n})` : ""),
       // "TP.HCM , ngày …" footer date — written from the quote's date (was a
       // hard-coded 05/07/2018 in the template, never updated before).
       date:        "G17",
@@ -234,9 +236,9 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       sectionFill: "FFF4CFB0", subFill: "FFCAD8AA",
       // MÀU CHỮ, đo từ cùng tệp mẫu ấy (đừng chỉ lấy màu nền — đợt trước bỏ quên đúng hai dòng
       // này nên hàng nhóm ra chữ CAM-NÂU FF9A5B14 và nhóm con ra chữ XANH DƯƠNG FF1F4E79):
-      //     hàng NHÓM     = theme5 tint -0.25  (accent2 #C0504D → #953735, đỏ gạch)
+      //     hàng NHÓM     = theme5 tint -0.25  (accent2 #C0504D → #963634 Excel vẽ, đỏ gạch)
       //     hàng NHÓM CON = FF4F513E           (xanh rêu đậm)
-      // Giữ nguyên dạng THEME cho hàng nhóm thay vì đóng cứng #953735: tệp mẫu khai bằng theme,
+      // Giữ nguyên dạng THEME cho hàng nhóm thay vì đóng cứng #963634: tệp mẫu khai bằng theme,
       // ghi lại y như vậy thì đổi bảng màu của tệp mẫu là chữ đi theo, không lệch ra.
       sectionTextColor: { theme: 5, tint: -0.25 },
       subTextColor: "FF4F513E",
@@ -271,22 +273,25 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // KTS") — đo trên file xuất: cột Hạng Mục rộng 21 làm chữ bị cắt mất dòng, còn Chi Tiết rộng
       // 50 thì bỏ trống quá nửa. Chia lại cho hai bên cùng đủ chỗ; tổng bề ngang bảng KHÔNG tăng.
       //
-      // CỘT STT BẰNG ĐÚNG GN (6,63 — `cols` của Marico_Decor.xlsx). Mẫu để 12,36 cho một cột chỉ chứa
-      // "A" / "1".."99" — người dùng chỉ ra ô STT "bự quá" (2026-09-25). Phần bề rộng dôi ra dồn hết
-      // cho Hạng Mục, tính cho B + C giữ đúng số px cũ (87 + 238 = 46 + 279): mép cột D không xê dịch
-      // nên logo COLORFUL (neo B → D) giữ nguyên hình, và tổng bề ngang bảng vẫn không đổi.
-      //
-      // THÀNH TIỀN (H) 15 → 17,1, lấy đúng phần đó từ GHI CHÚ (I) 16,18 → 14 (105 + 113 = 120 + 98 px):
-      // nhãn nay xuống dòng "THÀNH TIỀN / (VNĐ)" như GN, mà ở cỡ 12 đậm (GN cỡ 10) chữ "THÀNH TIỀN" không
-      // vừa cột 15 — Excel COM đo ra nó tự ngắt "THÀNH / TIỀN" (tests/xl-cao-hang-tieu-de-cot.test.js),
-      // tức nhãn thành 3 dòng và hàng tiêu đề cao ~50pt. Ở 17,1 nó nằm gọn một dòng.
-      columnWidths: { B: 6.6328125, C: 39.8, D: 30, H: 17.1, I: 14 },
-      // "(VNĐ)" sau Đơn Giá / Thành Tiền, đúng cách GN viết (G11/H11 của Marico_Decor.xlsx).
+      // CỘT STT HẸP LẠI như GN (6,6): mẫu Colorfull để B = 12,36, gần gấp đôi số cần cho "STT"/"10"/"A"
+      // — người dùng chỉ ra ô STT "bự quá". Nay B = 7.
+      // THÀNH TIỀN 15 → 18: tiêu đề nay thêm dòng "(VNĐ)" (xem `headerLabels`), mà ở 15 chữ "THÀNH
+      // TIỀN" (TNR 12 đậm) đã tự ngắt hai dòng (đo COM) ⇒ ba dòng, hàng tiêu đề cao 50pt. Ở 18 nó
+      // nằm một dòng, tiêu đề hai dòng như GN.
+      // Phần còn dư trả cho Chi Tiết để TỔNG BỀ NGANG B:I GIỮ NGUYÊN (12,36 + 30 + 15 = 7 + 32,36 + 18;
+      // tính bằng px Excel cũng đúng y: 87 + 210 + 105 = 49 + 227 + 126): dải tiêu đề B2:I2 gộp suốt
+      // bảng, và số đo Excel thật về chỗ nó xuống dòng (tests/xl-tieu-de-dai-xuong-dong.test.js) chỉ
+      // đúng ở đúng bề ngang đó. Hạng Mục giữ 34 cũng vì lý do ấy (tests/xl-cao-hang-theo-be-rong-chu
+      // .test.js đo ở 34), Ghi Chú giữ bề rộng của tệp mẫu.
+      // Thu cột B làm mép cột C/D dịch trái — logo COLORFUL của mẫu neo B → D nên KHÔNG được để neo
+      // của nó đi theo: src/excel.ts (`chupAnhMau` / `datLaiAnhMau`) giữ nguyên hình của logo.
+      columnWidths: { B: 7, C: 34, D: 32.36328125, H: 18 },
+      // Chữ Hạng Mục của hàng mục thường cùng màu với số STT (theme 9 tint -0.5 — accent6 F79646 của
+      // tệp mẫu tối đi một nửa, Excel vẽ ra #974706 nâu cam; đọc ở B6 của mẫu), như GN để STT và tên
+      // cùng một màu xanh #0070C0. Mẫu để đen (theme 1).
+      nameTextColor: { theme: 9, tint: -0.499984740745262 },
+      // "(VNĐ)" dưới Đơn Giá / Thành Tiền, y chữ tiêu đề của mẫu GN (Marico_Decor.xlsx G11/H11).
       headerLabels: { unitPrice: "ĐƠN GIÁ\n(VNĐ)", amount: "THÀNH TIỀN\n(VNĐ)" },
-      // Tên hạng mục có màu như GN (GN: xanh 0070C0), nhưng theo tông của chính Colorfull: cùng sắc
-      // độ với nền tiêu đề cột 9DCCC9 (176°), hạ độ sáng xuống 30% cho đọc được trên nền trắng
-      // (tương phản ≈ 5,3:1, ngang xanh GN). Mẫu để đen (theme 1).
-      nameTextColor: "FF227771",
       columns: {
         stt:       "B",
         name:      "C",
@@ -476,9 +481,10 @@ TEMPLATE_CONFIGS.clofull_conngay = {
     },
     // Cùng ý nghĩa với GN có-ngày (`G*E*F` = đơn giá × số lượng × số ngày), chỉ khác chữ cột.
     amountFormula: (r: number) => `H${r}*F${r}*G${r}`,
-    // `columnWidths` khoá theo CHỮ cột nên phải dịch như mọi toạ độ khác: Thành Tiền / Ghi Chú ở I / J.
-    // Tệp mẫu có-ngày để I 15 · J 16,18 — y cặp H/I của bản không-ngày, nên cùng số.
-    columnWidths: { B: 6.6328125, C: 39.8, D: 30, I: 17.1, J: 14 },
+    // `columnWidths` khoá theo CHỮ cột nên phải dịch như mọi toạ độ khác: như bản không-ngày, chỉ khác
+    // cột Thành Tiền nay là I (không phải H — H là Đơn Giá). Tệp mẫu có-ngày để B 12,36 · D 50 · I 15
+    // y như bản không-ngày, nên cùng số.
+    columnWidths: { B: 7, C: 34, D: 32.36328125, I: 18 },
   },
   totals: {
     subtotal: {
