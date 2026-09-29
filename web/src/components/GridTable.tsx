@@ -1400,6 +1400,9 @@ function GridTableInner(props: GridTableProps) {
   };
   const onPaste = (e: { clipboardData: DataTransfer; target: EventTarget | null; preventDefault(): void }) => {
     if (!editable) return;
+    // Đang đứng ở ô chọn / ô tích (không có vùng chọn): dán rơi về ô chữ nhớ lần trước (focusRef) là ghi
+    // vào chỗ người dùng không nhìn — thà không làm gì, như dán vào một ô danh sách của Excel.
+    if ((e.target as HTMLElement | null)?.closest?.("[data-oc]")) return;
     flushSoft();
     const ae = document.activeElement as HTMLElement | null;
     const f0 = (e.target as HTMLElement)?.getAttribute?.("data-f") || ae?.getAttribute?.("data-f");
@@ -1739,9 +1742,50 @@ function GridTableInner(props: GridTableProps) {
     baoSoDan(); baoChiChep();
   };
 
+  // ── Ô CHỌN / Ô TÍCH trong lưới: CHỨNG TỪ · LƯU KHO (bảng nội bộ) · DUYỆT ─────────────────────
+  // Ba ô này không phải ô chữ nên không nằm trong FIELDS (không chọn vùng / chép / dán được), và bàn phím
+  // trước đây bỏ qua chúng hẳn: onGridKeyDown chỉ nhận ô có data-f. Hệ quả: → từ ô NS không bao giờ tới
+  // được CHỨNG TỪ; đứng ở ô chọn thì mũi tên đổi luôn chứng từ (hành vi gốc của <select>) thay vì đi ô;
+  // tích nhầm rồi Ctrl+Z thì KHÔNG có gì xảy ra — phải bấm sang ô chữ mới lùi được. Nay chúng là "ô" của
+  // điều hướng: ←/→ đi trong hàng (← từ ô đầu về ô chữ cuối), ↑/↓ cùng cột qua các hàng có ô đó (hàng
+  // nhóm / dòng thông tin không có → bỏ qua), Ctrl+mũi tên nhảy biên, Ctrl+Z / Ctrl+Y như ô chữ. Đổi giá
+  // trị bằng Space (ô tích), Alt+↓ hoặc gõ chữ cái (ô chọn) — đúng nếp ô danh sách của Excel.
+  const OC_COT = [cotNoiBo ? "chungTu" : null, cotNoiBo ? "luuKho" : null, approveCol && editable ? "approved" : null].filter(Boolean) as string[];
+  /** Ô chọn / ô tích `oc` ở hàng `row` — chỉ khi dùng được (ô khoá vì thiếu quyền thì bàn phím đi qua). */
+  const ocDung = (row: number, oc: string) => {
+    const el = tableRef.current?.querySelector(`tr[data-row="${row}"] [data-oc="${oc}"]`) as HTMLInputElement | HTMLSelectElement | null;
+    return el && !el.disabled ? el : null;
+  };
+  const vaoOc = (el: HTMLElement) => { el.focus(); };   // phần còn lại ở onGridFocus — chung cho cả bấm chuột
+  const phimOc = (e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; nativeEvent: KeyboardEvent; preventDefault(): void; stopPropagation(): void }, el: HTMLElement, oc: string) => {
+    const tr = el.closest("tr[data-row]"); if (!tr) return;
+    const i = parseInt(tr.getAttribute("data-row") || "0", 10);
+    const ctrl = e.ctrlKey || e.metaKey;
+    const uz = undoRedoKey(ctrl, e.shiftKey, e.key);
+    if (uz) { e.preventDefault(); e.stopPropagation(); if (editable) (uz === "undo" ? doUndo : doRedo)(); return; }
+    if (!e.key.startsWith("Arrow") || e.nativeEvent?.altKey) return;   // Alt+↓ mở danh sách chứng từ như thường
+    e.preventDefault(); e.stopPropagation();
+    const k = OC_COT.indexOf(oc);
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const trai = e.key === "ArrowLeft";
+      if (trai && ctrl) { moveTo(i, FIELDS[0], false); return; }
+      const thu = trai ? OC_COT.slice(0, k).reverse() : OC_COT.slice(k + 1);
+      for (const c of ctrl ? [...thu].reverse() : thu) { const d = ocDung(i, c); if (d) { vaoOc(d); return; } }
+      if (trai) moveTo(i, FIELDS[FIELDS.length - 1], false, -1);   // hết ô chọn bên trái → ô chữ cuối của hàng
+      return;
+    }
+    const buoc = e.key === "ArrowDown" ? 1 : -1;
+    const hangs = ctrl
+      ? Array.from({ length: items.length }, (_, r) => (buoc > 0 ? items.length - 1 - r : r)).filter((r) => (buoc > 0 ? r > i : r < i))
+      : Array.from({ length: items.length }, (_, r) => i + buoc * (r + 1)).filter((r) => r >= 0 && r < items.length);
+    for (const r of hangs) { const d = ocDung(r, oc); if (d) { vaoOc(d); return; } }
+  };
+
   // ── bàn phím trong ô (Enter/Tab/Arrow/Esc/Ctrl) ────────────────────────────────
   const onGridKeyDown = (e: { key: string; keyCode: number; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; target: EventTarget | null; nativeEvent: KeyboardEvent; preventDefault(): void; stopPropagation(): void }) => {
     const ae = e.target as HTMLInputElement | HTMLTextAreaElement | null;
+    const oc = ae?.getAttribute?.("data-oc");
+    if (oc && ae) { phimOc(e, ae, oc); return; }
     const f = ae?.getAttribute?.("data-f"); const tr = ae?.closest?.("tr[data-row]");
     if (!f || !tr || !FIELDS.includes(f)) return;
     const ctrl = e.ctrlKey || e.metaKey;
@@ -2051,6 +2095,8 @@ function GridTableInner(props: GridTableProps) {
         return;
       }
       e.preventDefault(); e.stopPropagation();
+      // → ở ô chữ CUỐI (NS của bảng nội bộ) đi tiếp sang ô chọn / ô tích đầu tiên dùng được của hàng.
+      if (dCol > 0 && !e.shiftKey && ci === lastCol) { const d = OC_COT.map((c) => ocDung(i, c)).find(Boolean); if (d) { vaoOc(d); return; } }
       moveTo(i + dRow, FIELDS[ci + dCol] || f, e.shiftKey, prefer);
       return;
     }
@@ -2063,6 +2109,9 @@ function GridTableInner(props: GridTableProps) {
     }
   };
   const onGridFocus = (e: { target: EventTarget | null }) => {
+    // Vào ô chọn / ô tích (bàn phím — vaoOc — hay bấm chuột): thoát chế độ sửa của ô chữ vừa rời (blur đã
+    // chốt nội dung), và bỏ vùng tô — ô này không thuộc vùng chọn, để vùng cũ lại là Ctrl+C chép chỗ khác.
+    if ((e.target as HTMLElement | null)?.getAttribute?.("data-oc")) { onDangDung?.(); lockCell(null); clearSel(); return; }
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
     if (!f || !tr) return;
     onDangDung?.();   // Tab vào một ô cũng là "đang làm ở lưới này"
@@ -2680,15 +2729,15 @@ function GridTableInner(props: GridTableProps) {
       {cotNoiBo && <>
         <td className="col-ns">{taInput(i, "ns")}</td>
         <td className="col-chung-tu">
-          <select value={String((items[i] as Record<string, unknown>).chungTu || "")} disabled={!editable} data-xl="chung-tu" onChange={xuLyO} aria-label="Chứng từ">
+          <select value={String((items[i] as Record<string, unknown>).chungTu || "")} disabled={!editable} data-xl="chung-tu" data-oc="chungTu" onChange={xuLyO} aria-label="Chứng từ">
             <option value="">—</option>
             {CHUNG_TU.map(([v, nhan]) => <option key={v} value={v}>{nhan}</option>)}
           </select>
         </td>
-        <td className="col-luu-kho"><input type="checkbox" checked={!!(items[i] as Record<string, unknown>).luuKho} disabled={!editable} data-xl="luu-kho" onChange={xuLyO} aria-label="Lưu kho" /></td>
+        <td className="col-luu-kho"><input type="checkbox" checked={!!(items[i] as Record<string, unknown>).luuKho} disabled={!editable} data-xl="luu-kho" data-oc="luuKho" onChange={xuLyO} aria-label="Lưu kho" /></td>
       </>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
-      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
+      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" data-oc="approved" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
       {payCol && <td className="col-pay">{canPay
         ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} data-xl="thanh-toan" onClick={xuLyBam}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
         : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
@@ -2843,7 +2892,7 @@ function GridTableInner(props: GridTableProps) {
           </details>
           <AnchoredPanel anchorRef={keysRef} open={keysOpen} onClose={() => setKeysOpen(false)} align="left" className="grid-keys-body" label="Phím tắt của bảng">
               <p><b>Chọn / sửa ô (như Excel):</b> bấm = chọn ô · <b>gõ là ĐÈ nội dung luôn</b> (không cần nhấp đúp) · <b>nhấp đúp</b>/<kbd>F2</kbd> = sửa trong chữ (mũi tên chạy trong chữ; bấm <kbd>F2</kbd> lần nữa để mũi tên chốt-và-đi) · <kbd>Esc</kbd> hủy sửa · <kbd>Delete</kbd> xóa vùng chọn · <kbd>Backspace</kbd> xóa ô rồi gõ luôn.</p>
-              <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống · <kbd>Shift+Enter</kbd> lên · <kbd>{modKey}+Enter</kbd> chốt tại chỗ (chọn vùng thì điền cả vùng) · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên.</p>
+              <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống · <kbd>Shift+Enter</kbd> lên · <kbd>{modKey}+Enter</kbd> chốt tại chỗ (chọn vùng thì điền cả vùng) · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên.{OC_COT.length > 0 && <> Ô chọn / ô tích ({[cotNoiBo ? "Chứng từ, Lưu kho" : "", OC_COT.includes("approved") ? "Duyệt" : ""].filter(Boolean).join(", ")}): mũi tên đi ô · <kbd>Space</kbd> tích · <kbd>Alt+↓</kbd> mở danh sách · <kbd>{modKey}+Z</kbd> hoàn tác ngay tại ô.</>}</p>
               <p><b>Chọn vùng:</b> kéo chuột · <kbd>Shift</kbd>+bấm · <kbd>Shift</kbd>+mũi tên · <kbd>Shift+Space</kbd> cả hàng · <kbd>{modKey}+Space</kbd> cả cột · <kbd>{modKey}+A</kbd> cả bảng.</p>
               <p><b>Dữ liệu:</b> <kbd>{modKey}+C/V</kbd> copy–dán (qua lại Excel được) · <kbd>{modKey}+X</kbd> cắt kiểu Excel (viền nét đứt, <b>dán mới chuyển đi</b>, <kbd>Esc</kbd> huỷ) · <kbd>{modKey}+D</kbd> chép xuống · <kbd>{modKey}+R</kbd> chép phải · kéo (hoặc nhấp đúp) ô vuông góc dưới-phải · <kbd>{modKey}+Z</kbd>/<kbd>{modKey}+Y</kbd> hoàn tác–làm lại.</p>
               <p><b>Hàng:</b> <kbd>{modKey}+Shift++</kbd> chèn hàng dưới · <kbd>Shift+Space</kbd> rồi <kbd>{modKey}+-</kbd> xóa các hàng đang chọn · <kbd>Alt+Enter</kbd> xuống dòng trong ô · <kbd>Alt+↓</kbd> mở gợi ý hạng mục theo rạp.</p>
