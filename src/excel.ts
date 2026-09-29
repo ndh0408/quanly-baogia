@@ -301,11 +301,18 @@ function sectionLetter(n: number) {
 function colLetterToIdx(L: string) { let n = 0; for (const ch of String(L).toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; }
 function idxToColLetter(n: number) { let s = ""; n = n + 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
 // Đọc kích thước ảnh từ buffer (PNG/JPEG/GIF) để nhúng GIỮ TỈ LỆ — không cần thư viện ngoài.
+// CHỈ đọc khi byte đúng là định dạng mà đuôi khai (chữ ký đầu tệp; PNG thì khối đầu phải là IHDR). Tệp hỏng
+// hay khai sai đuôi thì trả null ("không đọc ra"), không lấy 8 byte bất kỳ làm kích thước. Bản cũ đọc một
+// JPEG mang đuôi .png ra 65536 × 4292542531px, và logo của mẫu bật `anhMau.giuTiLeAnhGoc` bị ép còn
+// 0,0012px bề ngang (tests/xl-anh-mau-giu-hinh.test.js).
+const CHU_KY_PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 function imgDims(buf: Buffer, ext: string): { w: number; h: number } | null {
   try {
-    if (ext === "png" && buf.length > 24) return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
-    if (ext === "gif" && buf.length > 10) return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
-    if (ext === "jpeg") {   // scan các marker SOF0..SOF15 (trừ DHT/DAC/RST)
+    if (ext === "png" && buf.length > 24 && buf.subarray(0, 8).equals(CHU_KY_PNG) && buf.toString("latin1", 12, 16) === "IHDR") {
+      return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    }
+    if (ext === "gif" && buf.length > 10 && /^GIF8[79]a$/.test(buf.toString("latin1", 0, 6))) return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+    if (ext === "jpeg" && buf[0] === 0xff && buf[1] === 0xd8) {   // SOI, rồi scan các marker SOF0..SOF15 (trừ DHT C4, JPG C8, DAC CC)
       let i = 2;
       while (i + 9 < buf.length) {
         if (buf[i] !== 0xff) { i++; continue; }
@@ -419,9 +426,11 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
 // 81,33px (tỉ lệ 2,389) trong khi PNG nhúng `xl/media/image1.png` là 471×186 (2,532; pHYs hai chiều
 // bằng nhau) ⇒ hẹp ngang 5,6%. Mẫu nào bật cờ này thì ảnh của nó giữ CHIỀU CAO và GÓC TRÊN-TRÁI như
 // tệp mẫu, còn BỀ NGANG tính lại = cao × tỉ lệ pixel của chính tệp ảnh (đọc đầu tệp PNG/GIF/JPEG trong
-// workbook — không ghi cứng số nào). Đọc không ra kích thước thì giữ hình tệp mẫu như không bật.
+// workbook — không ghi cứng số nào; đuôi .jpg / .JPG đọc như .jpeg). Đọc không ra kích thước (tệp cụt / hỏng,
+// khai sai đuôi, định dạng `imgDims` không đọc như EMF, hay khai 0) thì giữ hình tệp mẫu như không bật.
+// `anhMau` không khai, `undefined` hay `null` đều là không bật.
 // Mép phải dời ra vài px nên mẫu bật cờ phải còn chỗ trống bên phải ảnh: tests/xl-anh-mau-giu-hinh
-// .test.js khoá việc logo Colorfull không đè ô có chữ / ô gộp nào ở hàng 1–4.
+// .test.js khoá việc logo Colorfull không đè ô có chữ / ô gộp nào ở hàng 1–4, cùng các nhánh dự phòng trên.
 const EMU_MOI_PX_ANH = 9525, EMU_MOI_PT_ANH = 12700;
 /** Tỉ lệ rộng / cao theo PIXEL của tệp ảnh mà `anh` (một phần tử `ws._media`) trỏ tới; không đọc được → null. */
 function tiLeAnhGoc(ws: any, anh: any): number | null {
@@ -468,7 +477,11 @@ export type AnhMau = {
   ext: { width: number; height: number } | null;
 };
 export type TuyChonAnhMau = { giuTiLeAnhGoc?: boolean };
-export function chupAnhMau(ws: any, tuyChon: TuyChonAnhMau = {}): AnhMau[] {
+/** `tuyChon` là `cfg.anhMau` của mẫu. `null` phải được coi như không khai: mẫu kế thừa Colorfull tắt cờ bằng
+ *  `{ ...clofull_decor, anhMau: null }`, mà bản cũ (`tuyChon = {}`) đọc `null.giuTiLeAnhGoc` → TypeError,
+ *  cả lần xuất hỏng. Lý do là tham số mặc định của JS chỉ thay `undefined`. */
+export function chupAnhMau(ws: any, tuyChon?: TuyChonAnhMau | null): AnhMau[] {
+  const giuTiLe = !!tuyChon?.giuTiLeAnhGoc;
   const ds: AnhMau[] = [];
   for (const anh of (Array.isArray(ws._media) ? ws._media : [])) {
     const { tl, br, editAs, ext } = anh?.range || {};
@@ -480,7 +493,7 @@ export function chupAnhMau(ws: any, tuyChon: TuyChonAnhMau = {}): AnhMau[] {
     let rong = coBr ? mepTraiCot(ws, br.nativeCol) + br.nativeColOff - x : null;
     const cao = coBr ? mepTrenHang(ws, br.nativeRow) + br.nativeRowOff - y : null;
     let extMoi: AnhMau["ext"] = null;
-    const tiLe = tuyChon.giuTiLeAnhGoc ? tiLeAnhGoc(ws, anh) : null;
+    const tiLe = giuTiLe ? tiLeAnhGoc(ws, anh) : null;
     if (tiLe) {
       if (cao != null && cao > 0) rong = cao * tiLe;
       else if (!coBr && Number(ext?.height) > 0) extMoi = { width: Number(ext.height) * tiLe, height: Number(ext.height) };
