@@ -7,12 +7,15 @@
  * GAP1-08: rc-qa.mjs coi 404 là đạt khi mong 200, và bỏ qua 403 khi đo hiệu năng.
  * INFRA-10: app không khai stop_grace_period (Docker SIGKILL sau 10s = đúng lưới tắt 10s của app).
  * INFRA-11: không đường nào đang chạy quét lỗ hổng của IMAGE.
- * §17: explain-hot-paths đỏ/xanh theo LỊCH SỬ của bảng (thứ tự vật lý), không theo index; không
- *   dựng trang (QuoteSheet) nên mù trước truy vấn đếm trang.
+ * §17: explain-hot-paths đỏ/xanh theo LỊCH SỬ của bảng (thứ tự vật lý), không theo index; gọi qua
+ *   junction thì thoát 0 im lặng; không dựng trang (QuoteSheet) nên mù trước truy vấn đếm trang.
  */
 import { describe, it, expect, beforeAll } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, symlinkSync, unlinkSync, rmdirSync, realpathSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { dongVoNghia } from "../scripts/ci/check-line-refs.mjs";
 
 const GOC = path.resolve(import.meta.dirname, "..");
@@ -158,7 +161,7 @@ describe("§17 — explain-hot-paths: phán quyết theo INDEX, không theo th�
   const src = doc(TEP);
   // Chỉ import khi phần CHẠY cổng đã được chốt: thiếu chốt thì chính lần import sẽ dựng 5.000 dòng
   // vào CSDL test ngay giữa bộ test song song (rồi process.exit giết luôn worker).
-  const coChot = /^if \(process\.argv\[1\] && import\.meta\.url === pathToFileURL\(path\.resolve\(process\.argv\[1\]\)\)\.href\) await chayCong\(\);$/m.test(src);
+  const coChot = /^if \(laTepChinh\(import\.meta\.url, process\.argv\[1\]\)\) await chayCong\(\);$/m.test(src);
   let m = {};
   beforeAll(async () => {
     if (coChot) m = await import("../scripts/db/explain-hot-paths.mjs");
@@ -176,8 +179,56 @@ describe("§17 — explain-hot-paths: phán quyết theo INDEX, không theo th�
     return sxy / Math.sqrt(sx * sy);
   };
 
-  it("phần chạy cổng nằm sau chốt import.meta.url === argv[1] — import từ test không chạm CSDL", () => {
+  it("phần chạy cổng nằm sau chốt laTepChinh(import.meta.url, argv[1]) — import từ test không chạm CSDL", () => {
     expect(coChot).toBe(true);
+  });
+
+  // Người soát (2026-09-29): chốt cũ so CHUỖI `import.meta.url === pathToFileURL(path.resolve(argv[1]))`.
+  // Node dựng import.meta.url của tệp chính từ đường ĐÃ giải junction/symlink, còn argv[1] giữ chữ người
+  // gọi gõ — gọi bằng đường tuyệt đối đi qua junction thì cổng không chạy, thoát 0, 0 byte: trông y hệt
+  // cổng XANH. Bài này gọi ĐÚNG như thế. Tiến trình con không được chạm CSDL nào: cwd là thư mục tạm
+  // (config nạp `.env` theo cwd — .env của checkout chính trỏ CSDL dev), env tối thiểu không có
+  // SESSION_SECRET (config dừng ngay khi nạp), DATABASE_URL trỏ cổng 1 phòng khi có gì lọt qua.
+  it("gọi bằng đường tuyệt đối đi qua junction/symlink: cổng VẪN CHẠY, không thoát 0 im lặng", () => {
+    const tam = mkdtempSync(path.join(tmpdir(), "xp-lien-"));
+    const lien = path.join(tam, "db");
+    symlinkSync(path.join(GOC, "scripts", "db"), lien, "junction");
+    try {
+      expect(realpathSync(lien), "junction/symlink không trỏ về scripts/db thật").toBe(realpathSync(path.join(GOC, "scripts", "db")));
+      const r = spawnSync(process.execPath, [path.join(lien, "explain-hot-paths.mjs")], {
+        cwd: tam,
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          DATABASE_URL: "postgresql://khong:khong@127.0.0.1:1/khong_co",
+        },
+        encoding: "utf8",
+        timeout: 60_000,
+      });
+      const ra = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+      expect(r.status === 0 && ra.trim() === "", "gọi qua junction: thoát 0 mà KHÔNG in gì — cổng không chạy").toBe(false);
+      // Không có SESSION_SECRET/CSDL thì cổng đã CHẠY phải đỏ — xanh ở đây nghĩa là không đo gì cả.
+      expect(r.status, ra.slice(0, 600)).not.toBe(0);
+    } finally {
+      unlinkSync(lien); // gỡ ĐÚNG junction — không bao giờ xoá đệ quy qua nó (sẽ xoá luôn scripts/db thật)
+      rmdirSync(tam);
+    }
+  }, 90_000);
+
+  it("laTepChinh: đường qua junction/symlink = đường thật; tệp khác hoặc argv rỗng thì không", () => {
+    const tam = mkdtempSync(path.join(tmpdir(), "xp-lien-"));
+    const lien = path.join(tam, "db");
+    symlinkSync(path.join(GOC, "scripts", "db"), lien, "junction");
+    try {
+      const url = pathToFileURL(path.join(GOC, TEP)).href;
+      expect(m.laTepChinh(url, path.join(lien, "explain-hot-paths.mjs"))).toBe(true);
+      expect(m.laTepChinh(url, path.join(GOC, TEP))).toBe(true);
+      expect(m.laTepChinh(url, path.join(GOC, "scripts", "ci", "check-line-refs.mjs"))).toBe(false);
+      expect(m.laTepChinh(url, undefined)).toBe(false);
+    } finally {
+      unlinkSync(lien);
+      rmdirSync(tam);
+    }
   });
 
   it("dữ liệu thử có TRANG cho mỗi báo giá — bảng QuoteSheet rỗng thì truy vấn đếm trang không bao giờ đỏ", () => {

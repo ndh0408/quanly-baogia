@@ -201,6 +201,10 @@ gộp **toàn bảng** `QuoteSheet` để đếm trang: `_count: { sheets }` c�
 đẩy được khoá JOIN vào subquery có `GROUP BY` — không index nào cứu được. Nay
 `listQuotes` đếm trang riêng, chỉ cho id của trang đang xem (`soTrangTheoBaoGia`).
 
+Cổng chỉ chạy khi được gọi thẳng (`laTepChinh` so **đường thật** của `argv[1]` với
+`import.meta.url`): gọi qua junction/symlink bằng đường tuyệt đối thì bản so chuỗi
+cũ thoát 0 mà không in gì, trông y hệt cổng xanh.
+
 `PRISMA_LOG_QUERIES` **không được bật ở production**: câu SQL kèm tham số, tức
 tên khách, số điện thoại và mọi thứ người dùng gõ vào ô tìm kiếm sẽ nằm trong
 nhật ký.

@@ -42,8 +42,9 @@
 //      vẫn rẻ hơn quét tuần tự ~3 lần (đo: 190 so với 592); gỡ index thì mọi đường sắp theo createdAt
 //      rơi về Seq Scan và cổng ĐỎ — kiểm ngược vẫn còn nguyên.
 
+import { realpathSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const CHI_TIET = process.argv.includes("--chi-tiet");
 const SO_DONG = Number(process.env.EXPLAIN_SO_DONG || 5000);
@@ -468,7 +469,29 @@ async function chayCong() {
   );
 }
 
+/**
+ * `true` khi tệp có `metaUrl` chính là tệp Node được gọi chạy (`argv1`), không phải được `import`.
+ *
+ * So ĐƯỜNG THẬT của hai vế, không so chuỗi. Node dựng `import.meta.url` của tệp chính từ đường đã
+ * giải symlink/junction, còn `argv[1]` giữ nguyên chữ người gọi gõ. Bản trước so
+ * `import.meta.url === pathToFileURL(path.resolve(argv[1]))` — gọi bằng đường tuyệt đối đi qua một
+ * junction/symlink tới repo thì hai vế lệch, cổng KHÔNG chạy và tiến trình thoát 0 với 0 byte đầu
+ * ra: một cổng im lặng trông y hệt cổng XANH (người soát đo được, 2026-09-29). `realpathSync.native`
+ * còn chuẩn hoá luôn hoa/thường của ổ đĩa và thư mục trên Windows.
+ */
+export function laTepChinh(metaUrl, argv1) {
+  if (!argv1) return false;
+  const that = (p) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return that(fileURLToPath(metaUrl)) === that(argv1);
+}
+
 // Chỉ CHẠY cổng khi được gọi thẳng. `import` từ test (tests/ops-cong-kiem.test.js) chỉ lấy các hàm
 // thuần ở trên — không nạp dist/, không chạm CSDL. Thiếu chốt này thì một lần import sẽ dựng 5.000
 // dòng vào CSDL test ngay giữa bộ test chạy song song.
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await chayCong();
+if (laTepChinh(import.meta.url, process.argv[1])) await chayCong();
