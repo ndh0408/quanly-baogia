@@ -27,9 +27,11 @@
 // xuất: khớp tới 0,01px.
 //
 // ĐỎ TRÊN MÃ CŨ:
-//   · tắt `datLaiAnhMau(ws, anhMau)` ở cuối `fillSheetData` (tức bản 582ce85 nguyên trạng): cả ba ca
-//     Colorfull đỏ — góc dưới-phải lệch +52px (336 thay vì 284) và neo góc trên-trái lệch 62,67px trong
-//     cột B rộng 49px;
+//   · tắt `datLaiAnhMau(ws, anhMau)` ở cuối `fillSheetData` (neo logo y như bản 582ce85 — `chupAnhMau`
+//     chỉ đọc): cả SÁU ca Colorfull đỏ (đo lại 2026-09-29, trên 6c06121). Câu đỏ đầu tiên là TỈ LỆ —
+//     "logo vẽ 246.33 × 81.33px, tỉ lệ 3.029; ảnh gốc 471×186 = 2.532" (theo XML: x 89,67 → 336 thay vì
+//     → 295,6); nới riêng câu tỉ lệ thì `kiemNeoTrongO` vẫn làm đỏ cả sáu ca: "góc trên-trái: lệch
+//     62.67px trong cột 2 chỉ rộng 49px";
 //   · trên 4c4bd07 (logo đúng hình tệp mẫu, chưa theo ảnh gốc): sáu ca Colorfull đỏ ở tỉ lệ — 2,389 so
 //     với 2,532, lệch 5,6% — và hai ca đơn vị `giuTiLeAnhGoc` đỏ (cờ bị bỏ qua).
 // Ca GN xanh ở mọi phía: GN không có gì phải sửa, và nó đỏ nếu ai đó "sửa" bằng cách ghim vị trí TUYỆT

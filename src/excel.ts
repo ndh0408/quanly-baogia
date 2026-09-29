@@ -1792,7 +1792,7 @@ ${ghiChu}`, null, beRongVungGop(oChinh), fGC);
   }
 
   // SAU CÙNG, khi mọi bề rộng cột (`columnWidths`, `hiddenColumns`, cột ảnh) và chiều cao hàng đã chốt:
-  // đưa ảnh của tệp mẫu về đúng hình của nó (xem `chupAnhMau`).
+  // đặt lại neo ảnh của tệp mẫu — chỗ + cỡ như tệp mẫu, hay bề ngang theo ảnh gốc (xem `chupAnhMau`).
   datLaiAnhMau(ws, anhMau);
 
   return {

@@ -830,7 +830,9 @@ describe("Colorfull — màu nền đúng như file mẫu người dùng chỉnh
  *   4. "(VNĐ)" sau Đơn Giá / Thành Tiền như GN.
  * Cả BA mẫu Colorfull. Phần bề rộng STT thôi dùng chia cho Thành Tiền (15 → 18) và Chi Tiết
  * (30 → 32,36) để TỔNG bề ngang B:I giữ nguyên. Logo COLORFUL neo B → D nên thu B là mép cột C/D dịch —
- * logo giữ hình nhờ `datLaiAnhMau` (src/excel.ts), khoá ở tests/xl-anh-mau-giu-hinh.test.js.
+ * `chupAnhMau` / `datLaiAnhMau` (src/excel.ts) tính lại neo: CHỖ và CHIỀU CAO như tệp mẫu, bề ngang theo
+ * tỉ lệ ảnh PNG gốc (`anhMau.giuTiLeAnhGoc`). Cụm này KHÔNG soi neo ảnh — lớp khoá DUY NHẤT của logo là
+ * tests/xl-anh-mau-giu-hinh.test.js.
  * ============================================================================
  */
 describe("Colorfull — bốn chỗ học theo GN", () => {
@@ -921,12 +923,19 @@ describe("Colorfull — bốn chỗ học theo GN", () => {
       expect(o.font?.italic ?? false, `${ma}: khối Kính gửi bị nghiêng`).toBe(false);
       expect(o.font?.name).toBe("Times New Roman");
       expect(o.font?.color, `${ma}: chữ đỏ của ô mồi lại lọt vào`).toEqual({ theme: 1 });
-      // Mã in ĐÚNG MỘT lần trong cả sheet — hai đường ghi mã (ô riêng / khối Kính gửi) không được chồng.
-      let soLan = 0;
+      // Mã in ĐÚNG MỘT lần trong cả sheet — hai đường ghi mã (ô riêng `cells.quoteNumber` / khối Kính gửi)
+      // không được chồng. Đếm CHÍNH MÃ, không đếm tiền tố "Số://": mẫu mà có `cells.quoteNumber` nhưng
+      // thiếu `quoteNumberFormat` (chép / kế thừa cấu hình GN sót) thì src/excel.ts ghi mã THÔ
+      // "FP_A26_002" vào ô riêng — đếm tiền tố chỉ thấy 1 và báo xanh dù mã đã in hai lần.
+      const maSheet = baoGia4(ma).projectCode;
+      let soLan = 0, soTienTo = 0;
       ws.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (c) => {
-        if (!c.isMerged || c.master === c) soLan += chu(c.value).split("Số://").length - 1;
+        if (c.isMerged && c.master !== c) return;
+        soLan += chu(c.value).split(maSheet).length - 1;
+        soTienTo += chu(c.value).split("Số://").length - 1;
       }));
-      expect(soLan, `${ma}: mã báo giá in ${soLan} lần`).toBe(1);
+      expect(soLan, `${ma}: mã báo giá ${maSheet} in ${soLan} lần`).toBe(1);
+      expect(soTienTo, `${ma}: tiền tố "Số://" in ${soTienTo} lần`).toBe(1);
       // Hàng 3 đủ cao cho cả dòng mã (Times 12: 15,75pt/dòng).
       expect(ws.getRow(3).height, `${ma}: dòng mã bị xén`).toBeGreaterThanOrEqual(dong.length * 15.75);
     }
