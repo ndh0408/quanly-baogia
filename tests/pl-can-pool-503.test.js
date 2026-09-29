@@ -22,11 +22,16 @@ const moTa = URL_DB ? describe : describe.skip;
 
 /** Dựng ĐÚNG lỗi mà pool cạn sinh ra — qua node-pg + adapter Prisma, không tự chế. */
 async function loiCanPoolThat() {
-  const pool = new pg.Pool({ connectionString: URL_DB, max: 1, connectionTimeoutMillis: 600 });
+  // Kết nối CHIẾM pool được chờ rộng: dưới tải của lượt verify đầy đủ, mở kết nối đầu tiên có lúc
+  // mất hơn 600ms và bài đỏ ở chính dòng chiếm pool — trước cả khi tới điều nó cần đo. pg-pool đọc
+  // `options.connectionTimeoutMillis` ở MỖI lần connect, nên chiếm xong mới hạ xuống 600ms cho lần
+  // gọi của Prisma (lần phải cạn).
+  const pool = new pg.Pool({ connectionString: URL_DB, max: 1, connectionTimeoutMillis: 15_000 });
   const { PrismaPg } = await import("@prisma/adapter-pg");
   const { PrismaClient } = await import("@prisma/client");
   const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
   const giu = await pool.connect(); // chiếm trọn pool
+  pool.options.connectionTimeoutMillis = 600;
   try {
     await prisma.$queryRawUnsafe("select 1");
     return null; // không cạn được → bài dưới sẽ đỏ, và đỏ đúng lý do
