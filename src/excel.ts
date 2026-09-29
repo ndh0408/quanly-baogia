@@ -325,10 +325,10 @@ const MAX_ROW_PX = 540;           // Excel giới hạn hàng 409pt ≈ 545px �
 const MAX_ITEM_IMG_BYTES = 3 * 1024 * 1024;   // cap ảnh/hạng mục (client đã nén ~JPEG 1400px)
 // Định dạng ExcelJS ghi thẳng được vào .xlsx. KHÔNG có `webp` ở đây dù `webp` LƯU ĐƯỢC:
 // regex của `images` trong src/validators.ts (tìm bằng `grep -n 'images: z.array'` — hiện ở
-// dòng 163-165) nhận cả webp. Bên web, RE_ANH_HOP_LE (web/src/components/GridTable.tsx:122)
-// cũng nhận webp, nhưng nó là guard HIỂN THỊ trong `safeImgSrc` (dòng 135) — chống chuỗi thoát
-// khỏi `src=""`, KHÔNG phải đường lưu. Đường lưu thật là `fileToImg` (GridTable.tsx:1618): ảnh
-// chọn từ máy được vẽ lên canvas rồi `toDataURL("image/jpeg", 0.82)` (dòng 1631), tức webp
+// dòng 163-165) nhận cả webp. Bên web, `RE_ANH_HOP_LE` (web/src/components/GridTable.tsx)
+// cũng nhận webp, nhưng nó là guard HIỂN THỊ trong `safeImgSrc` — chống chuỗi thoát
+// khỏi `src=""`, KHÔNG phải đường lưu. Đường lưu thật là `fileToImg` (GridTable.tsx): ảnh
+// chọn từ máy được vẽ lên canvas rồi `toDataURL("image/jpeg", 0.82)`, tức webp
 // người dùng chèn đã thành JPEG trước khi rời trình duyệt; webp chỉ tới được server qua nhánh
 // dự phòng khi `toDataURL` ném lỗi, hoặc qua API gọi thẳng.
 // Vì sao vẫn không nhúng: muốn nhúng webp thì phải chuyển mã, mà dự án
