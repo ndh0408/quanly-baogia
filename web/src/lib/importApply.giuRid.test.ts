@@ -128,4 +128,17 @@ describe("Thay toàn bộ giữ NS / CHỨNG TỪ / LƯU KHO của dòng khớp"
     giuTruongChiApp(cu(), sau, { giuGhiChuNoiBo: true });
     expect(sau.every((it) => it.ns === undefined && it.chungTu === undefined)).toBe(true);
   });
+
+  // Hàng KHÔNG ghép được (khách xoá khỏi tệp) mất ba trường vĩnh viễn — tệp không chở chúng. Hộp xác nhận
+  // từng chỉ đếm ảnh và duyệt / thanh toán nên im lặng về đúng thứ kế toán cần để đối chiếu chứng từ.
+  it("đếm hàng có NS / chứng từ / lưu kho sẽ mất (noiBoMat); giá trị mặc định không tính", () => {
+    const them: HangNb[] = [
+      { kind: "item", name: "Loa bị khách xoá", unit: "bộ", quantity: 1, unitPrice: 70000, rid: "r-6", luuKho: true },
+      { kind: "item", name: "Bục bị khách xoá", unit: "cái", quantity: 1, unitPrice: 60000, rid: "r-7", ns: "  ", luuKho: false, chungTu: null },
+    ];
+    const r = giuTruongChiApp([...cu(), ...them], toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true });
+    // "Bàn…" (NS + HĐNS) + "Loa…" (chỉ lưu kho) = 2; "Bục…" chỉ có giá trị mặc định / chuỗi trắng.
+    expect(r.noiBoMat).toBe(2);
+    expect(giuTruongChiApp(cu().slice(0, 2), toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true }).noiBoMat, "mọi dòng có dữ liệu đều khớp").toBe(0);
+  });
 });

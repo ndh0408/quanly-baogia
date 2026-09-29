@@ -183,12 +183,53 @@ function khongCoHayRong(v: unknown): boolean {
   return false;
 }
 
+/**
+ * Cùng họ lỗi với `khongCoHayRong` nhưng nằm SÂU trong khoá: ba cột của BẢNG NỘI BỘ (NS · Lưu kho · Chứng
+ * từ, 4e24308). `sanitizeExtraTables` / `sanitizeHnTables` dựng lại từng hàng và từ đợt đó ghi
+ * `ns: null, luuKho: false, chungTu: null` vào MỌI hàng, còn ảnh chụp phiên bản lưu trước đợt không có ba
+ * khoá. So nguyên JSON thì mọi báo giá có bảng nội bộ hiện "sheets" / "hnTables" ĐÃ ĐỔI ở lần so đầu tiên
+ * qua mốc đó, dù không ai đụng vào — `khongCoHayRong` chỉ gộp được ở cấp khoá ngoài cùng.
+ *
+ * Bỏ ba khoá khi chúng mang GIÁ TRỊ MẶC ĐỊNH (vắng mặt ≡ mặc định) ở mọi hàng của mọi bảng nội bộ — bảng
+ * theo trang (`sheets[].extraTables[].items[]`) lẫn bảng Hà Nội cấp báo giá (`hnTables[].items[]`) — rồi
+ * mới so. Giá trị thật (NS có chữ, đã lưu kho, có chứng từ) giữ nguyên khoá nên thay đổi thật vẫn hiện.
+ * Chỉ dùng để SO; `before` / `after` trả về vẫn là dữ liệu gốc của phiên bản.
+ */
+const laMacDinhNoiBo: Record<string, (v: unknown) => boolean> = {
+  ns: (v) => v == null || (typeof v === "string" && v.trim() === ""),
+  luuKho: (v) => v == null || v === false,
+  chungTu: (v) => v == null || v === "",
+};
+function boMacDinhNoiBo(tables: unknown): unknown {
+  if (!Array.isArray(tables)) return tables;
+  return tables.map((t: any) => {
+    // Cột Json tự do (xem stripProofsForSnapshot): bảng / hàng lạ hình dạng thì để nguyên, không đoán.
+    if (!t || typeof t !== "object" || !Array.isArray(t.items)) return t;
+    return {
+      ...t,
+      items: t.items.map((it: any) => {
+        if (!it || typeof it !== "object") return it;
+        const gon = { ...it };
+        for (const [k, macDinh] of Object.entries(laMacDinhNoiBo)) if (macDinh(gon[k])) delete gon[k];
+        return gon;
+      }),
+    };
+  });
+}
+function deSoPhienBan(k: string, v: unknown): unknown {
+  if (k === "hnTables") return boMacDinhNoiBo(v);
+  if (k === "sheets" && Array.isArray(v)) {
+    return v.map((s: any) => (s && typeof s === "object" && Array.isArray(s.extraTables) ? { ...s, extraTables: boMacDinhNoiBo(s.extraTables) } : s));
+  }
+  return v;
+}
+
 export function diffVersions(a: any, b: any) {
   const out: { key: string; before: unknown; after: unknown }[] = [];
   const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
   for (const k of keys) {
     if (khongCoHayRong(a?.[k]) && khongCoHayRong(b?.[k])) continue;
-    if (JSON.stringify(a?.[k]) !== JSON.stringify(b?.[k])) {
+    if (JSON.stringify(deSoPhienBan(k, a?.[k])) !== JSON.stringify(deSoPhienBan(k, b?.[k]))) {
       out.push({ key: k, before: a?.[k] ?? null, after: b?.[k] ?? null });
     }
   }

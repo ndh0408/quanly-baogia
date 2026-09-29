@@ -2096,8 +2096,11 @@ export async function duplicateQuote(req: Request) {
   // reconcileExtra* kế thừa nhầm). Bản sao là báo giá MỚI chưa ai duyệt, chưa ai trả tiền.
   // MỘT hàm cho cả hnTables lẫn extraTables để hai chỗ không trôi khỏi nhau — đúng cái đã xảy ra:
   // hnTables được cắt từ lâu còn extraTables thì bị chép nguyên văn (MONEY-05/RBAC-02, 2026-09-23).
+  // Ba cột nội bộ (4e24308) chia hai phe: LƯU KHO là TRẠNG THÁI công việc của dự án cũ (hàng đó đã vào kho
+  // chưa) — như duyệt / đã trả, bản sao chưa có gì vào kho nên CẮT; còn NS (ai ứng / nguồn chi) và CHỨNG
+  // TỪ (VAT / HĐNS / TM) là PHÂN LOẠI của dòng chi phí, dự án mới làm lại hạng mục đó vẫn theo cách ấy nên GIỮ.
   const catTrangThai = (it: any) => {
-    const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, ...con } = it || {};
+    const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, luuKho: _lk, ...con } = it || {};
     return con;
   };
 

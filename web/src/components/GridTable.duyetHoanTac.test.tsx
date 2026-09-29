@@ -160,3 +160,183 @@ describe("bảng nội bộ: cột NS · CHỨNG TỪ · LƯU KHO", () => {
     expect(hop!.querySelector('tr[data-row="1"] td.col-luu-kho input')).toBeTruthy();
   });
 });
+
+// ── Ô CHỌN / Ô TÍCH trong điều hướng bàn phím + Ctrl+Z (2026-09-29) ─────────────────────────────
+// onGridKeyDown chỉ nhận ô có data-f, nên CHỨNG TỪ / LƯU KHO / DUYỆT nằm ngoài bàn phím: → từ ô NS không
+// tới được chúng, và đứng ở đó bấm Ctrl+Z thì không có gì xảy ra (phải bấm sang ô chữ mới lùi được).
+function VoOc({ items, canApprove = true }: { items: ItemK[]; canApprove?: boolean }) {
+  const [, buoc] = useState(0);
+  return (
+    <GridTable items={items} usesDays={false} showDetail={false} numberSubs={false} editable
+      internalNote={false} approveCol canApprove={canApprove} cotNoiBo groupSubtotal={false} onChange={() => buoc((v) => v + 1)} />
+  );
+}
+function moLuoiOc(items: ItemK[], canApprove = true) {
+  hop = document.createElement("div");
+  document.body.appendChild(hop);
+  root = createRoot(hop);
+  act(() => root!.render(<VoOc items={items} canApprove={canApprove} />));
+}
+const oc = (row: number, ten: string) => hop!.querySelector(`tr[data-row="${row}"] [data-oc="${ten}"]`) as HTMLInputElement & HTMLSelectElement;
+const dangO = () => document.activeElement;
+/** Bấm một phím ở ô ĐANG có tiêu điểm; trả về sự kiện để xem có bị chặn mặc định không. */
+const bam = (init: KeyboardEventInit) => {
+  const ev = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+  act(() => { (document.activeElement as HTMLElement).dispatchEvent(ev); });
+  return ev;
+};
+type NB = ItemK & { ns?: string | null; luuKho?: boolean; chungTu?: string | null };
+
+describe("ô CHỨNG TỪ / LƯU KHO / DUYỆT nằm trong điều hướng mũi tên", () => {
+  it("→ từ ô NS đi qua CHỨNG TỪ → LƯU KHO → DUYỆT (hết thì đứng yên); ← quay về tới ô NS", () => {
+    moLuoiOc([mk({ name: "Nước suối" })]);
+    act(() => { o(0, "ns").focus(); });
+    bam({ key: "ArrowRight" });
+    expect(dangO(), "→ ở ô NS không sang được ô Chứng từ").toBe(oc(0, "chungTu"));
+    bam({ key: "ArrowRight" });
+    expect(dangO()).toBe(oc(0, "luuKho"));
+    bam({ key: "ArrowRight" });
+    expect(dangO()).toBe(oc(0, "approved"));
+    bam({ key: "ArrowRight" });
+    expect(dangO(), "ô cuối hàng — đứng yên").toBe(oc(0, "approved"));
+    bam({ key: "ArrowLeft" }); bam({ key: "ArrowLeft" });
+    expect(dangO()).toBe(oc(0, "chungTu"));
+    bam({ key: "ArrowLeft" });
+    expect(dangO(), "← ở ô Chứng từ phải về ô chữ NS").toBe(o(0, "ns"));
+  });
+
+  it("↑/↓ đi cùng cột, bỏ qua hàng nhóm (không có ô); mũi tên KHÔNG đổi chứng từ đang chọn", () => {
+    const items = [mk({ name: "A", chungTu: "VAT" } as Partial<NB>), mk({ kind: "section", name: "NHÓM" }), mk({ name: "B", chungTu: "TM" } as Partial<NB>)];
+    moLuoiOc(items);
+    act(() => { oc(0, "chungTu").focus(); });
+    const ev = bam({ key: "ArrowDown" });
+    expect(ev.defaultPrevented, "để mặc định thì <select> đổi sang chứng từ kế tiếp").toBe(true);
+    expect(dangO()).toBe(oc(2, "chungTu"));
+    bam({ key: "ArrowUp" });
+    expect(dangO()).toBe(oc(0, "chungTu"));
+    expect([(items[0] as NB).chungTu, (items[2] as NB).chungTu]).toEqual(["VAT", "TM"]);
+    act(() => { oc(0, "luuKho").focus(); });
+    bam({ key: "ArrowDown", ctrlKey: true });
+    expect(dangO(), "Ctrl+↓ nhảy tới ô cùng cột ở hàng cuối").toBe(oc(2, "luuKho"));
+  });
+
+  it("Alt+↓ ở ô chọn để trình duyệt mở danh sách (không bị chặn)", () => {
+    moLuoiOc([mk({ name: "A" })]);
+    act(() => { oc(0, "chungTu").focus(); });
+    expect(bam({ key: "ArrowDown", altKey: true }).defaultPrevented).toBe(false);
+    expect(dangO()).toBe(oc(0, "chungTu"));
+  });
+
+  it("ô Duyệt khoá (không có quyền duyệt) thì bàn phím đi qua, không kẹt ở đó", () => {
+    moLuoiOc([mk({ name: "A" })], false);
+    act(() => { oc(0, "luuKho").focus(); });
+    bam({ key: "ArrowRight" });
+    expect(dangO()).toBe(oc(0, "luuKho"));
+  });
+});
+
+describe("Ctrl+Z / Ctrl+Y khi đang đứng ở ô chọn / ô tích", () => {
+  it("chọn Chứng từ rồi Ctrl+Z NGAY tại ô đó: model và ô cùng về trước; Ctrl+Y làm lại", () => {
+    const items = [mk({ name: "A" })];
+    moLuoiOc(items);
+    const chon = oc(0, "chungTu");
+    act(() => { chon.focus(); });
+    act(() => { chon.value = "HDNS"; chon.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect((items[0] as NB).chungTu).toBe("HDNS");
+    bam({ key: "z", ctrlKey: true });
+    expect((items[0] as NB).chungTu ?? null, "Ctrl+Z ở ô chọn không làm gì").toBeNull();
+    expect(oc(0, "chungTu").value).toBe("");
+    bam({ key: "y", ctrlKey: true });
+    expect((items[0] as NB).chungTu).toBe("HDNS");
+    expect(oc(0, "chungTu").value).toBe("HDNS");
+  });
+
+  it("tích Lưu kho rồi Ctrl+Z tại ô tích: bỏ tích cả model lẫn ô", () => {
+    const items = [mk({ name: "A" })];
+    moLuoiOc(items);
+    act(() => { oc(0, "luuKho").focus(); });
+    act(() => { oc(0, "luuKho").click(); });
+    expect((items[0] as NB).luuKho).toBe(true);
+    bam({ key: "z", ctrlKey: true });
+    expect(!!(items[0] as NB).luuKho).toBe(false);
+    expect(oc(0, "luuKho").checked).toBe(false);
+  });
+
+  it("ô DUYỆT cùng gốc lỗi: tích rồi Ctrl+Z tại chính ô Duyệt", async () => {
+    const items = [mk({ name: "A" }), mk({ name: "B" })];
+    moLuoiOc(items);
+    await suaTenHang1();
+    act(() => { oc(0, "approved").focus(); });
+    act(() => { oc(0, "approved").click(); });
+    expect(items[0].approved).toBe(true);
+    bam({ key: "z", ctrlKey: true });
+    expect(!!items[0].approved, "Ctrl+Z ở ô Duyệt không làm gì").toBe(false);
+    expect(oc(0, "approved").checked).toBe(false);
+    expect(items[1].name, "chỉ lùi thao tác duyệt").toBe("B2");
+  });
+
+  it("dán khi đang đứng ở ô chọn không ghi vào ô chữ nào (không có ô nào đang được chọn để nhận)", () => {
+    const items = [mk({ name: "A", notes: "giữ" })];
+    moLuoiOc(items);
+    act(() => { o(0, "notes").focus(); });
+    bam({ key: "ArrowRight" });   // Ghi chú → NS
+    bam({ key: "ArrowRight" });   // NS → Chứng từ
+    expect(dangO()).toBe(oc(0, "chungTu"));
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: { getData: (k: string) => (k === "text/plain" ? "CHỮ DÁN" : "") } });
+    act(() => { oc(0, "chungTu").dispatchEvent(ev); });
+    expect([items[0].name, items[0].notes, (items[0] as NB).ns ?? ""]).toEqual(["A", "giữ", ""]);
+  });
+});
+
+// ── Soát vòng 1 (2026-09-29): Home / End / PgUp / PgDn là phím DI CHUYỂN của bảng (bảng phím tắt ⌨️) ──────
+// Ô <select> đang đóng trên Chromium / Windows xử lý chúng bằng cách ĐỔI LỰA CHỌN (Home → "—", End → "TM") —
+// cùng loại lỗi mũi tên ở 6007c12. jsdom không mô phỏng việc đổi giá trị đó, nên bài chốt ở chỗ lưới CHẶN
+// mặc định (defaultPrevented) và con trỏ đi đúng ô.
+describe("Home / End / PgUp / PgDn ở ô chọn / ô tích: đi ô, không để trình duyệt đổi chứng từ", () => {
+  const bangDai = () => [
+    mk({ name: "A", chungTu: "VAT" } as Partial<NB>),
+    ...Array.from({ length: 9 }, (_, k) => mk({ name: `H${k + 1}`, chungTu: "HDNS" } as Partial<NB>)),
+    mk({ kind: "section", name: "NHÓM" }),
+    mk({ name: "Y", chungTu: "TM" } as Partial<NB>),
+    mk({ name: "Z", chungTu: "TM" } as Partial<NB>),
+  ];
+
+  it("Home về ô chữ đầu hàng, End tới ô chọn / ô tích xa nhất bên phải — cả hai đều bị chặn mặc định", () => {
+    const items = bangDai();
+    moLuoiOc(items);
+    act(() => { oc(0, "chungTu").focus(); });
+    expect(bam({ key: "Home" }).defaultPrevented, "Home để mặc định thì <select> nhảy về '—'").toBe(true);
+    expect(dangO()).toBe(o(0, "name"));
+    act(() => { oc(0, "chungTu").focus(); });
+    expect(bam({ key: "End" }).defaultPrevented, "End để mặc định thì <select> nhảy về 'TM'").toBe(true);
+    expect(dangO()).toBe(oc(0, "approved"));
+    expect((items[0] as NB).chungTu).toBe("VAT");
+  });
+
+  it("PgDn / PgUp đi 10 hàng trong cùng cột; hàng đích là NHÓM (không có ô) thì dừng ở hàng có ô gần nhất", () => {
+    const items = bangDai();
+    moLuoiOc(items);
+    act(() => { oc(0, "chungTu").focus(); });
+    expect(bam({ key: "PageDown" }).defaultPrevented).toBe(true);
+    expect(dangO(), "hàng 10 là nhóm → dừng ở hàng 9").toBe(oc(9, "chungTu"));
+    bam({ key: "PageDown" });
+    expect(dangO(), "quá cuối bảng → hàng cuối").toBe(oc(12, "chungTu"));
+    expect(bam({ key: "PageUp" }).defaultPrevented).toBe(true);
+    expect(dangO()).toBe(oc(2, "chungTu"));
+    act(() => { oc(12, "luuKho").focus(); });
+    bam({ key: "PageDown" });
+    expect(dangO(), "đang ở hàng cuối — đứng yên").toBe(oc(12, "luuKho"));
+    expect(items.map((x) => (x as NB).chungTu ?? null)).toEqual(bangDai().map((x) => (x as NB).chungTu ?? null));
+  });
+
+  it("Ctrl+Home về ô đầu bảng, Ctrl+End về ô chữ cuối của hàng cuối", () => {
+    moLuoiOc(bangDai());
+    act(() => { oc(5, "luuKho").focus(); });
+    expect(bam({ key: "Home", ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(dangO()).toBe(o(0, "name"));
+    act(() => { oc(5, "chungTu").focus(); });
+    expect(bam({ key: "End", ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(dangO()).toBe(o(12, "ns"));
+  });
+});
