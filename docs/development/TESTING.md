@@ -120,8 +120,9 @@ image nên mới bị `--nhanh` bỏ qua).
 | `/api/auth/login` trả `401`, **không phải** `5xx` | đường đăng nhập vỡ ở bản đã biên dịch: `5xx` và `401` trông giống nhau trên biểu đồ, khác hẳn với người dùng |
 | worker thoát sau `SIGTERM` | rolling update cắt ngang job đang chạy vì worker không nghe tín hiệu dừng |
 
-**Trước 2026-08-31 script này KHÔNG BAO GIỜ CHẠY.** Nó chỉ được gọi ở
-`.github/workflows/ci.yml:217`, mà Actions không bật trên tài khoản này. Lượt chạy tay
+**Trước 2026-08-31 script này KHÔNG BAO GIỜ CHẠY.** Nó chỉ được gọi ở bước
+"Smoke test artifact production (dist/)" của job `test` trong `.github/workflows/ci.yml`,
+mà Actions không bật trên tài khoản này. Lượt chạy tay
 đầu tiên lộ ra ngay một lỗi: script gán `PORT=3999` nhưng **không `export`**, nên tiến
 trình con `node dist/server.js` bind cổng mặc định `3000` của chính nó còn script gõ cửa
 `3999`. Trong CI thì không thấy, vì khối `env:` của bước đã export sẵn — đúng hình dạng
@@ -187,7 +188,7 @@ Ba điều cố ý, đừng "sửa" ngược:
    thuộc ở một gói là có chủ ý — `tests/ch3-npm-manifest.test.js` đòi mọi
    `devDependencies` phải có người dùng thật.
 3. **`jsdom` không lọt vào ảnh production.** Stage `webbuild` chạy `npm ci` để BUILD;
-   stage runtime chỉ lấy kết quả đã build — `Dockerfile:98` là
+   stage runtime chỉ lấy kết quả đã build — dòng duy nhất của `Dockerfile` chạm tới stage đó là
    `COPY --from=webbuild /app/public/app2 ./public/app2`, không copy `node_modules` nào.
 
 **Tệp đang có ở tầng này** (tính đến 2026-08-28, đúng một):

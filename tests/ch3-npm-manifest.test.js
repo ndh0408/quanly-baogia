@@ -10,8 +10,9 @@
 // (2) `playwright` nằm ở devDependencies mà LÚC ẤY không file nào trong repo nhắc tới nó: không
 //     `playwright.config.*`, không spec, không bước CI — `npm ci` tải nó về mỗi lượt để không
 //     kiểm gì. TRẠNG THÁI NAY ĐÃ KHÁC, nói cho rõ kẻo đọc nhầm luật ở dưới:
-//       · `scripts/ci/ui-smoke.mjs:35` nhập `chromium` từ gói đó. Nhờ đúng chỗ dùng này mà
-//         `playwright` xanh ở luật devDependency — không phải nhờ một ngoại lệ nào.
+//       · `scripts/ci/ui-smoke.mjs` nhập `chromium` từ gói đó (`import { chromium } from
+//         "playwright"`). Nhờ đúng chỗ dùng này mà `playwright` xanh ở luật devDependency — không
+//         phải nhờ một ngoại lệ nào.
 //       · Vẫn KHÔNG có `playwright.config.*` và KHÔNG có spec: smoke giao diện là một script Node
 //         tự cầm trình duyệt, không phải bộ E2E của Playwright.
 //       · Vẫn KHÔNG có bước CI nào chạy nó. `.github/workflows/ci.yml` không nhắc `ui-smoke` lẫn
@@ -23,8 +24,9 @@
 //     `"fontkit": "^2.0.4"`), không liên quan `pdf-fontkit` — đã kiểm: không gói nào trong
 //     node_modules khai phụ thuộc `pdf-fontkit`. Chuỗi "nanoid" duy nhất trong src là nhãn `case`
 //     của switch trên `issue.format` của zod (src/zodErrorMap.ts), KHÔNG phải import.
-//     Hậu quả thật: cả hai lọt vào phạm vi `npm audit --omit=dev --audit-level=high` (ci.yml:296)
-//     vốn CHẶN MERGE — một advisory HIGH của thư viện không ai gọi cũng làm đỏ nhánh.
+//     Hậu quả thật: cả hai lọt vào phạm vi `npm audit --omit=dev --audit-level=high` (bước
+//     "Dependency audit (high+) — gate" của job `security` trong ci.yml) vốn CHẶN MERGE — một
+//     advisory HIGH của thư viện không ai gọi cũng làm đỏ nhánh.
 //
 // Ba luật dưới đây là dạng TỔNG QUÁT của ba lỗi trên, nên chúng còn bắt được lần trôi sau.
 import { describe, it, expect } from "vitest";
@@ -92,11 +94,12 @@ describe("package.json — không nuôi gói không ai dùng", () => {
 
     // Gói KHÔNG xuất hiện dưới dạng import nhưng vẫn cần thật — mỗi mục kèm lý do kiểm chứng được.
     const NGOAI_LE = {
-      // src/logger.ts:51 nạp qua TÊN (`transport: { target: "pino-pretty" }`), không import tĩnh.
+      // src/logger.ts (`export const logger = pino(…)`) nạp qua TÊN
+      // (`transport: { target: "pino-pretty" }`), không import tĩnh.
       "pino-pretty": "nạp theo tên trong pino transport (src/logger.ts)",
-      // Dockerfile:7-9 giải thích: k8s/helm/compose chạy `prisma migrate deploy` lúc khởi động nên
+      // Chú thích ở stage `deps` của Dockerfile giải thích: k8s/helm/compose chạy `prisma migrate deploy` lúc khởi động nên
       // CLI phải sống sót qua `npm ci --omit=dev`.
-      prisma: "CLI migrate chạy lúc khởi động (Dockerfile:7-9)",
+      prisma: "CLI migrate chạy lúc khởi động (Dockerfile, stage deps)",
       // Các script vận hành gọi `node --import tsx …` (pii:backfill, proof:migrate).
       tsx: "runtime TS cho script vận hành (`node --import tsx`)",
     };

@@ -93,7 +93,25 @@ ENV NODE_ENV=production \
     PORT=3000 \
     NODE_OPTIONS=--enable-source-maps
 
+# ── SÀN PHIÊN BẢN CHO GÓI OS ĐÃ CÓ BẢN VÁ (docker-smoke.sh bước [D3]) ─────────────────────────
+# Docker CACHE lớp `apk add` này theo đúng CHUỖI LỆNH + ảnh nền. NODE_IMAGE ghim digest nên ảnh nền
+# không đổi; chuỗi lệnh không đổi → lớp dựng lần đầu được dùng lại MÃI, kể cả khi kho alpine đã phát
+# hành bản vá. Đo 2026-09-29: image dựng từ cache mang libexpat 2.8.4-r0 — CVE-2026-93990 (HIGH),
+# kéo vào bởi fontconfig ← font-dejavu, KHÔNG có trong ảnh node gốc — trong khi kho v3.24 đã có
+# 2.8.5-r0; trivy ở [D3] ĐỎ. VM production cũng vậy: `compose build app` dùng cache của CHÍNH VM, nên
+# image đang chạy có thể còn bản cũ dù một lượt dựng sạch ở máy khác thấy xanh.
+#
+# Ghi SÀN (`>=`) chứ không `apk upgrade`: sàn ĐỔI chuỗi lệnh — mọi cache (máy dev lẫn VM) buộc phải
+# dựng lại lớp này — và là điều apk TỰ KIỂM: kho chưa có bản đạt sàn thì build ĐỎ ngay tại đây thay
+# vì im lặng cài bản cũ. `apk upgrade` thì không làm gì khi cache còn, và kéo mọi gói của ảnh nền trôi
+# theo ngày dựng — ngược với lý do ghim digest ở trên.
+# PHẢI để trong nháy đơn: `libexpat>=2.8.5-r0` trần thì shell đọc `>` là CHUYỂN HƯỚNG — ghi ra tệp
+# tên `=2.8.5-r0` rồi cài libexpat bản bất kỳ, tức sàn biến mất mà không ai hay.
+# [D3] báo CVE gói OS mới → thêm một sàn cạnh cái dưới, kèm mã CVE ở đây. tests/ops-cong-kiem.test.js
+# (INFRA-11) giữ sàn này có mặt, đúng nháy, và không tụt dưới bản vá.
+#   libexpat >= 2.8.5-r0 — CVE-2026-93990
 RUN apk add --no-cache openssl libc6-compat tini postgresql16-client font-dejavu \
+      'libexpat>=2.8.5-r0' \
  && addgroup -S app && adduser -S app -G app
 
 # Copy production-only node_modules + generated Prisma client

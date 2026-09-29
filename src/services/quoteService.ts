@@ -1098,6 +1098,10 @@ export async function listQuotes(req: Request) {
       take: size,
     }),
   ]);
+  // Số trang của từng báo giá — CHỈ cho id của trang này (vì sao không dùng `_count`: xem
+  // QUOTE_LIST_SELECT). Gắn lại đúng hình dạng `_count.sheets` mà presentQuoteRow vẫn đọc.
+  const soTrang = await soTrangTheoBaoGia(rows.map((r: any) => r.id));
+  for (const r of rows as any[]) r._count = { sheets: soTrang.get(r.id) ?? 0 };
   if (canBangNoiBo && rows.length) {
     // Bảng Hà Nội nay ở CẤP BÁO GIÁ nên phải nạp riêng — `presentQuoteRow` nhánh hnOnly đọc
     // `q.hnTables`. Cũng cắt ảnh ngay tại SQL, cùng lý do với bảng theo trang.
@@ -1112,6 +1116,17 @@ export async function listQuotes(req: Request) {
     for (const r of rows as any[]) r.sheets = [{ extraTables: theoBaoGia.get(r.id) ?? [] }];
   }
   return { rows, total, page, size };
+}
+
+/**
+ * Số trang (QuoteSheet) của từng báo giá trong `ids`: MỘT câu `GROUP BY` lọc `quoteId IN (…)`, đi
+ * index `QuoteSheet_quoteId_order_idx` — đọc đúng số trang của trang danh sách đang xem, không phải
+ * cả bảng. Báo giá không có trang nào thì không có trong Map (người gọi lùi về 0).
+ */
+async function soTrangTheoBaoGia(ids: number[]): Promise<Map<number, number>> {
+  if (!ids.length) return new Map();
+  const nhom = await prisma.quoteSheet.groupBy({ by: ["quoteId"], where: { quoteId: { in: ids } }, _count: { _all: true } });
+  return new Map(nhom.map((g) => [g.quoteId, g._count._all]));
 }
 
 /**

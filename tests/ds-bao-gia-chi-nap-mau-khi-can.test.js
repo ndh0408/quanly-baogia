@@ -15,8 +15,10 @@ vi.mock("../src/db.js", () => ({
   prisma: {
     quote: {
       count: async () => 1,
-      findMany: async () => [{ id: 5, companyId: 7, company: { id: 7, name: "Gia Nguyễn", shortName: "GN" }, _count: { sheets: 1 } }],
+      findMany: async () => [{ id: 5, companyId: 7, company: { id: 7, name: "Gia Nguyễn", shortName: "GN" } }],
     },
+    // Số trang đếm riêng theo id của trang danh sách (tests/ds-bao-gia-dem-trang.test.js).
+    quoteSheet: { groupBy: async () => [{ quoteId: 5, _count: { _all: 1 } }] },
     quoteTemplate: { findMany: async () => { h.goiMau++; return h.mau; } },
     // Hai câu SQL thô của listQuotes: bảng nội bộ theo trang (FROM "QuoteSheet") và bảng HN cấp báo giá.
     $queryRaw: async (sql) => (sql.join("").includes('FROM "QuoteSheet"') ? [] : [{ quoteId: 5, tables: h.bangHn }]),

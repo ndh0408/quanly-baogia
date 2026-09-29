@@ -345,6 +345,15 @@ export function presentQuote(q: any, { hnOnly = false, internalOnly = false }: {
 // Lightweight projection for the LIST view: NO customerLogo (base64, bloats the
 // row) and NO sheets/items (the list only needs a sheet COUNT). Uses the stored
 // snapshot totals — no per-row recompute. Hot, frequently-refetched query.
+//
+// KHÔNG có `_count: { select: { sheets: true } }` — CỐ Ý. Prisma dịch nó thành
+// `LEFT JOIN (SELECT "quoteId", COUNT(*) FROM "QuoteSheet" WHERE 1=1 GROUP BY "quoteId")`: gộp
+// TOÀN BẢNG QuoteSheet rồi mới JOIN, vì Postgres không đẩy được khoá JOIN vào một subquery có
+// GROUP BY. Tức mỗi lần tải danh sách 20 báo giá là một lần quét hết mọi trang của mọi báo giá, và
+// không index nào cứu được (đo trên 5.000 báo giá × 2 trang: ép tắt seqscan thì chi phí còn cao
+// hơn — 1509 so với 859). Số trang
+// được `listQuotes` đếm riêng, chỉ cho id của trang hiện tại, rồi gắn lại đúng `_count.sheets` mà
+// `presentQuoteRow` đọc. Xem scripts/db/explain-hot-paths.mjs (TRANG_MOI_BAO_GIA).
 export const QUOTE_LIST_SELECT = {
   id: true, quoteNumber: true, projectCode: true, projectVersion: true,
   title: true, shortTitle: true, toCompany: true, status: true, quoteDate: true,
@@ -353,7 +362,6 @@ export const QUOTE_LIST_SELECT = {
   company: { select: { id: true, name: true, shortName: true } },
   customer: { select: { code: true, name: true } },
   createdBy: { select: { id: true, displayName: true } },
-  _count: { select: { sheets: true } },
 };
 
 export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }: { hnOnly?: boolean; internalOnly?: boolean } = {}) {
