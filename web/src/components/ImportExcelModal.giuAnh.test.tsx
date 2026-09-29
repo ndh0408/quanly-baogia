@@ -135,3 +135,30 @@ describe("L48 (bảng HN): hàng đã thanh toán bị tệp đổi số tiền 
     expect(loiXacNhan.join(" | ")).not.toMatch(/đã thanh toán bị đổi/);
   });
 });
+
+// Bảng nội bộ (AccountHnView): ba cột NS · CHỨNG TỪ · LƯU KHO (4e24308) không bao giờ có trong tệp Excel. Dòng
+// khớp giữ chúng (892e154) nhưng dòng bị xoá thật thì mất hẳn — hộp xác nhận phải NÓI RA như ảnh / duyệt.
+describe("Thay toàn bộ (bảng nội bộ): hàng có NS / chứng từ / lưu kho bị xoá được báo trước khi nạp", () => {
+  const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
+  it("xem trước + hộp xác nhận đếm hàng sẽ mất ba cột; dòng khớp vẫn giữ", async () => {
+    const { payload, html } = await napTep([
+      hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }),
+      hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2" }),
+      hang({ kind: "item", name: "Bàn bị khách xoá", unit: "cái", quantity: 1, unitPrice: 100000, rid: "r-3", ns: "Chị Lan", chungTu: "HDNS" }),
+      hang({ kind: "item", name: "Loa bị khách xoá", unit: "bộ", quantity: 1, unitPrice: 70000, rid: "r-4", luuKho: true }),
+    ]);
+    expect(payload, "không nạp").toBeTruthy();
+    expect(payload!.plans[0].items[0]).toMatchObject({ ns: "Anh Tuấn", chungTu: "VAT", luuKho: true });
+    expect(loiXacNhan.join(" | ")).toMatch(/2 hàng có NS \/ chứng từ \/ lưu kho .*sẽ bị xoá/);
+    expect(html).toMatch(/2 hàng có NS \/ chứng từ \/ lưu kho sẽ bị xoá/);
+  });
+
+  it("hàng bị xoá chỉ có giá trị mặc định → không cảnh báo ba cột", async () => {
+    await napTep([
+      hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }),
+      hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2" }),
+      hang({ kind: "item", name: "Bàn bị khách xoá", unit: "cái", quantity: 1, unitPrice: 100000, rid: "r-3", ns: null, chungTu: null, luuKho: false }),
+    ]);
+    expect(loiXacNhan.join(" | ")).not.toMatch(/NS \/ chứng từ/);
+  });
+});

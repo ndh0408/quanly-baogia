@@ -321,6 +321,8 @@ export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] 
  *                      BAO GIỜ chở chúng: không mang sang là Lưu xong ba cột về rỗng ở MỌI hàng khớp
  *                      (sanitizeExtraTables ghi null/false), trong khi bảng đối chiếu vẫn ghi "Giữ nguyên".
  * `trangThaiMat` = số hàng đã duyệt / đã thanh toán KHÔNG ghép được (sẽ mất cùng dòng) — hộp xác nhận nói ra.
+ * `noiBoMat` = số hàng có NS / chứng từ / lưu kho KHÔNG ghép được. Tệp không bao giờ chở ba cột đó nên hàng
+ *   bị xoá thật là mất chúng vĩnh viễn — trước đây hộp xác nhận chỉ đếm ảnh và duyệt / thanh toán, im về chúng.
  * `tienDaTraDoi` = tên các hàng ĐÃ THANH TOÁN ghép được mà tệp đổi SL / Đơn Giá / Số Ngày (soát toàn diện
  *   đợt 3). rid đi theo nên máy chủ nhận ra hàng đã trả, và người không có quyền thanh toán bị TỪ CHỐI cả
  *   lần Lưu (400). KHÔNG âm thầm giữ số cũ — người nạp có thể chính là người có quyền, và nuốt thay đổi là
@@ -329,6 +331,8 @@ export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] 
 const TRUONG_TRANG_THAI = ["rid", "approved", "approvedAt", "approvedBy", "paid", "paidAt", "paidById", "hasPaidProof"] as const;
 const TRUONG_NOI_BO = ["ns", "luuKho", "chungTu"] as const;
 const coTrangThai = (it: Record<string, unknown>) => !!(it.approved || it.paid || it.hasPaidProof || it.paidAt);
+/** Hàng có dữ liệu ở ba cột nội bộ — giá trị mặc định (null / false / chuỗi trắng) không tính, như extraTableHasData. */
+const coNoiBo = (it: Record<string, unknown>) => (typeof it.ns === "string" && it.ns.trim() !== "") || !!it.chungTu || it.luuKho === true;
 /** Dấu vân tay SỐ TIỀN của một hàng — PHẢI khớp `soTienHang` (src/services/quoteService.ts), nơi máy
  *  chủ so hàng đã trả. `null` = hàng KHÔNG ghi số tiền (bản trước chuẩn hoá) → máy chủ không so. */
 const soTienHang = (it: Record<string, unknown>): string | null => {
@@ -337,7 +341,7 @@ const soTienHang = (it: Record<string, unknown>): string | null => {
   return `${Number(q) || 0}|${Number(dg) || 0}|${it.days != null ? Number(it.days) : ""}`;
 };
 
-export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean; giuCongThucNgayAn?: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; tienDaTraDoi: string[]; congThucNgayAnMat: number } {
+export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean; giuCongThucNgayAn?: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; noiBoMat: number; tienDaTraDoi: string[]; congThucNgayAnMat: number } {
   type ItemApp = M.Item & { productId?: unknown } & Record<string, unknown>;
   const items = after.slice();
   const daGhep = new Set<number>();
@@ -365,14 +369,15 @@ export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGh
     }
     items[j] = moi;
   }
-  let anhMat = 0, trangThaiMat = 0, congThucNgayAnMat = 0;
+  let anhMat = 0, trangThaiMat = 0, noiBoMat = 0, congThucNgayAnMat = 0;
   before.forEach((cu, i) => {
     if (opts.giuCongThucNgayAn && cu.formulas?.days && !ngayAnDaGiu.has(i)) congThucNgayAnMat++;
     if (daGhep.has(i)) return;
     anhMat += cu.images?.length || 0;
     if (coTrangThai(cu as ItemApp)) trangThaiMat++;
+    if (coNoiBo(cu as ItemApp)) noiBoMat++;
   });
-  return { items, anhMat, trangThaiMat, tienDaTraDoi, congThucNgayAnMat };
+  return { items, anhMat, trangThaiMat, noiBoMat, tienDaTraDoi, congThucNgayAnMat };
 }
 
 /** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */

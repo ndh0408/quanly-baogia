@@ -119,7 +119,7 @@ export function ImportExcelModal({
     // đối chiếu nói đúng thứ sẽ xảy ra.
     const giu = plan.mode !== "append" && target ? giuTruongChiApp(before, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote, giuCongThucNgayAn: !usesDays }) : null;
     const after = plan.mode === "append" ? [...before, ...conv.items] : (giu?.items ?? conv.items);
-    const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0, tienDaTraDoi = giu?.tienDaTraDoi ?? [];
+    const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0, noiBoMat = giu?.noiBoMat ?? 0, tienDaTraDoi = giu?.tienDaTraDoi ?? [];
     const beforeTotal = M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
     const effectiveGroupSubtotal = plan.mode === "append" ? !!target?.groupSubtotal : !!fs.groupSubtotal;
     const afterTotal = M.sheetSubtotalGrouped(after, usesDays, effectiveGroupSubtotal);
@@ -143,7 +143,7 @@ export function ImportExcelModal({
     return {
       fs, plan, target, targetTemplate, templateMismatch, isNew, usesDays, addrDetail, showDetail, detailDropped, columnMoves,
       before, after, beforeTotal, afterTotal, importedTotal, fileTotal, moneyDelta, moneyMismatch,
-      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat, tienDaTraDoi,
+      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat, noiBoMat, tienDaTraDoi,
     };
   }, [usable, plans, active, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId]);
 
@@ -175,7 +175,7 @@ export function ImportExcelModal({
     const effectiveRemovals = removeTargets.filter((i) => unmatchedTargets.includes(i));
     const out: ImportApplyPayload["plans"] = [];
     let totals: ImportApplyPayload["totals"];
-    let moneyRisk = 0, formulaRisk = 0, templateRisk = 0, rowRisk = 0, sheetRisk = 0, anhRisk = 0, trangThaiRisk = 0;
+    let moneyRisk = 0, formulaRisk = 0, templateRisk = 0, rowRisk = 0, sheetRisk = 0, anhRisk = 0, trangThaiRisk = 0, noiBoRisk = 0;
     const tienDaTraRisk: string[] = [];
     usable.forEach((fs, i) => {
       const plan = plans[i];
@@ -197,6 +197,8 @@ export function ImportExcelModal({
       anhRisk += giu?.anhMat ?? 0;
       // Bảng HN: hàng đã duyệt / đã thanh toán không còn trong tệp → mất dấu duyệt, cờ đã trả, ảnh chứng từ.
       trangThaiRisk += giu?.trangThaiMat ?? 0;
+      // Bảng nội bộ: hàng có NS / chứng từ / lưu kho không còn trong tệp → mất cả ba (tệp không chở chúng).
+      noiBoRisk += giu?.noiBoMat ?? 0;
       // Bảng HN: hàng đã thanh toán bị tệp đổi số tiền → máy chủ từ chối CẢ lần Lưu nếu người dùng không có
       // quyền thanh toán (reconcileExtraPayments). Modal không biết quyền → nói điều kiện ra, không đoán.
       tienDaTraRisk.push(...(giu?.tienDaTraDoi ?? []));
@@ -233,6 +235,7 @@ export function ImportExcelModal({
       effectiveRemovals.length ? `${effectiveRemovals.length} sheet hiện có sẽ bị xóa` : "",
       anhRisk ? `${anhRisk} ảnh hạng mục ở sheet đích sẽ bị xoá (dòng có ảnh không còn trong file)` : "",
       trangThaiRisk ? `${trangThaiRisk} hàng đã duyệt / đã thanh toán ở sheet đích sẽ bị xoá (mất dấu duyệt, thanh toán và ảnh chứng từ)` : "",
+      noiBoRisk ? `${noiBoRisk} hàng có NS / chứng từ / lưu kho ở sheet đích sẽ bị xoá (dòng không còn trong file — tệp Excel không chở ba cột này)` : "",
       tienDaTraRisk.length ? `${tienDaTraRisk.length} hàng đã thanh toán bị đổi số tiền (${tenVaiHang(tienDaTraRisk)}) — nếu bạn không có quyền thanh toán, lần Lưu sẽ bị từ chối` : "",
     ].filter(Boolean);
     if (risks.length && !(await confirmModal(
@@ -389,7 +392,7 @@ export function ImportExcelModal({
                       <small>{view.fileTotal == null ? "Không tìm thấy dòng Tổng cộng trong file" : `Excel ${M.fmtMoney(view.fileTotal)} · sau nạp ${M.fmtMoney(view.importedTotal)}`}</small>
                     </div>
                   </div>
-                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0 || view.trangThaiMat > 0 || view.tienDaTraDoi.length > 0) && (
+                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0 || view.trangThaiMat > 0 || view.noiBoMat > 0 || view.tienDaTraDoi.length > 0) && (
                     <ul className="import-warn">
                       {view.templateMismatch && <li>
                         Bạn đang đưa file dạng <strong>{view.fs.templateName || view.fs.templateCode}</strong> vào sheet dùng <strong>{view.targetTemplate?.name}</strong>. Hãy chọn đúng sheet đích để nhóm và số thứ tự không đổi kiểu.
@@ -403,6 +406,9 @@ export function ImportExcelModal({
                       </li>}
                       {view.trangThaiMat > 0 && <li>
                         <strong>{view.trangThaiMat} hàng đã duyệt / đã thanh toán sẽ bị xoá</strong> cùng các dòng không còn trong file — mất luôn dấu duyệt, thanh toán và ảnh chứng từ. Dòng còn khớp thì giữ nguyên trạng thái.
+                      </li>}
+                      {view.noiBoMat > 0 && <li>
+                        <strong>{view.noiBoMat} hàng có NS / chứng từ / lưu kho sẽ bị xoá</strong> cùng các dòng không còn trong file — tệp Excel không chở ba cột này nên chúng mất hẳn. Dòng còn khớp thì giữ nguyên.
                       </li>}
                       {view.tienDaTraDoi.length > 0 && <li>
                         <strong>{view.tienDaTraDoi.length} hàng đã thanh toán bị đổi số tiền</strong> ({tenVaiHang(view.tienDaTraDoi)}) — file sửa số lượng / đơn giá / số ngày của hàng đã đánh dấu ĐÃ TRẢ. Nếu bạn không có quyền thanh toán, lần Lưu sẽ bị TỪ CHỐI: nhờ người phụ trách thanh toán bỏ đánh dấu trước, hoặc sửa lại số trong file.
