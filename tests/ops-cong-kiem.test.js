@@ -7,7 +7,8 @@
  * GAP1-08: rc-qa.mjs coi 404 là đạt khi mong 200, và bỏ qua 403 khi đo hiệu năng.
  * INFRA-10: app không khai stop_grace_period (Docker SIGKILL sau 10s = đúng lưới tắt 10s của app).
  * INFRA-11: không đường nào đang chạy quét lỗ hổng của IMAGE.
- * §17: explain-hot-paths đỏ/xanh theo LỊCH SỬ của bảng (thứ tự vật lý), không theo index.
+ * §17: explain-hot-paths đỏ/xanh theo LỊCH SỬ của bảng (thứ tự vật lý), không theo index; không
+ *   dựng trang (QuoteSheet) nên mù trước truy vấn đếm trang.
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
@@ -177,6 +178,13 @@ describe("§17 — explain-hot-paths: phán quyết theo INDEX, không theo th�
 
   it("phần chạy cổng nằm sau chốt import.meta.url === argv[1] — import từ test không chạm CSDL", () => {
     expect(coChot).toBe(true);
+  });
+
+  it("dữ liệu thử có TRANG cho mỗi báo giá — bảng QuoteSheet rỗng thì truy vấn đếm trang không bao giờ đỏ", () => {
+    // quoteSheetsSchema đòi ≥ 1 trang mỗi báo giá: ở CSDL thật QuoteSheet luôn lớn ít nhất bằng Quote.
+    expect(m.TRANG_MOI_BAO_GIA).toBeGreaterThanOrEqual(1);
+    expect(src).toMatch(/INSERT INTO "QuoteSheet" \("quoteId", "templateId", "order"\)\s+SELECT q\.id, \$1, o FROM "Quote" q CROSS JOIN generate_series\(1, \$2\) o WHERE q\."companyId" = \$3`,\s+mau\.id, TRANG_MOI_BAO_GIA, co\.id,/);
+    expect(src, "mẫu thử phải được dọn (QuoteSheet trỏ tới nó; Company bị nó trỏ tới)").toMatch(/prisma\.quoteTemplate\.deleteMany\(\{ where: \{ code: \{ startsWith: TAG \} \}/);
   });
 
   it("trang SÂU bỏ qua ~10% số dòng dựng: ở 40% (trang 100 cũ) Seq Scan là lựa chọn ĐÚNG khi thứ tự lệch", () => {

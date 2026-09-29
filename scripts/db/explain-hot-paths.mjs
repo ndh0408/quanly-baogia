@@ -18,8 +18,9 @@
 // ngưỡng đặt theo số dòng thật của bảng trong kế hoạch, không phải "thấy Seq Scan là đỏ".
 //
 // ── DỮ LIỆU ────────────────────────────────────────────────────────────────
-// Tự dựng `EXPLAIN_SO_DONG` (mặc định 5000) khách hàng + báo giá mang tiền tố `xp-<pid>`, chạy
-// ANALYZE để bộ hoạch định có thống kê thật, rồi XOÁ CỨNG ở finally. Không đụng dữ liệu sẵn có.
+// Tự dựng `EXPLAIN_SO_DONG` (mặc định 5000) khách hàng + báo giá mang tiền tố `xp-<pid>`, mỗi báo
+// giá `TRANG_MOI_BAO_GIA` trang, chạy ANALYZE để bộ hoạch định có thống kê thật, rồi XOÁ CỨNG ở
+// finally. Không đụng dữ liệu sẵn có.
 // Không có dữ liệu thì mọi kế hoạch đều là Seq Scan trên bảng rỗng và bài đo nói dối theo chiều
 // ngược lại: "không có index nào cần thiết".
 //
@@ -53,6 +54,13 @@ const TAG = `xp-${process.pid}`;
 export const CO_TRANG = 20;
 /** Trang SÂU bỏ qua chừng này phần số dòng dựng. Vì sao không sâu hơn: xem khối THỨ TỰ VẬT LÝ. */
 export const TI_LE_TRANG_SAU = 0.1;
+/**
+ * Số TRANG (QuoteSheet) dựng cho mỗi báo giá thử. Không được là 0: `quoteSheetsSchema` đòi mỗi báo
+ * giá ≥ 1 trang, nên ở CSDL thật bảng QuoteSheet luôn lớn ít nhất bằng bảng Quote. Bản trước không
+ * dựng trang nào — câu Prisma sinh cho `_count: { sheets }` (gộp TOÀN BẢNG QuoteSheet rồi mới JOIN)
+ * quét một bảng rỗng và cổng báo XANH cho đúng Seq Scan mà mỗi lần tải danh sách phải trả.
+ */
+export const TRANG_MOI_BAO_GIA = 2;
 
 /**
  * Số trang của đường "trang SÂU": bỏ qua ≈ `TI_LE_TRANG_SAU` số dòng dựng, không ít hơn trang 2.
@@ -343,6 +351,16 @@ async function main() {
       }),
     });
   }
+  // Trang của từng báo giá — xem TRANG_MOI_BAO_GIA. SQL thô cho gọn: một câu thay cho 10.000 lần
+  // tạo lồng; chỉ ba cột bắt buộc, còn lại để mặc định như một trang vừa tạo từ giao diện.
+  const mau = await prisma.quoteTemplate.create({
+    data: { companyId: co.id, name: "Mẫu Explain", code: `${TAG}-mau`, filePath: "templates/GN_KhongNgay.xlsx" },
+  });
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "QuoteSheet" ("quoteId", "templateId", "order")
+     SELECT q.id, $1, o FROM "Quote" q CROSS JOIN generate_series(1, $2) o WHERE q."companyId" = $3`,
+    mau.id, TRANG_MOI_BAO_GIA, co.id,
+  );
   // ANALYZE: không có thống kê tươi thì bộ hoạch định đoán bừa và mọi kế hoạch dưới đây vô nghĩa.
   await prisma.$executeRawUnsafe('ANALYZE "Quote", "Customer", "QuoteSheet", "QuoteItem", "AuditEvent"');
   // In ra để lượt nào cũng thấy tiền đề của bài đo: ≈ 0 là đang đo ở thứ tự vật lý xấu nhất. Không
@@ -352,7 +370,7 @@ async function main() {
       WHERE schemaname = 'public' AND tablename IN ('Customer', 'Quote') AND attname = 'createdAt' ORDER BY tablename`,
   );
   ok(
-    `${SO_DONG} khách + ${SO_DONG} báo giá, đã ANALYZE · correlation(createdAt): ` +
+    `${SO_DONG} khách + ${SO_DONG} báo giá × ${TRANG_MOI_BAO_GIA} trang, đã ANALYZE · correlation(createdAt): ` +
       (tuongQuan.map((r) => `${r.tablename} ${Number(r.correlation).toFixed(2)}`).join(", ") || "chưa có"),
   );
 
@@ -402,6 +420,10 @@ async function donDep() {
   if (!prisma) return;
   try {
     await prisma.quote.deleteMany({ where: { quoteNumber: { startsWith: TAG } }, hardDelete: true, includeDeleted: true });
+  } catch { /* bỏ qua */ }
+  // Sau Quote (trang đi theo báo giá — onDelete: Cascade), trước Company (mẫu trỏ tới công ty).
+  try {
+    await prisma.quoteTemplate.deleteMany({ where: { code: { startsWith: TAG } }, hardDelete: true, includeDeleted: true });
   } catch { /* bỏ qua */ }
   try {
     await prisma.customer.deleteMany({ where: { code: { startsWith: TAG } }, hardDelete: true, includeDeleted: true });

@@ -193,6 +193,14 @@ của bảng chứ không vì thiếu index. Khi đỏ, chẩn đoán (SQL, nút
 hàng ước lượng/thật, thống kê bảng, correlation của cột sắp xếp, kế hoạch bị gạt
 đi) ra **stderr** — `verify-local.sh` đổ stdout vào `/dev/null`.
 
+Mỗi báo giá thử có **trang** (`QuoteSheet`, `TRANG_MOI_BAO_GIA`): validator đòi ≥ 1
+trang mỗi báo giá, nên ở CSDL thật bảng này luôn lớn ít nhất bằng bảng `Quote`.
+Trước 2026-09-29 script không dựng trang nào, và cổng không thấy danh sách báo giá
+gộp **toàn bảng** `QuoteSheet` để đếm trang: `_count: { sheets }` của Prisma thành
+`LEFT JOIN (SELECT "quoteId", COUNT(*) … GROUP BY "quoteId")`, mà Postgres không
+đẩy được khoá JOIN vào subquery có `GROUP BY` — không index nào cứu được. Nay
+`listQuotes` đếm trang riêng, chỉ cho id của trang đang xem (`soTrangTheoBaoGia`).
+
 `PRISMA_LOG_QUERIES` **không được bật ở production**: câu SQL kèm tham số, tức
 tên khách, số điện thoại và mọi thứ người dùng gõ vào ô tìm kiếm sẽ nằm trong
 nhật ký.
