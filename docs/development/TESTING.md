@@ -120,8 +120,9 @@ image nên mới bị `--nhanh` bỏ qua).
 | `/api/auth/login` trả `401`, **không phải** `5xx` | đường đăng nhập vỡ ở bản đã biên dịch: `5xx` và `401` trông giống nhau trên biểu đồ, khác hẳn với người dùng |
 | worker thoát sau `SIGTERM` | rolling update cắt ngang job đang chạy vì worker không nghe tín hiệu dừng |
 
-**Trước 2026-08-31 script này KHÔNG BAO GIỜ CHẠY.** Nó chỉ được gọi ở
-`.github/workflows/ci.yml:217`, mà Actions không bật trên tài khoản này. Lượt chạy tay
+**Trước 2026-08-31 script này KHÔNG BAO GIỜ CHẠY.** Nó chỉ được gọi ở bước
+"Smoke test artifact production (dist/)" của job `test` trong `.github/workflows/ci.yml`,
+mà Actions không bật trên tài khoản này. Lượt chạy tay
 đầu tiên lộ ra ngay một lỗi: script gán `PORT=3999` nhưng **không `export`**, nên tiến
 trình con `node dist/server.js` bind cổng mặc định `3000` của chính nó còn script gõ cửa
 `3999`. Trong CI thì không thấy, vì khối `env:` của bước đã export sẵn — đúng hình dạng

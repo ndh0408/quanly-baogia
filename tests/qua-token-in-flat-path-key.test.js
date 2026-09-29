@@ -42,7 +42,7 @@ function bat() {
 }
 
 describe("token trong khoá `path` phẳng không được ra log", () => {
-  it("logger.error({ path }) — đúng hình dạng src/middleware.ts:239", () => {
+  it("logger.error({ path }) — đúng hình dạng logger.error trong errorHandler (src/middleware.ts)", () => {
     const { lg, doc } = bat();
     lg.error({ reqId: "r1", path: DUONG_MOI, method: "GET", status: 500 }, "request failed");
     expect(doc()).not.toContain(TOKEN);

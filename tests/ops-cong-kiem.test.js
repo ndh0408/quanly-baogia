@@ -28,6 +28,48 @@ describe("DOC-11 — dongVoNghia bắt dòng chỉ có dấu đóng", () => {
   });
 });
 
+// Người soát (2026-09-29): commit đổi tham chiếu sang TÊN còn sót sáu chỗ `tệp:dòng` ĐÃ TRÔI mà
+// check-line-refs không thể bắt — bốn chỗ rơi vào một dòng MÃ khác nghĩa (vd `src/logger.ts:51` giờ
+// là `export const redactConfig`), hai chỗ rơi vào dòng chú thích (cổng chỉ liệt kê, không chặn).
+// Cổng không kiểm được ngữ nghĩa, nên ở đây neo từng chỗ: số dòng cũ không còn, và TÊN được nêu thay
+// thế có thật ở tệp đích — đổi tên bước/hàm mà quên tài liệu thì bài này đỏ, thay vì im lặng trôi.
+describe("DOC-11 — tham chiếu đã đổi sang TÊN trỏ vào thứ có thật", () => {
+  const NEO = [
+    {
+      tep: "tests/qua-token-in-flat-path-key.test.js", cu: /src\/middleware\.ts:\d/, nhac: /logger\.error trong errorHandler \(src\/middleware\.ts\)/,
+      dich: "src/middleware.ts", neo: /export function errorHandler[\s\S]*?logger\.error\(\{ reqId: req\.id, path: req\.path/,
+    },
+    {
+      tep: "tests/ch3-npm-manifest.test.js", cu: /src\/logger\.ts:\d/, nhac: /src\/logger\.ts \(`export const logger = pino\(…\)`\)/,
+      dich: "src/logger.ts", neo: /export const logger = pino\(\{[\s\S]*?target: "pino-pretty"/,
+    },
+    {
+      tep: "tests/ch3-npm-manifest.test.js", cu: /ci\.yml:\d/, nhac: /"Dependency audit \(high\+\) — gate" của job `security`/,
+      dich: ".github/workflows/ci.yml", neo: /^ {2}security:\n[\s\S]*?- name: Dependency audit \(high\+\) — gate\n\s+run: npm audit --omit=dev --audit-level=high$/m,
+    },
+    {
+      tep: "tests/ch3-npm-manifest.test.js", cu: /scripts\/ci\/ui-smoke\.mjs:\d/, nhac: /`scripts\/ci\/ui-smoke\.mjs` nhập `chromium`/,
+      dich: "scripts/ci/ui-smoke.mjs", neo: /^import \{ chromium \} from "playwright";$/m,
+    },
+    {
+      tep: "docs/development/TESTING.md", cu: /ci\.yml:\d/, nhac: /"Smoke test artifact production \(dist\/\)" của job `test`/,
+      dich: ".github/workflows/ci.yml", neo: /^ {2}test:\n[\s\S]*?- name: Smoke test artifact production \(dist\/\)\n[\s\S]*?run: bash scripts\/ci\/smoke-dist\.sh$/m,
+    },
+    {
+      tep: "docs/adr/0006-go-spa-vanilla-cu.md", cu: /web\/src\/main\.tsx:\d/, nhac: /`import "\.\.\/\.\.\/public\/style\.css"` trong `web\/src\/main\.tsx`/,
+      dich: "web/src/main.tsx", neo: /^import "\.\.\/\.\.\/public\/style\.css";$/m,
+    },
+  ];
+  for (const { tep, cu, nhac, dich, neo } of NEO) {
+    it(`${tep}: không còn ${cu.source.replace(/\\d/g, "N").replace(/\\/g, "")}, và tên nêu thay có thật ở ${dich}`, () => {
+      const s = doc(tep);
+      expect(s, "vẫn còn tham chiếu số dòng").not.toMatch(cu);
+      expect(s, "tài liệu không nêu tên thay thế").toMatch(nhac);
+      expect(doc(dich).replace(/\r\n/g, "\n"), `${dich} không còn thứ tài liệu nêu tên`).toMatch(neo);
+    });
+  }
+});
+
 describe("GAP1-08 — rc-qa.mjs không chấm đạt quá dễ", () => {
   const src = doc("scripts/dev/rc-qa.mjs");
   it("không còn luật ngầm 'mong 200 thì 404 cũng được'", () => {

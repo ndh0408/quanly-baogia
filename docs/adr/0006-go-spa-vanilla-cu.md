@@ -57,7 +57,7 @@ Gỡ hẳn:
   `public/grid-clipboard.js`.
 - Bỏ route `/app` · `/app/*` và hàm `sendOld` trong `src/app.ts`.
 - Giữ `public/style.css` — nó **không** thuộc SPA cũ: React import nó qua Vite
-  (`web/src/main.tsx:10`), nên Vite tự băm và cache-bust.
+  (`import "../../public/style.css"` trong `web/src/main.tsx`), nên Vite tự băm và cache-bust.
 
 Không có lớp tương thích, không có cờ bật/tắt. Một frontend, một đường.
 
