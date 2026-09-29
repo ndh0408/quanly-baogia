@@ -180,9 +180,14 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // người dùng yêu cầu —
       //   · C3:I3 (một ô gộp, đọc ra 7 lần) khối "Kính gửi" thêm dòng CUỐI "(Số://GN26SNAP)";
       //   · G4 "ĐƠN GIÁ" → "ĐƠN GIÁ\n(VNĐ)" · H4 "THÀNH TIỀN " → "THÀNH TIỀN\n(VNĐ)".
-      // Hai thay đổi còn lại KHÔNG có trong bản chụp (nó không chụp bề rộng cột lẫn màu chữ): cột STT
-      // 12,36 → 6,63 (bề rộng dồn cho Hạng Mục / Thành Tiền) và tên hạng mục chữ xanh ngọc FF227771 —
-      // chốt riêng ở cụm "bốn chỗ học theo GN" của tests/cf-colorfull-cot-chi-tiet.test.js.
+      // Những thay đổi còn lại KHÔNG có trong bản chụp (nó không chụp bề rộng cột, màu chữ, kiểu chữ
+      // lẫn neo ảnh): cột B 12,36 → 7 · D 30 → 32,36 · H 15 → 18 (tổng B:I giữ nguyên), chữ Hạng Mục
+      // theme 9 tint -0.5 cùng màu số STT, dòng mã là chuỗi THƯỜNG (không nghiêng): chốt ở cụm "bốn
+      // chỗ học theo GN" của tests/cf-colorfull-cot-chi-tiet.test.js. Còn neo logo COLORFUL tính lại —
+      // CHỖ và CHIỀU CAO như tệp mẫu, bề ngang theo tỉ lệ ảnh PNG gốc (2026-09-29, `anhMau.giuTiLeAnhGoc`;
+      // tệp mẫu vốn bóp logo hẹp 5,6%) — chốt DUY NHẤT ở tests/xl-anh-mau-giu-hinh.test.js. Hai cách làm
+      // (bản 2026-09-25 dòng mã nghiêng bằng richText, bản chốt dùng chuỗi thường) cho CÙNG hash
+      // 0976a4a54d624299: bản chụp đọc chữ của richText, không đọc font từng đoạn.
       // Bảy fixture GN giữ nguyên hash: GN không đổi.
       expect({ [name]: h }).toMatchSnapshot();
     });

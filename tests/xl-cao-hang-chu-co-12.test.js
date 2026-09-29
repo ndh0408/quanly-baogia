@@ -32,8 +32,6 @@ async function xuat(code, { info = [], notes = null } = {}) {
   }));
   return wb.worksheets[0];
 }
-/** Chữ của ô, kể cả richText (khối "Kính gửi" kèm dòng mã báo giá nghiêng — 2026-09-25). */
-const chuO = (v) => (Array.isArray(v?.richText) ? v.richText.map((x) => x.text).join("") : String(v ?? ""));
 /** Tổng bề rộng LƯU của các cột trong vùng gộp bắt đầu ở `addr` (thứ `soDongKhiXuongHang` nhận). */
 function beRongGop(ws, addr) {
   const vung = ws.model.merges.find((m) => m.startsWith(`${addr}:`));
@@ -51,7 +49,8 @@ describe("chữ cỡ 12: mỗi dòng 15,75pt như Excel", () => {
       const ws = await xuat(code);
       const o = ws.getCell("C3");
       expect(o.font?.size, "bài này giả định ô C3 cỡ 12 như tệp mẫu").toBe(12);
-      const dong = chuO(o.value).split("\n");
+      expect(typeof o.value, "khối Kính gửi phải là chuỗi thường").toBe("string");
+      const dong = o.value.split("\n");
       expect(dong).toHaveLength(6);
       expect(dong[5]).toBe("(Số://CF26D3)");
       expect(ws.getRow(3).height, "dòng mã báo giá bị xén").toBeGreaterThanOrEqual(94.5);

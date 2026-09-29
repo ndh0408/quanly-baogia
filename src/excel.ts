@@ -387,25 +387,121 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
   }
 }
 
-// ── NEO ẢNH KHÔNG ĐƯỢC LỆCH QUÁ BỀ RỘNG CỘT CỦA NÓ ───────────────────────────────────────────────
-// Logo COLORFUL của mẫu Colorfull neo ở cột B, lệch vào 62,7px. Thu cột B (STT) về bề rộng của GN
-// (6,63 ≈ 46px) thì độ lệch DÀI HƠN CẢ CỘT — trạng thái tệp do Excel ghi không bao giờ có, và mỗi
-// trình đọc xử lý một kiểu: ExcelJS KẸP về mép cột (anchor.js, `Math.min(colWidth - 1, …)`),
-// LibreOffice cho TRÀN sang cột sau (soát chéo 2026-09-25 đo được). Dời phần tràn sang cột kế tiếp —
-// cách XlsxWriter vẫn làm — tính theo bề rộng px của Excel ở 96dpi: ở đó vị trí đúng y như cũ; trình
-// đo cột khác đi (LibreOffice ~7,4px/đơn vị, Excel ở DPI khác) lệch vài px (dưới 1%), không thấy được.
-// Neo không tràn (mọi ảnh của GN, ảnh hạng mục lệch 1px) thì không đổi gì.
-function neoAnhTrongCot(ws: any, a: any) {
-  if (!a || !Number.isFinite(a.nativeCol) || !Number.isFinite(a.nativeColOff)) return;
-  for (let lan = 0; lan < 64; lan++) {
-    const w = Number(ws.getColumn(a.nativeCol + 1).width);
-    // Bề rộng px Excel vẽ cho bề rộng LƯU `w` (đã gồm đệm), chữ số rộng nhất 7px (Calibri 11 — font
-    // Normal của cả hai mẫu): trunc(((256·w + trunc(128/7)) / 256) · 7). Cột không khai → 64px.
-    const px = Number.isFinite(w) && w > 0 ? Math.trunc(((256 * w + 18) / 256) * 7) : 64;
-    const emu = px * 9525;
-    if (a.nativeColOff < emu) return;
-    a.nativeColOff -= emu;
-    a.nativeCol += 1;
+// ── ẢNH CỦA TỆP MẪU (LOGO) GIỮ NGUYÊN HÌNH KHI BẢNG ĐỔI BỀ RỘNG CỘT / CHIỀU CAO HÀNG ─────────────────
+// Neo DrawingML của ảnh là (cột, lệch EMU trong cột, hàng, lệch trong hàng) cho góc trên-trái (tl) và
+// dưới-phải (br). Đổi bề rộng một cột NẰM DƯỚI ảnh mà để nguyên neo là ảnh đổi CỠ theo cột: logo
+// COLORFUL của mẫu Colorfull neo B+62,7px → D+22px, nên từ lâu `columnWidths` (Hạng Mục C 21,18 → 34)
+// đã kéo giãn nó 194 → 284px (tỉ lệ 2,39 → 3,50, trong khi ảnh gốc 471×186 là 2,53), rồi thu cột B
+// 12,36 → 7 làm mép cột D lùi 38px — và B còn 49px, hẹp hơn chính độ lệch 62,7px: trạng thái tệp Excel
+// không bao giờ ghi, mỗi trình đọc vẽ một kiểu (Excel và ExcelJS kẹp về mép cột — Excel COM đo ra logo
+// 260 × 81px, tỉ lệ 3,20 —, LibreOffice cho tràn sang cột sau).
+//
+// Nên: `chupAnhMau` CHỤP hình học tuyệt đối (EMU) của từng ảnh mẫu ngay khi vừa nạp tệp, theo bề rộng
+// cột / chiều cao hàng GỐC; `datLaiAnhMau` — chạy SAU mọi bước đổi kích thước — tính lại neo theo kích
+// thước MỚI:
+//   · KÍCH THƯỚC giữ đúng như trong tệp mẫu — một dòng cấu hình bề rộng cột không được làm méo logo
+//     (mẫu bật `anhMau.giuTiLeAnhGoc` thì bề ngang theo tỉ lệ ẢNH GỐC, xem cuối khối chú thích này);
+//   · VỊ TRÍ theo `editAs` của chính ảnh trong tệp mẫu: "absolute" đứng yên trên trang; còn lại ("oneCell"
+//     — mọi mẫu hiện có — hay "twoCell") đi theo Ô chứa góc trên-trái, lệch đúng bấy nhiêu EMU so với
+//     mép trái/trên của ô ấy như trong mẫu: nghĩa "di chuyển nhưng không co giãn theo ô" của Excel.
+// Neo mới luôn nằm TRONG cột/hàng của nó và không rơi vào cột/hàng ẩn (bề rộng 0).
+//   · Colorfull: cột A và hàng 1 không đổi ⇒ logo về đúng CHỖ và CHIỀU CAO trong tệp mẫu, bề ngang theo
+//     tỉ lệ ảnh gốc (neo C+13,7px → C+219,6px: 205,96 × 81,33px, tỉ lệ 2,532 như PNG 471×186).
+//   · GN: `columnWidths` chỉ đổi C/D, bên trái logo "GIA NGUYỄN" (F2 → G2); F, G, hàng 2 không đổi ⇒
+//     neo ra y hệt như cũ — logo vẫn đi theo khối "From:" ở E2 như mọi tệp GN đã gửi.
+// Đổi px theo đúng cách Excel đo ở 96dpi — Excel COM (Shapes.Left/Width/Height) đọc logo Colorfull của
+// tệp xuất ra đúng x 89,67 → 295,62, 205,96 × 81,33px (tỉ lệ 2,532), khớp số tính ở đây tới 0,01px;
+// trình đo khác (LibreOffice ~7,4px/đơn vị, Excel ở DPI khác) lệch vài px, dưới 1%.
+// Ảnh hạng mục (`insertItemImages`) thêm vào SAU lúc chụp nên không bị đụng.
+//
+// ── TUỲ CHỌN `giuTiLeAnhGoc` (cấu hình mẫu: `anhMau.giuTiLeAnhGoc`) ─────────────────────────────────
+// "Đúng hình tệp mẫu" chưa chắc là đúng hình ẢNH: chính tệp mẫu Colorfull đã bóp logo — vẽ 194,33 ×
+// 81,33px (tỉ lệ 2,389) trong khi PNG nhúng `xl/media/image1.png` là 471×186 (2,532; pHYs hai chiều
+// bằng nhau) ⇒ hẹp ngang 5,6%. Mẫu nào bật cờ này thì ảnh của nó giữ CHIỀU CAO và GÓC TRÊN-TRÁI như
+// tệp mẫu, còn BỀ NGANG tính lại = cao × tỉ lệ pixel của chính tệp ảnh (đọc đầu tệp PNG/GIF/JPEG trong
+// workbook — không ghi cứng số nào). Đọc không ra kích thước thì giữ hình tệp mẫu như không bật.
+// Mép phải dời ra vài px nên mẫu bật cờ phải còn chỗ trống bên phải ảnh: tests/xl-anh-mau-giu-hinh
+// .test.js khoá việc logo Colorfull không đè ô có chữ / ô gộp nào ở hàng 1–4.
+const EMU_MOI_PX_ANH = 9525, EMU_MOI_PT_ANH = 12700;
+/** Tỉ lệ rộng / cao theo PIXEL của tệp ảnh mà `anh` (một phần tử `ws._media`) trỏ tới; không đọc được → null. */
+function tiLeAnhGoc(ws: any, anh: any): number | null {
+  const media = ws.workbook?.getImage?.(anh?.imageId);
+  if (!media?.buffer) return null;
+  const ext = String(media.extension || "").toLowerCase();
+  const d = imgDims(Buffer.from(media.buffer), ext === "jpg" ? "jpeg" : ext);
+  return d && d.w > 0 && d.h > 0 ? d.w / d.h : null;
+}
+/** Bề rộng px Excel vẽ cho cột `c` (1-based): trunc(((256·w + trunc(128/7)) / 256) · 7) — `w` là bề rộng
+ *  LƯU (đã gồm đệm), chữ số rộng nhất 7px (Calibri 11, font Normal của mọi mẫu). Ẩn → 0; không khai → 64. */
+function pxCotExcel(ws: any, c: number): number {
+  const col = ws.getColumn(c);
+  if (col.hidden) return 0;
+  const w = Number(col.width);
+  if (!Number.isFinite(w)) return 64;
+  return w > 0 ? Math.trunc(((256 * w + Math.trunc(128 / 7)) / 256) * 7) : 0;
+}
+/** Chiều cao hàng `r` (1-based) theo EMU. `findRow` chứ không `getRow`: đọc không được đẻ ra hàng rỗng
+ *  mới trong tệp (tệp GN phải ra y hệt từng byte). Hàng không khai cao → chiều cao mặc định của sheet. */
+function emuHang(ws: any, r: number): number {
+  const row = ws.findRow(r);
+  if (row?.hidden) return 0;
+  const h = Number(row?.height);
+  const pt = Number.isFinite(h) && h > 0 ? h : Number(ws.properties?.defaultRowHeight) || 15;
+  return pt * EMU_MOI_PT_ANH;
+}
+/** Mép trái cột `c0` / mép trên hàng `r0` (0-based, như `nativeCol` / `nativeRow`), theo EMU. */
+const mepTraiCot = (ws: any, c0: number) => { let s = 0; for (let c = 1; c <= c0; c++) s += pxCotExcel(ws, c) * EMU_MOI_PX_ANH; return s; };
+const mepTrenHang = (ws: any, r0: number) => { let s = 0; for (let r = 1; r <= r0; r++) s += emuHang(ws, r); return s; };
+/** Đặt neo `a` vào điểm tuyệt đối (x, y) EMU: tìm cột/hàng CÓ bề rộng chứa điểm đó (cột/hàng ẩn bị bỏ qua). */
+function datNeoTuyetDoi(ws: any, a: any, x: number, y: number) {
+  let c = 0, trai = 0;
+  for (; c < 16383; c++) { const w = pxCotExcel(ws, c + 1) * EMU_MOI_PX_ANH; if (w > 0 && x < trai + w) break; trai += w; }
+  let r = 0, tren = 0;
+  for (; r < 1048575; r++) { const h = emuHang(ws, r + 1); if (h > 0 && y < tren + h) break; tren += h; }
+  a.nativeCol = c; a.nativeColOff = Math.round(x - trai);
+  a.nativeRow = r; a.nativeRowOff = Math.round(y - tren);
+}
+export type AnhMau = {
+  anh: any; tuyetDoi: boolean; cot: number; hang: number; dx: number; dy: number; x: number; y: number;
+  rong: number | null; cao: number | null;
+  /** oneCellAnchor + `giuTiLeAnhGoc`: `ext` (px) mới, bề ngang theo tỉ lệ ảnh gốc. */
+  ext: { width: number; height: number } | null;
+};
+export type TuyChonAnhMau = { giuTiLeAnhGoc?: boolean };
+export function chupAnhMau(ws: any, tuyChon: TuyChonAnhMau = {}): AnhMau[] {
+  const ds: AnhMau[] = [];
+  for (const anh of (Array.isArray(ws._media) ? ws._media : [])) {
+    const { tl, br, editAs, ext } = anh?.range || {};
+    if (anh?.type !== "image" || !tl || !Number.isFinite(tl.nativeCol) || !Number.isFinite(tl.nativeRow)) continue;
+    const x = mepTraiCot(ws, tl.nativeCol) + tl.nativeColOff, y = mepTrenHang(ws, tl.nativeRow) + tl.nativeRowOff;
+    // Ảnh neo kiểu oneCellAnchor (tl + ext) không có br: kích thước nằm sẵn trong `ext` (px), tự giữ nguyên
+    // (trừ khi `giuTiLeAnhGoc` — khi đó `ext` mới giữ chiều cao, bề ngang theo ảnh gốc).
+    const coBr = br && Number.isFinite(br.nativeCol) && Number.isFinite(br.nativeRow);
+    let rong = coBr ? mepTraiCot(ws, br.nativeCol) + br.nativeColOff - x : null;
+    const cao = coBr ? mepTrenHang(ws, br.nativeRow) + br.nativeRowOff - y : null;
+    let extMoi: AnhMau["ext"] = null;
+    const tiLe = tuyChon.giuTiLeAnhGoc ? tiLeAnhGoc(ws, anh) : null;
+    if (tiLe) {
+      if (cao != null && cao > 0) rong = cao * tiLe;
+      else if (!coBr && Number(ext?.height) > 0) extMoi = { width: Number(ext.height) * tiLe, height: Number(ext.height) };
+    }
+    ds.push({
+      anh, tuyetDoi: editAs === "absolute", cot: tl.nativeCol, hang: tl.nativeRow, dx: tl.nativeColOff, dy: tl.nativeRowOff, x, y,
+      rong, cao, ext: extMoi,
+    });
+  }
+  return ds;
+}
+export function datLaiAnhMau(ws: any, ds: AnhMau[]) {
+  const conLai = new Set(Array.isArray(ws._media) ? ws._media : []);
+  for (const m of ds) {
+    if (!conLai.has(m.anh)) continue;   // `keepImagesAboveRow` đã bỏ ảnh này
+    const x = m.tuyetDoi ? m.x : mepTraiCot(ws, m.cot) + m.dx;
+    const y = m.tuyetDoi ? m.y : mepTrenHang(ws, m.hang) + m.dy;
+    const { tl, br } = m.anh.range;
+    datNeoTuyetDoi(ws, tl, x, y);
+    if (br && m.rong != null && m.cao != null) datNeoTuyetDoi(ws, br, x + m.rong, y + m.cao);
+    if (!br && m.ext) m.anh.range.ext = m.ext;
   }
 }
 
@@ -473,6 +569,8 @@ function unmergeTotals(ws: any, cfg: any, lastItemRow: any) {
 /** Fill data for one sheet using its template config. Returns totals.
  *  sheetLabel: khi báo giá có NHIỀU sheet, tên sheet được nối vào tiêu đề ("… - Banner"). */
 function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, sheetLabel?: string, sheetIdx = 0, tongSheet = 1) {
+  // Hình học ảnh của tệp mẫu theo kích thước GỐC — trước MỌI bước đổi cột/hàng (xem `chupAnhMau`).
+  const anhMau = chupAnhMau(ws, cfg.anhMau);
   applyTemplateCleanup(ws, cfg);
 
   const c = cfg.cells;
@@ -507,33 +605,23 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   if (c.toPhone) setCell(ws, c.toPhone, clean(quote.toPhone));
   if (c.toAddress) setCell(ws, c.toAddress, clean(quote.toAddress));
   // MÃ SẢN XUẤT CỦA CHÍNH SHEET NÀY, không phải số GN của cả báo giá: mỗi tab Excel mang mã riêng
-  // ("FP_A26_003_02") để khớp với trang Hoá đơn và với màn hình soạn. GN in ở ô riêng
-  // (`cells.quoteNumber`), Colorfull in thành dòng cuối khối "Kính gửi" (`cells.toBlockCodeFormat`).
+  // ("FP_A26_003_02") để khớp với trang Hoá đơn và với màn hình soạn. Tính MỘT lần ở đây: GN in ở ô
+  // riêng (`cells.quoteNumber`), Colorfull in thành dòng cuối khối "Kính gửi" (`toBlockFormat`).
   const maSheet = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
   // Combined recipient block (e.g. CLF "Kính gửi: Cty X  Mr/Ms Y  Email: Z")
   if (c.toBlockCell) {
+    // ── MÃ BÁO GIÁ LÀ DÒNG CUỐI CỦA KHỐI "KÍNH GỬI", KHÔNG PHẢI HÀNG RIÊNG ─────────────────────────
+    // Người dùng muốn mã "nằm dưới cùng mấy chỗ thông tin, y hệt GN". Mẫu Colorfull không còn hàng
+    // trống nào giữa khối này (hàng 3) và tiêu đề cột (hàng 4), mà CHÈN hàng thì phải dời
+    // `infoBannerCell` — bộ nhập bám đúng toạ độ đó (src/excelImport.ts, `appBannerRow`) nên mọi tệp
+    // Colorfull đã gửi khách nạp lại sẽ mất ÂM THẦM hàng hạng mục đầu tiên. Dải B5 cũng không được:
+    // người dùng đã chốt nó chỉ mang thông tin chương trình. Ô C3 thì bộ nhập không đọc, nên thêm một
+    // dòng vào đây không đổi gì khi nạp lại.
     const txt = c.toBlockFormat
-      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail, phone: quote.toPhone, address: quote.toAddress })
+      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail, phone: quote.toPhone, address: quote.toAddress, quoteNumber: maSheet })
       : (quote.toCompany || "");
     // Keep newlines (multi-line recipient block) — don't collapse via clean().
-    const khoi = (txt || "").trim();
-    const dongMa = c.toBlockCodeFormat ? c.toBlockCodeFormat(maSheet) : "";
-    if (dongMa) {
-      // ── MÃ BÁO GIÁ LÀ DÒNG CUỐI CỦA KHỐI "KÍNH GỬI", KHÔNG PHẢI HÀNG RIÊNG ─────────────────────
-      // Người dùng muốn mã "nằm dưới cùng mấy chỗ thông tin, y hệt GN" (GN: "(Số://…)" nghiêng, canh
-      // giữa, ngay trên bảng). Mẫu Colorfull không còn hàng trống nào giữa khối này (hàng 3) và tiêu
-      // đề cột (hàng 4), mà CHÈN hàng thì phải dời `infoBannerCell` — bộ nhập bám đúng toạ độ đó
-      // (src/excelImport.ts, `appBannerRow`) nên mọi tệp Colorfull đã gửi khách nạp lại sẽ mất ÂM
-      // THẦM hàng hạng mục đầu tiên. Dải B5 cũng không được: người dùng đã chốt nó chỉ mang thông tin
-      // chương trình. Ô C3 thì bộ nhập không đọc, nên thêm một dòng vào đây không đổi gì khi nạp lại.
-      // Hai đoạn chữ (richText) để dòng mã NGHIÊNG như GN mà các dòng trên vẫn đứng; đoạn nào cũng
-      // mang đủ font (thiếu font thì Excel vẽ đoạn đó bằng Calibri 11 mặc định).
-      const f = { ...(ws.getCell(c.toBlockCell).font || {}), color: { theme: 1 } };
-      const doan = khoi ? [{ text: `${neutralizeFormula(khoi)}\n`, font: f }] : [];
-      ws.getCell(c.toBlockCell).value = { richText: [...doan, { text: dongMa, font: { ...f, italic: true } }] };
-    } else {
-      setCell(ws, c.toBlockCell, khoi);
-    }
+    setCell(ws, c.toBlockCell, (txt || "").trim());
     ensureWrap(ws.getCell(c.toBlockCell));
     // ── MÀU CHỮ + CĂN LỀ CỦA KHỐI NÀY ────────────────────────────────────────────────────────
     // CHỮ PHẢI VỀ MÀU MẶC ĐỊNH. Ô C3 của mẫu Colorfull VỐN là chữ mồi "logo cty khách hàng" màu
@@ -686,13 +774,9 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   for (const L of (itemsCfg.hiddenColumns || []) as string[]) {
     try { const c = ws.getColumn(L); c.hidden = true; c.width = 0; } catch { /* mẫu không có cột đó */ }
   }
+  // Logo của mẫu KHÔNG đi theo hai vòng này — neo của nó tính lại ở cuối hàm (`datLaiAnhMau`).
   for (const [L, w] of Object.entries((itemsCfg.columnWidths || {}) as Record<string, number>)) {
     try { ws.getColumn(L).width = w; } catch { /* bỏ qua */ }
-  }
-  // Ảnh còn lại lúc này chỉ là ảnh đầu trang của mẫu (logo) — xem `neoAnhTrongCot`.
-  for (const m of (Array.isArray(ws._media) ? ws._media : [])) {
-    neoAnhTrongCot(ws, m?.range?.tl);
-    neoAnhTrongCot(ws, m?.range?.br);
   }
   // Đổi NỀN hàng tiêu đề cột (STT/Hạng Mục…) → f3c9a1 cho MỌI mẫu — chỉ đổi nền + chữ đen đậm,
   // giữ nguyên viền/căn lề baked trong file mẫu. Khớp màu header của web.
@@ -871,9 +955,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     if (!addr) return;
     try {
       const o = ws.getCell(addr);
-      const v = o.value;
-      // Khối "Kính gửi" kèm dòng mã báo giá là richText — đo cả nó, không thì dòng mã bị xén.
-      const chu = typeof v === "string" ? v : Array.isArray(v?.richText) ? v.richText.map((x: any) => x.text).join("") : "";
+      const chu = typeof o.value === "string" ? o.value : "";
       if (!chu) return;                       // ô rỗng: giữ nguyên (dải banner rỗng còn bị ẩn hàng)
       const r = parseInt(String(addr).replace(/^[A-Z]+/, ""), 10);
       if (!r) return;
@@ -1185,8 +1267,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         if (cols.name) {
           setCell(ws, `${cols.name}${r}`, it.name || "");
           ensureWrap(ws.getCell(`${cols.name}${r}`));
-          // Màu chữ tên hạng mục riêng của mẫu (Colorfull: xanh ngọc theo nền tiêu đề cột — GN nướng
-          // sẵn xanh 0070C0 trong tệp mẫu nên không khai). Hàng con dùng chung ô tên gộp của hàng này.
+          // Chữ Hạng Mục cùng màu với số STT của hàng (kiểu GN: STT + tên cùng một màu xanh — GN nướng
+          // sẵn 0070C0 trong tệp mẫu nên không khai). Hàng con dùng chung ô tên gộp của hàng này.
           if (itemsCfg.nameTextColor) paintCell(ws.getCell(`${cols.name}${r}`), { fontColor: itemsCfg.nameTextColor });
         }
       }
@@ -1708,6 +1790,10 @@ ${ghiChu}`, null, beRongVungGop(oChinh), fGC);
     const dangCo = ws.getRow(hr).height;
     if (can > 0 && dangCo != null && can > dangCo) ws.getRow(hr).height = Math.min(409, can);
   }
+
+  // SAU CÙNG, khi mọi bề rộng cột (`columnWidths`, `hiddenColumns`, cột ảnh) và chiều cao hàng đã chốt:
+  // đặt lại neo ảnh của tệp mẫu — chỗ + cỡ như tệp mẫu, hay bề ngang theo ảnh gốc (xem `chupAnhMau`).
+  datLaiAnhMau(ws, anhMau);
 
   return {
     subtotal,                       // "Cộng" — CHƯA trừ Discount

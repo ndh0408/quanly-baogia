@@ -53,9 +53,48 @@ function mauChuCuoiCung(boChon) {
 }
 
 /**
+ * ÁP `tint` LÊN MỘT MÀU ĐÚNG CÁCH EXCEL VẼ: đổi RGB → HLS rồi L' = L·(1+tint) khi tint âm (tối đi),
+ * L' = L·(1−tint) + HLSMAX·tint khi tint dương (sáng lên) — ECMA-376, thuộc tính `tint` của CT_Color.
+ * Chỗ dễ sai là THANG SỐ: Excel dùng HLS SỐ NGUYÊN thang 240 của Windows (ColorRGBToHLS /
+ * ColorHLSToRGB, phép chia nguyên), không phải HSL số thực. Hai cách lệch nhau ±1 mỗi kênh — đủ làm
+ * "màn hình khớp tệp" thành gần đúng. Đo bằng Excel COM (Range.Font.Color) trên tệp Colorfull xuất ra,
+ * 2026-09-29: theme 9 tint -0.49998 (accent6 F79646) → #974706 (HSL số thực cho #984807); theme 5 tint
+ * -0.24998 (accent2 C0504D) → #963634 (HSL số thực cho #953735 — số bảng màu Office in). Ca "bộ giải
+ * theme khớp Excel" bên dưới khoá đúng hai số đo ấy.
+ */
+function apTint(hex6, tint) {
+  const HLSMAX = 240, RGBMAX = 255, T = Math.trunc;
+  const [R, G, B] = [0, 2, 4].map((i) => parseInt(hex6.slice(i, i + 2), 16));
+  const cMax = Math.max(R, G, B), cMin = Math.min(R, G, B), d = cMax - cMin;
+  const L = T(((cMax + cMin) * HLSMAX + RGBMAX) / (2 * RGBMAX));
+  let H = 0, S = 0;
+  if (d > 0) {
+    S = L <= HLSMAX / 2 ? T((d * HLSMAX + (cMax + cMin) / 2) / (cMax + cMin)) : T((d * HLSMAX + (2 * RGBMAX - cMax - cMin) / 2) / (2 * RGBMAX - cMax - cMin));
+    const lech = (v) => T(((cMax - v) * (HLSMAX / 6) + d / 2) / d);
+    H = R === cMax ? lech(B) - lech(G) : G === cMax ? HLSMAX / 3 + lech(R) - lech(B) : (2 * HLSMAX) / 3 + lech(G) - lech(R);
+    H = (H + HLSMAX) % HLSMAX;
+  }
+  const L2 = T(tint < 0 ? L * (1 + tint) : L * (1 - tint) + HLSMAX * tint);
+  const kenh = (n1, n2, h) => {
+    h = (h + HLSMAX) % HLSMAX;
+    if (h < HLSMAX / 6) return n1 + T(((n2 - n1) * h + HLSMAX / 12) / (HLSMAX / 6));
+    if (h < HLSMAX / 2) return n2;
+    if (h < (HLSMAX * 2) / 3) return n1 + T(((n2 - n1) * ((HLSMAX * 2) / 3 - h) + HLSMAX / 12) / (HLSMAX / 6));
+    return n1;
+  };
+  let rgb;
+  if (S === 0) rgb = [L2, L2, L2].map((v) => T((v * RGBMAX) / HLSMAX));
+  else {
+    const m2 = L2 <= HLSMAX / 2 ? T((L2 * (HLSMAX + S) + HLSMAX / 2) / HLSMAX) : L2 + S - T((L2 * S + HLSMAX / 2) / HLSMAX);
+    const m1 = 2 * L2 - m2;
+    rgb = [kenh(m1, m2, H + HLSMAX / 3), kenh(m1, m2, H), kenh(m1, m2, H - HLSMAX / 3)].map((v) => T((v * RGBMAX + HLSMAX / 2) / HLSMAX));
+  }
+  return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * Giải một màu THEME của Excel ra "#rrggbb", đọc bảng màu từ CHÍNH tệp mẫu Colorfull.
  * Chỉ số theme theo OOXML: 0 lt1 · 1 dk1 · 2 lt2 · 3 dk2 · 4..9 accent1..6.
- * Tint âm = tối đi: L' = L·(1+tint); tint dương = sáng lên: L' = L·(1−tint)+tint (ECMA-376).
  */
 async function giaiMauTheme({ theme, tint = 0 }) {
   const wb = new ExcelJS.Workbook();
@@ -67,23 +106,7 @@ async function giaiMauTheme({ theme, tint = 0 }) {
   const khoi = new RegExp(`<a:${TEN[theme]}>([\\s\\S]*?)</a:${TEN[theme]}>`).exec(xml);
   const hex = khoi && (/srgbClr val="([0-9A-Fa-f]{6})"/.exec(khoi[1]) || /lastClr="([0-9A-Fa-f]{6})"/.exec(khoi[1]));
   if (!hex) throw new Error(`không đọc được màu theme${theme} trong tệp mẫu`);
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex[1].slice(i, i + 2), 16) / 255);
-  // RGB → HLS
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0;
-  const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-    h /= 6;
-  }
-  const l2 = Math.max(0, Math.min(1, tint < 0 ? l * (1 + tint) : l * (1 - tint) + tint));
-  // HLS → RGB
-  const q = l2 < 0.5 ? l2 * (1 + s) : l2 + s - l2 * s, p = 2 * l2 - q;
-  const kenh = (t) => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
-  const ra = s === 0 ? [l2, l2, l2] : [kenh(h + 1 / 3), kenh(h), kenh(h - 1 / 3)];
-  return "#" + ra.map((x) => Math.round(x * 255).toString(16).padStart(2, "0")).join("");
+  return tint ? apTint(hex[1], tint) : `#${hex[1].toLowerCase()}`;
 }
 
 /** Màu chữ trong cấu hình (argb hoặc theme) → "#rrggbb". */
@@ -117,7 +140,7 @@ describe("Colorfull — màu lưới khớp màu tệp Excel", () => {
     // trên dev sau deploy, trước khi người dùng thấy.
     //
     // Màu nhóm khai bằng THEME trong cấu hình, nên ca này GIẢI theme ngay từ tệp mẫu thay vì đóng
-    // cứng "#953735": đổi bảng màu tệp mẫu hay đổi `tint` trong cấu hình mà quên CSS là đỏ ngay.
+    // cứng "#963634": đổi bảng màu tệp mẫu hay đổi `tint` trong cấu hình mà quên CSS là đỏ ngay.
     const it0 = getConfig("clofull_decor").items;
     expect(it0.sectionTextColor, "cấu hình phải khai màu chữ hàng nhóm").toBeTruthy();
     expect(it0.subTextColor, "cấu hình phải khai màu chữ hàng nhóm con").toBeTruthy();
@@ -151,25 +174,47 @@ describe("Colorfull — màu lưới khớp màu tệp Excel", () => {
     }
   });
 
-  it("TÊN HẠNG MỤC: màn hình tô đúng `items.nameTextColor` như tệp Excel — và vẫn đọc được ở bản tối", () => {
-    // 2026-09-25: tệp tô tên hạng mục xanh ngọc (theo nền tiêu đề cột) thay cho đen của tệp mẫu; lưới
-    // thì rơi về #0066cc chung của GN (`.excel-table td.col-hangmuc textarea`, public/style.css).
-    const mau = getConfig("clofull_decor").items.nameTextColor;
-    expect(mau, "cấu hình phải khai màu tên hạng mục").toBeTruthy();
+  it("bộ giải theme khớp đúng số Excel vẽ (đo Excel COM) — không phải HSL số thực", async () => {
+    // Không có ca này thì hai ca dưới chỉ chứng minh "CSS khớp với chính bộ giải", còn bộ giải lệch
+    // Excel bao nhiêu cũng xanh. Số đo: Range.Font.Color trên tệp Colorfull xuất ra (2026-09-29).
+    expect(await giaiMauTheme({ theme: 9, tint: -0.499984740745262 }), "B/C hàng hạng mục").toBe("#974706");
+    expect(await giaiMauTheme({ theme: 5, tint: -0.249977111117893 }), "chữ hàng nhóm").toBe("#963634");
+    // Tint dương: "Orange, Accent 6, Lighter 40%" của bảng màu Office.
+    expect(await giaiMauTheme({ theme: 9, tint: 0.39997558519241921 })).toBe("#fabf8f");
+  });
+
+  it("TÊN HẠNG MỤC: màn hình tô đúng `items.nameTextColor` như tệp Excel — và vẫn đọc được ở bản tối", async () => {
+    // Tệp tô chữ Hạng Mục cùng màu số STT (theme 9 tint -0.5 — accent6 của chính tệp mẫu tối đi một
+    // nửa), thay cho đen của tệp mẫu; lưới thì rơi về #0066cc chung của GN
+    // (`.excel-table td.col-hangmuc textarea`, public/style.css). Giải theme ngay từ tệp mẫu: đổi bảng
+    // màu tệp mẫu hay đổi `tint` trong cấu hình mà quên CSS là đỏ ngay.
+    const cfg = getConfig("clofull_decor").items.nameTextColor;
+    expect(cfg, "cấu hình phải khai màu tên hạng mục").toBeTruthy();
+    const mau = await mauCauHinhSangCss(cfg);
     expect(mauChuCuoiCung(".excel-table.clf-theme tr.grp-head td.col-hangmuc textarea"),
-      "màu tên hạng mục trên màn hình lệch với tệp Excel").toBe(argbSangCss(mau));
+      "màu tên hạng mục trên màn hình lệch với tệp Excel").toBe(mau);
     // Luật sáng (0,4,3) thắng luật tối chung `td:is(.col-stt, .col-hangmuc) :is(input, textarea)`
-    // (0,4,2) — thiếu luật tối riêng là xanh ngọc đậm vẽ trên nền tối.
+    // (0,4,2) — thiếu luật tối riêng là chữ nâu cam đậm vẽ trên nền tối.
     const toi = mauChuCuoiCung(':root[data-theme="dark"] .excel-table.clf-theme tr.grp-head td.col-hangmuc textarea');
     expect(toi, "thiếu màu tên hạng mục cho bản tối").toBeTruthy();
     const L = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
       .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
       .reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i], 0);
     const tuongPhan = (a, b) => { const [x, y] = [L(a), L(b)]; return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-    expect(tuongPhan(argbSangCss(mau), "#ffffff"), "tên hạng mục khó đọc trên nền trắng").toBeGreaterThanOrEqual(4.5);
+    expect(tuongPhan(mau, "#ffffff"), "tên hạng mục khó đọc trên nền trắng").toBeGreaterThanOrEqual(4.5);
     for (const nen of ["#141821", "#1a1f2a"]) {   // --surface / --surface-2 bản tối (public/style.css)
       expect(tuongPhan(toi, nen), `bản tối: ${toi} trên ${nen}`).toBeGreaterThanOrEqual(4.5);
     }
+    // Bản tối phải CÙNG TÔNG với màu tệp (sắc độ lệch ≤ 10°) và SÁNG hơn — không được là một màu khác hẳn.
+    const hsl = (h) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+      const sac = d === 0 ? 0 : max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return { sac: sac * 60, sang: (max + min) / 2 };
+    };
+    const [s, t] = [hsl(mau), hsl(toi)];
+    expect(Math.min(Math.abs(s.sac - t.sac), 360 - Math.abs(s.sac - t.sac)), `bản tối ${toi} khác tông với ${mau}`).toBeLessThanOrEqual(10);
+    expect(t.sang, `bản tối ${toi} không sáng hơn ${mau}`).toBeGreaterThan(s.sang);
   });
 
   it("hàng TIÊU ĐỀ: màn hình dùng đúng màu nướng sẵn của tệp mẫu, không dùng màu Gia Nguyễn", async () => {

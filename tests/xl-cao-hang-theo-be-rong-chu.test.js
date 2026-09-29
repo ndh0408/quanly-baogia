@@ -19,10 +19,10 @@ import ExcelJS from "exceljs";
 import { buildQuoteBuffer, soDongKhiXuongHang } from "../src/excel.js";
 
 // [bề rộng cột LƯU trong .xlsx, đậm?, cỡ chữ, nghiêng?, số dòng Excel cần, chữ] — bề rộng lấy
-// đúng các cột của mẫu LÚC ĐO: 38 (GN Hạng Mục), 48 (GN C:D gộp), 16,82 (GN Ghi chú), 34/30 (CLF Hạng
-// Mục trước 2026-09-25 / Chi Tiết), 29, 21,18 và 16,18 (CLF Ghi chú cỡ 10) · Chi Tiết của CLF là chữ
-// nghiêng cỡ 10. Hạng Mục CLF nay 39,8 — CHƯA đo bằng Excel (máy dev Linux không có COM); xem các ca
-// xuất tệp bên dưới.
+// đúng các cột của mẫu LÚC ĐO: 38 (GN Hạng Mục), 48 (GN C:D gộp), 16,82 (GN Ghi chú), 34 (CLF Hạng
+// Mục), 30 rồi 32,36 (CLF Chi Tiết trước / sau khi cột STT thu về 7), 29, 21,18 và 16,18 (CLF Ghi chú
+// cỡ 10) · Chi Tiết của CLF là chữ nghiêng cỡ 10. Ba ca 32,36 đo 2026-09-29 (Excel 16 qua COM, cùng
+// cách); cũng lượt đó đo lại hai ca ở 34 và một ca ở 30 — ra đúng số cũ.
 const BAN_DO = [
   [38, true, 11, false, 2, "Banner hàng rào: 0m8W x 0m5H x 8 tấm"],
   [21.1796875, true, 11, false, 3, "Banner hàng rào: 0m8W x 0m5H x 8 tấm"],
@@ -34,6 +34,9 @@ const BAN_DO = [
   [38, true, 11, false, 3, "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC"],
   [16.1796875, true, 11, false, 6, "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC"],
   [30, false, 10, true, 3, "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC"],
+  [32.36328125, false, 10, true, 2, "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC"],
+  [32.36328125, false, 10, true, 2, "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH"],
+  [32.36328125, false, 10, true, 3, "Backdrop: KT 14mW x 5mH, khung sắt, format dán decal in KTS, thi công ban đêm"],
   [21.1796875, false, 11, false, 4, "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC"],
   [34, true, 11, false, 2, "Đã bao gồm VAT. Đã bao gồm VAT"],
   [16.81640625, false, 11, false, 3, "Đã bao gồm VAT. Đã bao gồm VAT"],
@@ -87,21 +90,19 @@ describe("L40: tệp xuất đặt hàng đủ cao cho chữ (số đo Excel th�
   // Số dòng Excel đo ở bề rộng W là CẬN DƯỚI cho mọi cột hẹp hơn hoặc bằng W (cột hẹp đi thì không
   // bao giờ ít dòng hơn), nên mỗi ca mang bề rộng đã đo và chỉ hợp lệ khi cột của mẫu ≤ bề rộng đó —
   // ca kiểm ngay dưới đòi điều ấy, đổi `columnWidths` rộng ra mà không đo lại là ĐỎ ở đây.
-  // 2026-09-25: Hạng Mục Colorfull 34 → 39,8 (cột STT thu về 6,63 như GN, phần dôi dồn sang). Hai ca
-  // đo ở C 34 không còn dùng được; thay bằng số đo ở 48/50 (≥ 39,8) — kể cả một hàng NHÓM 3 dòng, để
-  // đường tô đậm hàng nhóm vẫn bị soi ở mức 3 dòng như ca cũ — và thêm cột Chi Tiết (D 30, đo đúng).
-  // Riêng "HẠNG MỤC SÂN KHẤU…": Excel cần 3 dòng ở 38 và 2 ở 50; ở 39,8 bộ ước lượng cho 2 dòng khi hệ
-  // số chữ thật ≤ 1,071 — tức còn ~2% biên NGOÀI hệ số an toàn 1,05 đã kiểm trên 523 chuỗi.
+  // Colorfull: Hạng Mục 34 (đo đúng ở 34), Chi Tiết 32,36 (cột STT 12,36 → 7, phần dư chia cho Chi
+  // Tiết và Thành Tiền) — ca Chi Tiết đo ở 32,36; ca đo ở 30 không còn là cận dưới nên đã thay.
   const CA = [
     // [mẫu, cột, chữ, loại hàng, đậm, cỡ, số dòng Excel cần, trường chứa chữ, bề rộng đã đo]
     ["unibenfood", "C", "Banner hàng rào: 0m8W x 0m5H x 8 tấm", "item", true, 11, 2, "name", 38],
     ["unibenfood", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 3, "name", 38],
     ["unibenfood", "C", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", true, 11, 3, "name", 38],
+    ["clofull_decor", "C", "Đã bao gồm VAT. Đã bao gồm VAT", "item", true, 11, 2, "name", 34],
+    ["clofull_decor", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 3, "name", 34],
     ["clofull_decor", "C", "Sự kiện ra mắt sản phẩm mới Moana tại Vincom Đồng Khởi ngày 01/10/2026 - Booth chính + POSM", "item", true, 11, 3, "name", 48],
-    ["clofull_decor", "C", "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH", "section", true, 11, 2, "name", 50],
     ["clofull_decor", "C", "Sự kiện ra mắt sản phẩm mới Moana tại Vincom Đồng Khởi ngày 01/10/2026 - Booth chính + POSM", "section", true, 11, 3, "name", 48],
-    ["clofull_decor", "D", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", false, 10, 3, "detail", 30],
-    ["clofull_conngay", "D", "THIẾT KẾ VÀ SẢN XUẤT POSM CHO CHUỖI CỬA HÀNG MIỀN BẮC", "item", false, 10, 3, "detail", 30],
+    ["clofull_decor", "D", "Backdrop: KT 14mW x 5mH, khung sắt, format dán decal in KTS, thi công ban đêm", "item", false, 10, 3, "detail", 32.36328125],
+    ["clofull_conngay", "D", "Backdrop: KT 14mW x 5mH, khung sắt, format dán decal in KTS, thi công ban đêm", "item", false, 10, 3, "detail", 32.36328125],
   ];
   for (const [code, cot, chu, kind, dam, co, dong, truong, rongDo] of CA) {
     it(`${code} · ${kind} "${chu.slice(0, 30)}…" cao ≥ ${caoCan(dong, dam, co)}pt`, async () => {
