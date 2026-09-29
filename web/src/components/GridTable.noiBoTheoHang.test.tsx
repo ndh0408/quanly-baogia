@@ -217,3 +217,132 @@ describe("bảng nội bộ — dán nguyên hàng từ LƯỚI CHÍNH đè lên
     expect(baTruong(b), "Màn LED mang chứng từ TM / lưu kho của Standee").toEqual([null, null, false]);
   });
 });
+
+// ── Soát vòng 1 (2026-09-29): ba đường còn lệch luật "ba trường là thuộc tính của hạng mục" ─────────────
+/** Bấm một phím ở ô đang có tiêu điểm (keydown nổi bọt tới lưới). */
+function bam(init: KeyboardEventInit) {
+  const ae = document.activeElement as HTMLElement;
+  act(() => { ae.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
+}
+/** Dán `cb` vào ô (row, f) — ô bất kỳ, không chỉ cột Hạng Mục. */
+function danVaoO(row: number, f: string, cb: ReturnType<typeof clipGia>) {
+  const el = hop!.querySelector(`tr[data-row="${row}"] [data-f="${f}"]`) as HTMLElement;
+  act(() => { el.focus(); });
+  const ev = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clipboardData", { value: cb });
+  act(() => { el.dispatchEvent(ev); });
+}
+const haiHang = () => [
+  mk({ name: "Backdrop", unitPrice: 250000, ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }),
+  mk({ name: "Standee", unitPrice: 90000, ns: "Chị Lan", chungTu: "TM", luuKho: false }),
+];
+
+describe("bảng nội bộ — dán khối Hạng Mục LỆCH CỘT không thay hạng mục của đích", () => {
+  // FIELDS của lưới thử: _stt · name · unit · quantity · unitPrice · notes · ns.
+  it("khối Hạng Mục → Đơn giá dán bắt đầu ở ô ĐVT: tên đích giữ nguyên → giữ cả ba trường của đích", () => {
+    const items = haiHang();
+    moLuoi(items);
+    chonKhoi(0, 3);
+    danVaoO(1, "unit", chepKhoi());
+    const b = items[1] as NB;
+    expect([b.name, b.unit], "dán theo vị trí kiểu Excel: tên nguồn rơi vào ĐVT").toEqual(["Standee", "Backdrop"]);
+    expect(baTruong(b), "Standee vẫn là Standee mà nhận NS / chứng từ / lưu kho của Backdrop").toEqual(["Chị Lan", "TM", false]);
+  });
+
+  it("CẮT lệch cột: đích giữ ba trường của nó; hàng nguồn đã mất tên + tiền thì về mặc định (như Delete)", () => {
+    const items = [...haiHang(), mk({ name: "" })];
+    moLuoi(items);
+    chonKhoi(0, 3);
+    danVaoO(1, "unit", chepKhoi(true));
+    const [a, b] = items as NB[];
+    expect(baTruong(b)).toEqual(["Chị Lan", "TM", false]);
+    expect(a.name).toBe("");
+    expect(baTruong(a), "hàng nguồn trống mà còn NS · VAT · lưu kho").toEqual([null, null, false]);
+  });
+
+  it("dán ĐÚNG cột (bắt đầu ở Hạng Mục) vẫn thay ba trường — mốc so của bài trên", () => {
+    const items = haiHang();
+    moLuoi(items);
+    chonKhoi(0, 3);
+    danVaoO(1, "name", chepKhoi());
+    expect(baTruong(items[1] as NB)).toEqual(["Anh Tuấn", "VAT", true]);
+  });
+});
+
+describe("bảng nội bộ — Ctrl+D / ô vuông điền chép hạng mục xuống thì ba trường đi theo", () => {
+  it("Ctrl+D khối Hạng Mục → Đơn giá: hàng dưới thành Backdrop VÀ mang NS · chứng từ · lưu kho của Backdrop", () => {
+    const items = haiHang();
+    moLuoi(items);
+    chonKhoi(0, 3);
+    bam({ key: "ArrowDown", shiftKey: true });
+    bam({ key: "d", ctrlKey: true });
+    const b = items[1] as NB;
+    expect([b.name, b.unitPrice]).toEqual(["Backdrop", 250000]);
+    expect(baTruong(b), "Backdrop mà vẫn mang Chị Lan · TM · không lưu kho của Standee").toEqual(["Anh Tuấn", "VAT", true]);
+    // mốc hoàn tác: một Ctrl+Z trả cả chữ lẫn ba trường
+    bam({ key: "z", ctrlKey: true });
+    expect([items[1].name, ...baTruong(items[1] as NB)]).toEqual(["Standee", "Chị Lan", "TM", false]);
+  });
+
+  it("Ctrl+D khối trải tới cột NS: chứng từ / lưu kho cũng theo NS, không nửa nguồn nửa đích", () => {
+    const items = haiHang();
+    moLuoi(items);
+    chonKhoi(0, 5);
+    bam({ key: "ArrowDown", shiftKey: true });
+    bam({ key: "d", ctrlKey: true });
+    expect(baTruong(items[1] as NB)).toEqual(["Anh Tuấn", "VAT", true]);
+  });
+
+  it("nhấp đúp ô vuông điền (chép tới hàng cuối): hàng thường nhận ba trường, hàng NHÓM ở giữa không giữ ba trường ẩn", () => {
+    const items = [
+      mk({ name: "Backdrop", unitPrice: 250000, ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }),
+      mk({ name: "NHÓM", kind: "section", ns: "rác", chungTu: "HDNS", luuKho: true } as Partial<NB>),
+      mk({ name: "Standee", unitPrice: 90000, ns: "Chị Lan", chungTu: "TM", luuKho: false }),
+    ];
+    moLuoi(items);
+    chonKhoi(0, 3);
+    const h = hop!.querySelector(".fill-handle") as HTMLElement;
+    expect(h, "ô vuông điền").toBeTruthy();
+    act(() => { h.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true })); });
+    expect([items[2].name, ...baTruong(items[2] as NB)]).toEqual(["Backdrop", "Anh Tuấn", "VAT", true]);
+    expect([items[1].kind, ...baTruong(items[1] as NB)]).toEqual(["section", null, null, false]);
+  });
+
+  it("Ctrl+D chỉ cột Hạng Mục (sửa chữ, không cột tiền) thì không đụng ba trường — biên của luật", () => {
+    const items = haiHang();
+    moLuoi(items);
+    act(() => { o(0).focus(); });
+    bam({ key: "ArrowDown", shiftKey: true });
+    bam({ key: "d", ctrlKey: true });
+    expect([items[1].name, ...baTruong(items[1] as NB)]).toEqual(["Backdrop", "Chị Lan", "TM", false]);
+  });
+});
+
+describe("bảng nội bộ — Delete khối hạng mục xoá luôn ba trường", () => {
+  it("Shift+Space cả hàng rồi Delete: hàng trống không còn VAT · lưu kho", () => {
+    const items = haiHang();
+    moLuoi(items);
+    act(() => { o(0).focus(); });
+    bam({ key: " ", code: "Space", shiftKey: true });
+    bam({ key: "Delete" });
+    const a = items[0] as NB;
+    expect([a.name, a.unitPrice]).toEqual(["", 0]);
+    expect(baTruong(a), "xoá sạch hàng mà còn 'VAT · lưu kho'").toEqual([null, null, false]);
+    // ô chọn / ô tích trên màn cũng về
+    const sel = hop!.querySelector('tr[data-row="0"] td.col-chung-tu select') as HTMLSelectElement;
+    const tk = hop!.querySelector('tr[data-row="0"] td.col-luu-kho input') as HTMLInputElement;
+    expect([sel.value, tk.checked]).toEqual(["", false]);
+    bam({ key: "z", ctrlKey: true });
+    expect([items[0].name, ...baTruong(items[0] as NB)]).toEqual(["Backdrop", "Anh Tuấn", "VAT", true]);
+  });
+
+  it("Delete khối Hạng Mục + ĐVT (chỉ chữ) thì giữ ba trường — biên của luật", () => {
+    const items = haiHang();
+    moLuoi(items);
+    chonKhoi(0, 1);
+    bam({ key: "Delete" });
+    const a = items[0] as NB;
+    expect([a.name, a.unit]).toEqual(["", ""]);
+    expect(baTruong(a)).toEqual(["Anh Tuấn", "VAT", true]);
+  });
+});

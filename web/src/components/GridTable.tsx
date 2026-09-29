@@ -1096,7 +1096,7 @@ function GridTableInner(props: GridTableProps) {
   // anhDaSang: ảnh của khối THỰC SỰ đã được ghi sang đích (soát toàn diện L21). cp.images chỉ chốt lúc
   // Ctrl+X; tới lúc dán mà cột Hình ảnh đã tắt, hay khối rơi vào nhánh 1 ô (không bao giờ chép ảnh) thì
   // ảnh không sang được — xoá ở nguồn là ảnh mất hẳn. Không sang → ảnh ở lại hàng nguồn.
-  const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }, anhDaSang = false, noiBoDaSang = false) => {
+  const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }, anhDaSang = false) => {
     const cp = cutPendingRef.current; if (!cp) return;
     cutPendingRef.current = null;
     if (cp.catId) { CAT_DA_XONG.add(cp.catId); if (CAT_DA_XONG.size > 50) CAT_DA_XONG.delete(CAT_DA_XONG.values().next().value as string); }
@@ -1116,9 +1116,12 @@ function GridTableInner(props: GridTableProps) {
       }
       // Ảnh đã theo khối sang đích (xem onCopyCut) → hàng nguồn nằm ngoài vùng dán thì bỏ ảnh.
       if (cp.images && anhDaSang && !(r >= dest.r0 && r <= dest.r1)) delete it.images;
-      // NS / chứng từ / lưu kho đã theo khối sang đích → hàng nguồn ngoài vùng dán về mặc định (NS nằm
-      // trong khối thì vòng trên đã xoá ô của nó; nằm ngoài khối thì chỉ còn đường này).
-      if (cp.noiBo && noiBoDaSang && !(r >= dest.r0 && r <= dest.r1)) { it.chungTu = null; it.luuKho = false; it.ns = null; }
+      // Khối cắt mang cái hạng mục (cp.noiBo — laKhoiHangMuc) → hạng mục đã RỜI hàng nguồn: hàng nguồn ngoài
+      // vùng dán về mặc định cả ba trường (NS nằm trong khối thì vòng trên đã xoá ô của nó; nằm ngoài khối thì
+      // chỉ còn đường này). Như Delete cùng khối (clearRange). Kể cả khi dán LỆCH CỘT — ba trường khi đó không
+      // sang đích (đích vẫn là hạng mục cũ), nhưng nguồn cũng đã mất tên + tiền: giữ lại là hàng trống mang
+      // "NS · VAT · lưu kho" rồi được Lưu như thế. Ctrl+Z trả lại cả hai phía.
+      if (cp.noiBo && !(r >= dest.r0 && r <= dest.r1)) { it.chungTu = null; it.luuKho = false; it.ns = null; }
     }
   };
   // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
@@ -1145,6 +1148,21 @@ function GridTableInner(props: GridTableProps) {
         else (it.formulas as Record<string, string>)[f] = moved;
       } else if (it.formulas) delete (it.formulas as Record<string, string>)[f];
     } }
+    // Chép xuống khối mang CÁI HẠNG MỤC (laKhoiHangMuc — Hạng Mục kèm cột tiền) là THAY hạng mục của các hàng
+    // dưới bằng hạng mục hàng đầu → NS · CHỨNG TỪ · LƯU KHO đi theo, như dán (soát vòng 1). Hai ô chọn không
+    // nằm trong FIELDS nên vòng trên không bao giờ chạm tới: Ctrl+D Backdrop (VAT, lưu kho) xuống Standee (TM)
+    // ra "Backdrop 250.000 · TM · không lưu kho"; khối trải tới NS thì NS của Backdrop mà chứng từ của Standee.
+    // Hàng nhóm (không có ô nào) về mặc định — giữ là để ba trường sống ẨN; hàng đầu là nhóm thì cũng thế.
+    if (cotNoiBo && laKhoiHangMuc(FIELDS.slice(rc.c0, rc.c1 + 1))) {
+      const top = items[rc.r0] as Record<string, unknown>;
+      const coO = (x: { kind?: string }) => x.kind !== "section" && x.kind !== "subsection" && x.kind !== "info";
+      const [ct, lk, ns]: NoiBoHang = coO(items[rc.r0]) ? [(top.chungTu as string | null | undefined) ?? null, !!top.luuKho, (top.ns as string | null | undefined) ?? null] : NOI_BO_MAC_DINH;
+      for (let r = rc.r0 + 1; r <= rc.r1; r++) {
+        if (items[r].kind === "info") continue;
+        const it = items[r] as Record<string, unknown>;
+        if (coO(items[r])) { it.chungTu = ct; it.luuKho = lk; it.ns = ns; } else { it.chungTu = null; it.luuKho = false; it.ns = null; }
+      }
+    }
     autoEnableGroupSub(rc.r0, rc.r1);
     recomputeAll(); onChange();
     syncActiveCell();   // Shift+↓ đã dời tiêu điểm xuống hàng DƯỚI — ô đó vừa bị điền đè (L6)
@@ -1181,6 +1199,7 @@ function GridTableInner(props: GridTableProps) {
   const clearRange = () => {
     const rc = rectOf(selRef.current); if (!rc) return;
     pushUndo();
+    const noiBoCuaHangMuc = cotNoiBo && laKhoiHangMuc(FIELDS.slice(rc.c0, rc.c1 + 1));
     for (let r = rc.r0; r <= rc.r1; r++) {
       const it = items[r] as Record<string, unknown> | undefined; if (!it) continue;
       for (let c = rc.c0; c <= rc.c1; c++) {
@@ -1190,6 +1209,11 @@ function GridTableInner(props: GridTableProps) {
         const fx = it.formulas as Record<string, string> | undefined;
         if (fx) { delete fx[f]; if (!Object.keys(fx).length) delete it.formulas; }
       }
+      // Xoá khối mang CÁI HẠNG MỤC (Hạng Mục kèm cột tiền — laKhoiHangMuc; Shift+Space cả hàng cũng thế) là
+      // xoá hạng mục → NS · CHỨNG TỪ · LƯU KHO của nó về mặc định, như CẮT cùng khối (finishCutMove). Hai ô
+      // chọn nằm ngoài FIELDS nên vòng trên không chạm tới: hàng trống còn "VAT · lưu kho", Lưu xuống như thế
+      // và màn kế toán hiện một hàng "—" có HĐ VAT (soát vòng 1). Chỉ xoá chữ (tên / ĐVT / NS) thì không đụng.
+      if (noiBoCuaHangMuc) { it.chungTu = null; it.luuKho = false; it.ns = null; }
     }
     recomputeAll(); onChange();
     // Ô đang focus bị effect đồng-bộ BỎ QUA → tự dọn giá trị hiển thị + mốc ESC.
@@ -1652,12 +1676,6 @@ function GridTableInner(props: GridTableProps) {
     // khác) không có `images`, mà bản cũ rơi về bộ đệm chép CŨ của lưới đích → hàng đầu nhận ảnh của lần
     // chép trước, các hàng sau bị xoá ảnh đang có. Payload không mang ảnh → không đụng ảnh đích.
     const blockImgs = sameBlock && showImages ? (internal?.images ?? null) : null;
-    // NS / chứng từ / lưu kho của từng hàng (onCopyCut gửi khi khối mang cái hạng mục — laKhoiHangMuc).
-    // Đích phải là bảng nội bộ — lưới chính không có ba cột này. Khối mang hạng mục mà KHÔNG chở ba trường
-    // (chép từ lưới chính / lưới không bật cột nội bộ) vẫn là THAY hạng mục của hàng đích: giữ NS / chứng
-    // từ cũ là gắn chứng từ của hạng mục bị đè lên hạng mục vừa dán → về mặc định.
-    const noiBoTuNguon = sameBlock && cotNoiBo ? (internal?.noiBo ?? null) : null;
-    const blockNoiBo: NoiBoHang[] | null = noiBoTuNguon ?? (sameBlock && cotNoiBo && laKhoiHangMuc(internal?.fields) ? rows.map(() => NOI_BO_MAC_DINH) : null);
     // Quy ước số của khối NGOÀI (GRID-01); khối chép trong lưới luôn đọc số thô.
     const quDan = internal ? null : suyQuyUocSo(rows, (c) => FIELDS[startCol + c] === "unitPrice");
     // Khối NGOÀI (Excel/Sheets) chép theo cột ĐANG HIỆN — có Thành Tiền ngay sau Đơn Giá, cột mà FIELDS
@@ -1684,6 +1702,17 @@ function GridTableInner(props: GridTableProps) {
       const fSrcName = ghepTheoTen ? fNguon?.[c] : null;
       return fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : vaiNgoai ? (vaiNgoai[c] || null) : (FIELDS[startCol + c] ?? null);
     };
+    // NS / chứng từ / lưu kho của từng hàng (onCopyCut gửi khi khối mang cái hạng mục — laKhoiHangMuc).
+    // Đích phải là bảng nội bộ — lưới chính không có ba cột này. Khối mang hạng mục mà KHÔNG chở ba trường
+    // (chép từ lưới chính / lưới không bật cột nội bộ) vẫn là THAY hạng mục của hàng đích: giữ NS / chứng
+    // từ cũ là gắn chứng từ của hạng mục bị đè lên hạng mục vừa dán → về mặc định.
+    // CHỈ khi hạng mục của hàng đích THẬT SỰ bị thay: cột Hạng Mục của khối rơi đúng vào cột Hạng Mục đích
+    // (soát vòng 1). Dán LỆCH CỘT kiểu Excel — khối Hạng Mục → Đơn giá bắt đầu ở ô ĐVT — thì tên nguồn rơi
+    // vào ĐVT, tên đích giữ nguyên: đích vẫn là hạng mục cũ, nhận chứng từ của hạng mục khác là sai.
+    const cotTenNguon = internal?.fields?.indexOf("name") ?? -1;
+    const thayHangMuc = cotTenNguon >= 0 && truongDich(cotTenNguon) === "name";
+    const noiBoTuNguon = sameBlock && cotNoiBo && thayHangMuc ? (internal?.noiBo ?? null) : null;
+    const blockNoiBo: NoiBoHang[] | null = noiBoTuNguon ?? (sameBlock && cotNoiBo && thayHangMuc && laKhoiHangMuc(internal?.fields) ? rows.map(() => NOI_BO_MAC_DINH) : null);
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       const it = items[ri] as Record<string, unknown>;
@@ -1731,7 +1760,7 @@ function GridTableInner(props: GridTableProps) {
     const dc1 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotCuoi : Math.min(FIELDS.length - 1, startCol + rows[0].length - 1);
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
     if (sameBlock && laCatCuaLuoi) {
-      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs, !!noiBoTuNguon);
+      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs);
     }
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();
