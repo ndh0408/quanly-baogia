@@ -108,3 +108,112 @@ describe("bảng nội bộ — chứng từ / lưu kho đi theo hạng mục kh
     expect([b.name, b.chungTu, b.luuKho]).toEqual(["Backdrop", "TM", false]);
   });
 });
+
+// ── Soát lại ed1b5b9 (2026-09-29): luật chốt — NS · CHỨNG TỪ · LƯU KHO là thuộc tính CỦA HẠNG MỤC. Khối
+// mang cái hạng mục (cột Hạng Mục kèm cột tiền) thì ba trường đi theo; hàng đích bị thay hạng mục thì không
+// được giữ ba trường của hạng mục cũ. Chỉ sửa chữ (tên, tên + ĐVT) thì không đụng.
+/** Chọn khối từ ô (row, "name") kéo sang phải `buoc` cột bằng Shift+→ (đúng thao tác bàn phím thật). */
+function chonKhoi(row: number, buoc: number, sangTrai = 0) {
+  const el = o(row);
+  act(() => { el.focus(); });
+  for (let k = 0; k < buoc; k++) {
+    const ae = document.activeElement as HTMLElement;
+    act(() => { ae.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true })); });
+  }
+  for (let k = 0; k < sangTrai; k++) {
+    const ae = document.activeElement as HTMLElement;
+    act(() => { ae.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true, cancelable: true })); });
+  }
+}
+function chepKhoi(cat = false) {
+  const cb = clipGia();
+  const ev = new Event(cat ? "cut" : "copy", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clipboardData", { value: cb });
+  act(() => { (document.activeElement as HTMLElement).dispatchEvent(ev); });
+  return cb;
+}
+const baTruong = (x: NB) => [x.ns ?? null, x.chungTu ?? null, !!x.luuKho];
+
+describe("bảng nội bộ — khối Hạng Mục kèm cột tiền mang ba trường, kể cả khi KHÔNG chạm cột NS", () => {
+  // FIELDS của lưới thử: _stt · name · unit · quantity · unitPrice · notes · ns → name→notes là 4 bước.
+  it("CẮT khối Hạng Mục → Ghi chú (không có cột NS) dán sang hàng trống: cả ba trường sang, hàng nguồn về mặc định", () => {
+    const items = [mk({ name: "Backdrop", unitPrice: 250000, notes: "gấp", ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }), mk({ name: "" })];
+    moLuoi(items);
+    chonKhoi(0, 4);
+    const cb = chepKhoi(true);
+    expect(JSON.parse(cb.kho["application/x-quanly-grid"]).fields).toEqual(["name", "unit", "quantity", "unitPrice", "notes"]);
+    dan(1, cb);
+    const [r, e] = items as NB[];
+    expect([e.name, e.unitPrice, e.notes], "khối không sang").toEqual(["Backdrop", 250000, "gấp"]);
+    expect(baTruong(e), "hàng đích nhận hạng mục mà không có chứng từ / NS / lưu kho").toEqual(["Anh Tuấn", "VAT", true]);
+    expect(r.name).toBe("");
+    expect(baTruong(r), "hàng nguồn đã trống vẫn giữ NS · VAT · lưu kho").toEqual([null, null, false]);
+  });
+
+  it("CHÉP khối Hạng Mục → Đơn giá đè lên hạng mục khác: đích nhận ba trường của nguồn, nguồn giữ nguyên", () => {
+    const items = [mk({ name: "Backdrop", unitPrice: 250000, ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }), mk({ name: "Standee", unitPrice: 90000, ns: "Chị Lan", chungTu: "TM", luuKho: false })];
+    moLuoi(items);
+    chonKhoi(0, 3);
+    dan(1, chepKhoi());
+    const [a, b] = items as NB[];
+    expect([b.name, b.unitPrice]).toEqual(["Backdrop", 250000]);
+    expect(baTruong(b), "Standee đã thành Backdrop mà vẫn mang NS / chứng từ của Standee").toEqual(["Anh Tuấn", "VAT", true]);
+    expect(baTruong(a)).toEqual(["Anh Tuấn", "VAT", true]);
+  });
+
+  it("chép khối Hạng Mục + ĐVT (chỉ CHỮ, không cột tiền) thì không đụng ba trường của đích — như chép riêng cột tên", () => {
+    const items = [mk({ name: "Backdrop", unit: "m2", ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }), mk({ name: "Standee", unit: "cái", ns: "Chị Lan", chungTu: "TM", luuKho: false })];
+    moLuoi(items);
+    chonKhoi(0, 1);
+    const cb = chepKhoi();
+    expect(JSON.parse(cb.kho["application/x-quanly-grid"]).noiBo).toBeUndefined();
+    dan(1, cb);
+    const b = items[1] as NB;
+    expect([b.name, b.unit]).toEqual(["Backdrop", "m2"]);
+    expect(baTruong(b)).toEqual(["Chị Lan", "TM", false]);
+  });
+
+  it("chép STT + Hạng Mục của hàng NHÓM đè lên hạng mục: hàng thành nhóm, không giữ ba trường ẩn", () => {
+    const items = [mk({ name: "Nhóm A", kind: "section" } as Partial<NB>), mk({ name: "Standee", unitPrice: 90000, ns: "Chị Lan", chungTu: "TM", luuKho: true })];
+    moLuoi(items);
+    chonKhoi(0, 0, 1);
+    const cb = chepKhoi();
+    expect(JSON.parse(cb.kho["application/x-quanly-grid"]).fields).toEqual(["_stt", "name"]);
+    dan(1, cb);
+    const b = items[1] as NB;
+    expect(b.kind).toBe("section");
+    expect(baTruong(b), "hàng nhóm không có ô nào mà vẫn giữ NS / chứng từ / lưu kho").toEqual([null, null, false]);
+  });
+});
+
+describe("bảng nội bộ — dán nguyên hàng từ LƯỚI CHÍNH đè lên hạng mục nội bộ", () => {
+  function HaiLuoi({ chinh, noiBo }: { chinh: ItemK[]; noiBo: ItemK[] }) {
+    const [, buoc] = useState(0);
+    return (
+      <>
+        <div className="luoi-chinh"><GridTable items={chinh} usesDays={false} showDetail={false} numberSubs={false} editable internalNote groupSubtotal={false} onChange={() => buoc((v) => v + 1)} /></div>
+        <div className="luoi-noi-bo"><GridTable items={noiBo} usesDays={false} showDetail={false} numberSubs={false} editable internalNote={false} cotNoiBo groupSubtotal={false} onChange={() => buoc((v) => v + 1)} /></div>
+      </>
+    );
+  }
+  it("hàng đích nhận hạng mục của lưới chính và KHÔNG giữ NS / chứng từ / lưu kho của hạng mục bị đè", () => {
+    const chinh = [mk({ name: "Màn LED", unitPrice: 5000000 })];
+    const noiBo = [mk({ name: "Standee", unitPrice: 90000, ns: "Chị Lan", chungTu: "TM", luuKho: true })];
+    hop = document.createElement("div");
+    document.body.appendChild(hop);
+    root = createRoot(hop);
+    act(() => root!.render(<HaiLuoi chinh={chinh} noiBo={noiBo} />));
+    const ten = (lop: string) => hop!.querySelector(`.${lop} tr[data-row="0"] [data-f="name"]`) as HTMLTextAreaElement;
+    act(() => { ten("luoi-chinh").focus(); });
+    act(() => { ten("luoi-chinh").dispatchEvent(new KeyboardEvent("keydown", { key: " ", code: "Space", shiftKey: true, bubbles: true, cancelable: true })); });
+    const cb = chepKhoi();
+    expect(JSON.parse(cb.kho["application/x-quanly-grid"]).noiBo, "lưới chính không có ba cột — không có gì để mang").toBeUndefined();
+    act(() => { ten("luoi-noi-bo").focus(); });
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: cb });
+    act(() => { ten("luoi-noi-bo").dispatchEvent(ev); });
+    const b = noiBo[0] as NB;
+    expect([b.name, b.unitPrice]).toEqual(["Màn LED", 5000000]);
+    expect(baTruong(b), "Màn LED mang chứng từ TM / lưu kho của Standee").toEqual([null, null, false]);
+  });
+});

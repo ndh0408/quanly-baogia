@@ -75,6 +75,10 @@ export type GridTableProps = {
 type Addr = { row: number; field: string; L: string };
 /** Cảnh báo gom trong MỘT lượt dán (xem pasteCellVal) — onPaste báo một lần khi dán xong. */
 type BaoDan = { moHo: string[]; khongSo: string[]; boiSo: [string, number][] };
+/** Ba trường bảng nội bộ của MỘT hàng trong payload chép (x-quanly-grid): [chungTu, luuKho, ns]. Payload
+ *  của tab còn chạy bản trước chỉ có hai phần tử — bản đó chỉ gửi khi khối có cột NS, NS đi theo ô. */
+type NoiBoHang = [string | null, boolean, (string | null)?];
+const NOI_BO_MAC_DINH: NoiBoHang = [null, false, null];
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote", "ns"]);
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
@@ -317,6 +321,11 @@ function GridTableInner(props: GridTableProps) {
   const RO_FIELDS = new Set(["_stt", "_amount"]);   // chọn/copy được, cấm ghi vào model
   const DATA_FIELD_COUNT = FIELDS.length - 1;       // số cột DỮ LIỆU (không tính _stt) — cho nhận dạng khối dán
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
+  // Khối (danh sách trường) đang mang "CÁI HẠNG MỤC" — cột Hạng Mục ĐI KÈM ít nhất một cột tiền (SL / Số
+  // ngày / Đơn giá): chép / cắt khối đó là chuyển cả dòng chi phí sang chỗ khác. Ba trường bảng nội bộ
+  // (NS · CHỨNG TỪ · LƯU KHO) mô tả chính dòng chi phí ấy (ai ứng, hoá đơn gì, có vào kho không) nên đi
+  // theo nó. Chỉ tên (± Chi tiết / ĐVT) là đang sửa CHỮ — như chép riêng cột tên, không đụng ba trường.
+  const laKhoiHangMuc = (fs: readonly string[] | undefined) => !!fs?.includes("name") && fs.some((f) => NUMERIC.has(f));
   const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
   const snap = () => khoAnhRef.current.snap(items);
   const pushUndo = () => { histRef.current.mark(snap()); };
@@ -1059,12 +1068,15 @@ function GridTableInner(props: GridTableProps) {
     // qexact: cờ SL CHÍNH XÁC (quantityExact — SL 4 số lẻ nạp từ Excel) của từng hàng. Không mang theo thì
     // hàng dán tính Thành Tiền theo SL làm tròn 1 số lẻ: 0,9075 × 1.000.000 ra 900.000 (soát toàn diện L19).
     const qexact = Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => !!items[rc.r0 + k]?.quantityExact);
-    // CHỨNG TỪ + LƯU KHO của bảng nội bộ: hai ô chọn không nằm trong FIELDS (không gõ/chọn vùng được), nên
-    // như ảnh, chép "cái hạng mục" (khối trải từ Hạng Mục tới NS) mà không mang chúng thì NS sang đích còn
-    // CHỨNG TỪ / LƯU KHO ở lại hàng cũ — hạng mục mang nhầm chứng từ của hàng khác.
-    const oKhoi = FIELDS.slice(rc.c0, rc.c1 + 1);
-    const noiBo = cotNoiBo && oKhoi.includes("name") && oKhoi.includes("ns")
-      ? Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => { const it = items[rc.r0 + k] as Record<string, unknown> | undefined; return [(it?.chungTu as string | null | undefined) ?? null, !!it?.luuKho] as [string | null, boolean]; })
+    // NS · CHỨNG TỪ · LƯU KHO của bảng nội bộ đi theo "cái hạng mục" (laKhoiHangMuc). Hai ô chọn không nằm
+    // trong FIELDS (không gõ/chọn vùng được), còn NS thì nhiều khi nằm NGOÀI khối: bản ed1b5b9 chỉ gửi khi
+    // khối trải tới tận cột NS, nên cắt khối Hạng Mục → Ghi chú dời chữ + tiền đi mà để lại hàng nguồn
+    // (đã trống) "NS · VAT · lưu kho", còn hàng đích nhận hạng mục không chứng từ. Gửi CẢ BA, mỗi hàng.
+    const noiBo: NoiBoHang[] | undefined = cotNoiBo && laKhoiHangMuc(FIELDS.slice(rc.c0, rc.c1 + 1))
+      ? Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => {
+        const it = items[rc.r0 + k] as Record<string, unknown> | undefined;
+        return [(it?.chungTu as string | null | undefined) ?? null, !!it?.luuKho, (it?.ns as string | null | undefined) ?? null];
+      })
       : undefined;
     const catId = cut && editable ? `${Date.now().toString(36)}-${++demCat}` : undefined;   // xem CAT_DA_XONG
     try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images, qexact, noiBo, catId })); } catch { /* */ }
@@ -1104,8 +1116,9 @@ function GridTableInner(props: GridTableProps) {
       }
       // Ảnh đã theo khối sang đích (xem onCopyCut) → hàng nguồn nằm ngoài vùng dán thì bỏ ảnh.
       if (cp.images && anhDaSang && !(r >= dest.r0 && r <= dest.r1)) delete it.images;
-      // Chứng từ / lưu kho đã theo khối sang đích → hàng nguồn ngoài vùng dán về mặc định.
-      if (cp.noiBo && noiBoDaSang && !(r >= dest.r0 && r <= dest.r1)) { it.chungTu = null; it.luuKho = false; }
+      // NS / chứng từ / lưu kho đã theo khối sang đích → hàng nguồn ngoài vùng dán về mặc định (NS nằm
+      // trong khối thì vòng trên đã xoá ô của nó; nằm ngoài khối thì chỉ còn đường này).
+      if (cp.noiBo && noiBoDaSang && !(r >= dest.r0 && r <= dest.r1)) { it.chungTu = null; it.luuKho = false; it.ns = null; }
     }
   };
   // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
@@ -1395,7 +1408,7 @@ function GridTableInner(props: GridTableProps) {
     const COL_NAME = FIELDS.indexOf("name");   // cột DỮ LIỆU đầu tiên (FIELDS[0] là "_stt", ô tính)
     let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : COL_NAME);
     if (RO_FIELDS.has(FIELDS[startCol])) startCol = COL_NAME;   // vùng chọn bắt đầu ở cột STT → dán từ Hạng Mục
-    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][]; qexact?: boolean[]; noiBo?: [string | null, boolean][]; catId?: string } | null = null;
+    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][]; qexact?: boolean[]; noiBo?: NoiBoHang[]; catId?: string } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
     // Khối là vùng CẮT đang chờ của CHÍNH lưới này → dán = DI CHUYỂN. So bằng mã cắt duy nhất, không
     // bằng token (bộ đếm riêng từng lưới — trùng giữa hai lưới). Tính TRƯỚC finishCutMove (nó xoá dấu cắt).
@@ -1636,9 +1649,12 @@ function GridTableInner(props: GridTableProps) {
     // khác) không có `images`, mà bản cũ rơi về bộ đệm chép CŨ của lưới đích → hàng đầu nhận ảnh của lần
     // chép trước, các hàng sau bị xoá ảnh đang có. Payload không mang ảnh → không đụng ảnh đích.
     const blockImgs = sameBlock && showImages ? (internal?.images ?? null) : null;
-    // Chứng từ / lưu kho của từng hàng (onCopyCut chỉ gửi khi khối trải Hạng Mục → NS của bảng nội bộ).
-    // Đích cũng phải là bảng nội bộ — lưới chính không có hai cột này.
-    const blockNoiBo = sameBlock && cotNoiBo ? (internal?.noiBo ?? null) : null;
+    // NS / chứng từ / lưu kho của từng hàng (onCopyCut gửi khi khối mang cái hạng mục — laKhoiHangMuc).
+    // Đích phải là bảng nội bộ — lưới chính không có ba cột này. Khối mang hạng mục mà KHÔNG chở ba trường
+    // (chép từ lưới chính / lưới không bật cột nội bộ) vẫn là THAY hạng mục của hàng đích: giữ NS / chứng
+    // từ cũ là gắn chứng từ của hạng mục bị đè lên hạng mục vừa dán → về mặc định.
+    const noiBoTuNguon = sameBlock && cotNoiBo ? (internal?.noiBo ?? null) : null;
+    const blockNoiBo: NoiBoHang[] | null = noiBoTuNguon ?? (sameBlock && cotNoiBo && laKhoiHangMuc(internal?.fields) ? rows.map(() => NOI_BO_MAC_DINH) : null);
     // Quy ước số của khối NGOÀI (GRID-01); khối chép trong lưới luôn đọc số thô.
     const quDan = internal ? null : suyQuyUocSo(rows, (c) => FIELDS[startCol + c] === "unitPrice");
     // Khối NGOÀI (Excel/Sheets) chép theo cột ĐANG HIỆN — có Thành Tiền ngay sau Đơn Giá, cột mà FIELDS
@@ -1680,7 +1696,11 @@ function GridTableInner(props: GridTableProps) {
       // Nhãn nhóm người dùng TỰ đặt thì mang theo; nhãn tự động (A/B/1/2) để render tính lại theo vị trí mới.
       if (labels && labels[r]) it.label = labels[r];
       if (blockImgs) { const im = blockImgs[r] || []; if (im.length) it.images = [...im]; else delete it.images; }
-      if (blockNoiBo) { const [ct, lk] = blockNoiBo[r] ?? [null, false]; it.chungTu = ct; it.luuKho = lk; }
+      if (blockNoiBo) {
+        const [ct, lk, ns] = blockNoiBo[r] ?? NOI_BO_MAC_DINH;
+        it.chungTu = ct ?? null; it.luuKho = !!lk;
+        if (ns !== undefined) it.ns = ns;   // khối có cột NS thì ô bên dưới ghi lại đúng chữ này
+      }
       cells.forEach((val, c) => {
         const f = truongDich(c);
         if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
@@ -1698,13 +1718,17 @@ function GridTableInner(props: GridTableProps) {
         pasteCellVal(ri, f, val, dR, dC, soThoNguon(c), quGoc(r, c) ?? quDan, bao);
         coSlTheoNguon(ri, r, f, internal?.fields?.[c]);
       });
+      // Hàng vừa THÀNH nhóm / nhóm con / dòng thông tin (khối mang loại hàng, vd chép STT + Hạng Mục của
+      // một nhóm) không có ô NS · chứng từ · lưu kho nào: giữ giá trị của hạng mục bị đè là để chúng sống
+      // ẨN trên hàng nhóm — vẫn được Lưu, vẫn tính là "bảng có dữ liệu".
+      if (cotNoiBo && kinds?.[r] && kinds[r] !== "item" && kinds[r] !== "sub") { it.chungTu = null; it.luuKho = false; it.ns = null; }
     });
     // Vùng đích: ghép theo tên / theo thứ tự hiển thị thì là các cột thật sự được ghi, còn lại tính theo số cột.
     const dc0 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotDau : startCol;
     const dc1 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotCuoi : Math.min(FIELDS.length - 1, startCol + rows[0].length - 1);
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
     if (sameBlock && laCatCuaLuoi) {
-      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs, !!blockNoiBo);
+      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs, !!noiBoTuNguon);
     }
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();
