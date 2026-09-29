@@ -187,7 +187,7 @@ Ba điều cố ý, đừng "sửa" ngược:
    thuộc ở một gói là có chủ ý — `tests/ch3-npm-manifest.test.js` đòi mọi
    `devDependencies` phải có người dùng thật.
 3. **`jsdom` không lọt vào ảnh production.** Stage `webbuild` chạy `npm ci` để BUILD;
-   stage runtime chỉ lấy kết quả đã build — `Dockerfile:98` là
+   stage runtime chỉ lấy kết quả đã build — dòng duy nhất của `Dockerfile` chạm tới stage đó là
    `COPY --from=webbuild /app/public/app2 ./public/app2`, không copy `node_modules` nào.
 
 **Tệp đang có ở tầng này** (tính đến 2026-08-28, đúng một):

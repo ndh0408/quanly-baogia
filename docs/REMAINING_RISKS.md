@@ -1161,9 +1161,9 @@ mới bỏ cột cũ ở một migration riêng.
 
 ## Lưu được 60.000 dòng nhưng xuất đồng bộ chỉ tới 20.000 — ĐÃ NỐI đường nền (2026-08-27)
 
-`src/validators.ts:355` cho **60 trang** × `:356` **1000 dòng/trang** = tối đa
-**60.000 item** một báo giá. Đường xuất đồng bộ `src/routes/export.routes.ts:35-41`
-lại từ chối từ **20.000 item** (trả 413 ở `:67` và `:105`) với lời nhắn "vui lòng
+`src/validators.ts` (hằng `MAX_SAVE_SHEETS`) cho **60 trang** × `MAX_SAVE_ITEMS_PER_SHEET` **1000 dòng/trang** = tối đa
+**60.000 item** một báo giá. Đường xuất đồng bộ `src/routes/export.routes.ts` (hàm `exportTooBig`)
+lại từ chối từ **20.000 item** (trả 413 ở cả hai route `/:id.xlsx` và `/:id.pdf`) với lời nhắn "vui lòng
 dùng xuất nền (async)". Nhưng **không client nào gọi đường nền**: `grep -rn
 "api/jobs\|/jobs" web/src` không ra kết quả nào — route `POST /api/quotes/:id/export`
 (`src/routes/jobs.routes.ts`, route `POST /quotes/:id/export`) chỉ có thể gọi bằng tay, và nó còn trả 503 nếu

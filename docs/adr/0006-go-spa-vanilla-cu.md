@@ -35,7 +35,7 @@ React không có:
    quan khi trường đó có mặt (`src/services/quoteService.ts`), nên mọi lần lưu từ
    `/app` **không bao giờ** kích hoạt kiểm tra — hai người sửa cùng báo giá thì
    người bấm sau ghi đè người bấm trước, không có 409, không cảnh báo.
-   React thì gửi (`web/src/pages/QuoteEditor.tsx:389`).
+   React thì gửi (`web/src/pages/QuoteEditor.tsx`, dòng `payload.baseUpdatedAt = …` trong `save`).
 
 2. **Mất số hoá đơn / ngày thanh toán / chữ ký / duyệt khách.** Cùng chỗ đó,
    payload sheet **không có `id: s.id`**. Lưu báo giá = xoá sheet rồi tạo lại, nên

@@ -94,9 +94,9 @@ describe("package.json — không nuôi gói không ai dùng", () => {
     const NGOAI_LE = {
       // src/logger.ts:51 nạp qua TÊN (`transport: { target: "pino-pretty" }`), không import tĩnh.
       "pino-pretty": "nạp theo tên trong pino transport (src/logger.ts)",
-      // Dockerfile:7-9 giải thích: k8s/helm/compose chạy `prisma migrate deploy` lúc khởi động nên
+      // Chú thích ở stage `deps` của Dockerfile giải thích: k8s/helm/compose chạy `prisma migrate deploy` lúc khởi động nên
       // CLI phải sống sót qua `npm ci --omit=dev`.
-      prisma: "CLI migrate chạy lúc khởi động (Dockerfile:7-9)",
+      prisma: "CLI migrate chạy lúc khởi động (Dockerfile, stage deps)",
       // Các script vận hành gọi `node --import tsx …` (pii:backfill, proof:migrate).
       tsx: "runtime TS cho script vận hành (`node --import tsx`)",
     };

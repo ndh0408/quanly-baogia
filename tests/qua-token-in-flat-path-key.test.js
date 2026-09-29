@@ -8,8 +8,8 @@
  * tuyên bố đó là chốt CUỐI trước khi dữ liệu rời hạ tầng.
  *
  * Không phải. Trình xử lý lỗi ghi một khoá `path` PHẲNG, ở GỐC đối tượng log:
- *   src/middleware.ts:239  logger.error({ reqId, path: req.path, method, status, err, stack }, …)
- *   src/middleware.ts:245  captureError(err, { reqId, path: req.path, method, userId })
+ *   src/middleware.ts `errorHandler`:  logger.error({ reqId, path: req.path, method, status, err, stack }, …)
+ *   src/middleware.ts `errorHandler`:  captureError(err, { reqId, path: req.path, method, userId })
  * `"req.url"` là đường DẪN LỒNG — nó không phủ khoá `path` ở gốc. Còn `scrubSentryEvent` chỉ xoá
  * ba khoá nội dung ["data","payload","body"] trong `extra`, nên `extra.path` đi thẳng.
  *
@@ -76,7 +76,7 @@ describe("token trong khoá `path` phẳng không được ra log", () => {
 });
 
 describe("token không được sang Sentry qua extra.path", () => {
-  it("extra.path — đúng hình dạng src/middleware.ts:245", () => {
+  it("extra.path — đúng hình dạng captureError trong errorHandler (src/middleware.ts)", () => {
     const ev = scrubSentryEvent({ extra: { reqId: "r1", path: DUONG_MOI, method: "GET", userId: 7 } });
     expect(String(ev.extra.path)).not.toContain(TOKEN);
     expect(String(ev.extra.path)).toContain("[da-che]");
