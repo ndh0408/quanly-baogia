@@ -60,6 +60,42 @@ describe("INFRA-11 — docker-smoke quét lỗ hổng của image", () => {
   });
 });
 
+// Lớp `apk add` của stage runtime bị Docker CACHE theo chuỗi lệnh; ảnh nền ghim digest nên nó không
+// bao giờ tự dựng lại → bản vá của kho alpine không tới image (2026-09-29: libexpat 2.8.4-r0,
+// CVE-2026-93990, trong khi kho đã có 2.8.5-r0; trivy [D3] đỏ). Sàn `>=` đổi chuỗi lệnh — mọi cache,
+// kể cả của VM, buộc dựng lại — và apk tự từ chối bản thấp hơn. Chú thích đầy đủ ở Dockerfile.
+describe("INFRA-11 — stage runtime ghi SÀN cho gói OS đã có bản vá", () => {
+  const df = doc("Dockerfile");
+  const runtime = df.slice(df.search(/^FROM \S+ AS runtime\s*$/m));
+  // Khối RUN apk add đầu tiên của stage runtime, kể cả các dòng tiếp nối bằng `\`.
+  const apk = /^RUN apk add(?:[^\n]*\\\r?\n)*[^\n]*/m.exec(runtime)?.[0] ?? "";
+  // So phiên bản kiểu apk "2.8.5-r0": từng số của phần chính, rồi số bản dựng -rN.
+  const so = (v) => v.split(/[.-]r?/).map(Number);
+  const soSanh = (a, b) => {
+    const x = so(a), y = so(b);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0);
+    return 0;
+  };
+
+  it("tìm thấy lệnh apk add của stage runtime (các bài dưới không lạc chỗ)", () => {
+    expect(apk).toMatch(/font-dejavu/);
+    expect(apk).toMatch(/addgroup/);
+  });
+  it("libexpat >= 2.8.5-r0 (CVE-2026-93990) — fontconfig ← font-dejavu kéo nó vào", () => {
+    const m = /'libexpat>=(\d[\d.]*-r\d+)'/.exec(apk);
+    expect(m, "stage runtime không ghi sàn libexpat — lớp apk dựng từ cache vẫn mang 2.8.4-r0").not.toBeNull();
+    expect(soSanh(m[1], "2.8.5-r0")).toBeGreaterThanOrEqual(0);
+  });
+  it("mọi ràng buộc phiên bản nằm trong nháy đơn — shell đọc `>` trần là CHUYỂN HƯỚNG, sàn biến mất", () => {
+    expect(apk.replace(/'[^']*'/g, "").match(/\S*[<>=~]\S*/g) ?? []).toEqual([]);
+  });
+  it("bộ so phiên bản phân biệt đúng chỗ cần phân biệt", () => {
+    expect(soSanh("2.8.4-r0", "2.8.5-r0")).toBeLessThan(0);
+    expect(soSanh("2.8.5-r1", "2.8.5-r0")).toBeGreaterThan(0);
+    expect(soSanh("2.10.0-r0", "2.8.5-r0")).toBeGreaterThan(0);
+  });
+});
+
 describe("INFRA-08 — CronJob backup (k8s) không bị NetworkPolicy của chính repo chặn", () => {
   it("pod template của quanly-db-backup mang nhãn app: quanly mà postgres-allow-app-only cho vào", () => {
     const cron = doc("infra/k8s/backup-cronjob.yaml");

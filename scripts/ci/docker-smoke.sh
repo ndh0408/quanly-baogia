@@ -86,6 +86,11 @@ ma=$?
 # node:24.21.0-alpine có 4 HIGH (brace-expansion, ip-address, tar) — nằm trong ảnh gốc, repo không
 # vá được bằng mã; cách xử lý là nâng NODE_IMAGE khi node phát hành bản kèm npm đã vá. Không tách
 # ra thì cổng đỏ thường trực vì thứ ngoài tầm tay, và cổng đỏ thường trực là cổng sẽ bị tắt.
+# Soát lại 2026-09-29: vẫn 4 HIGH (brace-expansion ×2, ip-address, tar). Không có gì để nâng —
+# node:24-alpine mới nhất trên Docker Hub CHÍNH LÀ digest đang ghim (24.21.0, dựng 2026-09-17), chưa
+# có tag 24.21.1/24.22. Lệnh soát: `docker buildx imagetools inspect node:24-alpine`.
+# Gói OS thì KHÁC: kho alpine vá được mà không cần ảnh nền mới — xem khối "SÀN PHIÊN BẢN" trong
+# Dockerfile (libexpat, CVE-2026-93990): lớp apk bị cache nên phải ghi sàn thì bản vá mới tới image.
 if [ "$ma" -eq 0 ]; then
   buoc "[D3] Quét lỗ hổng image (trivy image — gói OS + phụ thuộc ứng dụng)"
   if command -v trivy >/dev/null 2>&1; then
