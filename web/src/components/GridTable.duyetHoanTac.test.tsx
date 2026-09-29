@@ -288,3 +288,55 @@ describe("Ctrl+Z / Ctrl+Y khi đang đứng ở ô chọn / ô tích", () => {
     expect([items[0].name, items[0].notes, (items[0] as NB).ns ?? ""]).toEqual(["A", "giữ", ""]);
   });
 });
+
+// ── Soát vòng 1 (2026-09-29): Home / End / PgUp / PgDn là phím DI CHUYỂN của bảng (bảng phím tắt ⌨️) ──────
+// Ô <select> đang đóng trên Chromium / Windows xử lý chúng bằng cách ĐỔI LỰA CHỌN (Home → "—", End → "TM") —
+// cùng loại lỗi mũi tên ở 6007c12. jsdom không mô phỏng việc đổi giá trị đó, nên bài chốt ở chỗ lưới CHẶN
+// mặc định (defaultPrevented) và con trỏ đi đúng ô.
+describe("Home / End / PgUp / PgDn ở ô chọn / ô tích: đi ô, không để trình duyệt đổi chứng từ", () => {
+  const bangDai = () => [
+    mk({ name: "A", chungTu: "VAT" } as Partial<NB>),
+    ...Array.from({ length: 9 }, (_, k) => mk({ name: `H${k + 1}`, chungTu: "HDNS" } as Partial<NB>)),
+    mk({ kind: "section", name: "NHÓM" }),
+    mk({ name: "Y", chungTu: "TM" } as Partial<NB>),
+    mk({ name: "Z", chungTu: "TM" } as Partial<NB>),
+  ];
+
+  it("Home về ô chữ đầu hàng, End tới ô chọn / ô tích xa nhất bên phải — cả hai đều bị chặn mặc định", () => {
+    const items = bangDai();
+    moLuoiOc(items);
+    act(() => { oc(0, "chungTu").focus(); });
+    expect(bam({ key: "Home" }).defaultPrevented, "Home để mặc định thì <select> nhảy về '—'").toBe(true);
+    expect(dangO()).toBe(o(0, "name"));
+    act(() => { oc(0, "chungTu").focus(); });
+    expect(bam({ key: "End" }).defaultPrevented, "End để mặc định thì <select> nhảy về 'TM'").toBe(true);
+    expect(dangO()).toBe(oc(0, "approved"));
+    expect((items[0] as NB).chungTu).toBe("VAT");
+  });
+
+  it("PgDn / PgUp đi 10 hàng trong cùng cột; hàng đích là NHÓM (không có ô) thì dừng ở hàng có ô gần nhất", () => {
+    const items = bangDai();
+    moLuoiOc(items);
+    act(() => { oc(0, "chungTu").focus(); });
+    expect(bam({ key: "PageDown" }).defaultPrevented).toBe(true);
+    expect(dangO(), "hàng 10 là nhóm → dừng ở hàng 9").toBe(oc(9, "chungTu"));
+    bam({ key: "PageDown" });
+    expect(dangO(), "quá cuối bảng → hàng cuối").toBe(oc(12, "chungTu"));
+    expect(bam({ key: "PageUp" }).defaultPrevented).toBe(true);
+    expect(dangO()).toBe(oc(2, "chungTu"));
+    act(() => { oc(12, "luuKho").focus(); });
+    bam({ key: "PageDown" });
+    expect(dangO(), "đang ở hàng cuối — đứng yên").toBe(oc(12, "luuKho"));
+    expect(items.map((x) => (x as NB).chungTu ?? null)).toEqual(bangDai().map((x) => (x as NB).chungTu ?? null));
+  });
+
+  it("Ctrl+Home về ô đầu bảng, Ctrl+End về ô chữ cuối của hàng cuối", () => {
+    moLuoiOc(bangDai());
+    act(() => { oc(5, "luuKho").focus(); });
+    expect(bam({ key: "Home", ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(dangO()).toBe(o(0, "name"));
+    act(() => { oc(5, "chungTu").focus(); });
+    expect(bam({ key: "End", ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(dangO()).toBe(o(12, "ns"));
+  });
+});

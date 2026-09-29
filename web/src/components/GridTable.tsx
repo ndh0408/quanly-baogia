@@ -1792,9 +1792,28 @@ function GridTableInner(props: GridTableProps) {
     const ctrl = e.ctrlKey || e.metaKey;
     const uz = undoRedoKey(ctrl, e.shiftKey, e.key);
     if (uz) { e.preventDefault(); e.stopPropagation(); if (editable) (uz === "undo" ? doUndo : doRedo)(); return; }
-    if (!e.key.startsWith("Arrow") || e.nativeEvent?.altKey) return;   // Alt+↓ mở danh sách chứng từ như thường
-    e.preventDefault(); e.stopPropagation();
+    if (e.nativeEvent?.altKey) return;   // Alt+↓ mở danh sách chứng từ như thường
     const k = OC_COT.indexOf(oc);
+    // Home / End / PgUp / PgDn là phím DI CHUYỂN của bảng (bảng phím tắt ⌨️) — nhưng ô <select> đang đóng
+    // trên Chromium / Windows xử lý chúng bằng cách ĐỔI LỰA CHỌN (Home → "—", End → "TM"), đúng loại lỗi
+    // mũi tên đã vá (soát vòng 1). Chặn, và đi ô như ở ô chữ: Home về đầu hàng, End tới ô chọn / ô tích xa
+    // nhất bên phải, Ctrl+Home / Ctrl+End về góc bảng, PgUp / PgDn lên / xuống 10 hàng trong cùng cột.
+    if (e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown") {
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === "Home") { moveTo(ctrl ? 0 : i, FIELDS[0], false); return; }
+      if (e.key === "End") {
+        if (ctrl) { moveTo(items.length - 1, FIELDS[FIELDS.length - 1], false, -1); return; }
+        for (const c of OC_COT.slice(k + 1).reverse()) { const d = ocDung(i, c); if (d) { vaoOc(d); return; } }
+        return;
+      }
+      const buoc = e.key === "PageDown" ? 1 : -1;
+      const dich = Math.max(0, Math.min(items.length - 1, i + buoc * 10));
+      // Hàng đích (hoặc hàng gần nó nhất về phía hàng đang đứng) có ô này — hàng nhóm / dòng thông tin thì không.
+      for (let r = dich; r !== i; r -= buoc) { const d = ocDung(r, oc); if (d) { vaoOc(d); return; } }
+      return;
+    }
+    if (!e.key.startsWith("Arrow")) return;
+    e.preventDefault(); e.stopPropagation();
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       const trai = e.key === "ArrowLeft";
       if (trai && ctrl) { moveTo(i, FIELDS[0], false); return; }
@@ -2921,7 +2940,7 @@ function GridTableInner(props: GridTableProps) {
           </details>
           <AnchoredPanel anchorRef={keysRef} open={keysOpen} onClose={() => setKeysOpen(false)} align="left" className="grid-keys-body" label="Phím tắt của bảng">
               <p><b>Chọn / sửa ô (như Excel):</b> bấm = chọn ô · <b>gõ là ĐÈ nội dung luôn</b> (không cần nhấp đúp) · <b>nhấp đúp</b>/<kbd>F2</kbd> = sửa trong chữ (mũi tên chạy trong chữ; bấm <kbd>F2</kbd> lần nữa để mũi tên chốt-và-đi) · <kbd>Esc</kbd> hủy sửa · <kbd>Delete</kbd> xóa vùng chọn · <kbd>Backspace</kbd> xóa ô rồi gõ luôn.</p>
-              <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống · <kbd>Shift+Enter</kbd> lên · <kbd>{modKey}+Enter</kbd> chốt tại chỗ (chọn vùng thì điền cả vùng) · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên.{OC_COT.length > 0 && <> Ô chọn / ô tích ({[cotNoiBo ? "Chứng từ, Lưu kho" : "", OC_COT.includes("approved") ? "Duyệt" : ""].filter(Boolean).join(", ")}): mũi tên đi ô · <kbd>Space</kbd> tích · <kbd>Alt+↓</kbd> mở danh sách · <kbd>{modKey}+Z</kbd> hoàn tác ngay tại ô.</>}</p>
+              <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống · <kbd>Shift+Enter</kbd> lên · <kbd>{modKey}+Enter</kbd> chốt tại chỗ (chọn vùng thì điền cả vùng) · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên.{OC_COT.length > 0 && <> Ô chọn / ô tích ({[cotNoiBo ? "Chứng từ, Lưu kho" : "", OC_COT.includes("approved") ? "Duyệt" : ""].filter(Boolean).join(", ")}): mũi tên · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> đi ô · <kbd>Space</kbd> tích · <kbd>Alt+↓</kbd> mở danh sách · <kbd>{modKey}+Z</kbd> hoàn tác ngay tại ô.</>}</p>
               <p><b>Chọn vùng:</b> kéo chuột · <kbd>Shift</kbd>+bấm · <kbd>Shift</kbd>+mũi tên · <kbd>Shift+Space</kbd> cả hàng · <kbd>{modKey}+Space</kbd> cả cột · <kbd>{modKey}+A</kbd> cả bảng.</p>
               <p><b>Dữ liệu:</b> <kbd>{modKey}+C/V</kbd> copy–dán (qua lại Excel được) · <kbd>{modKey}+X</kbd> cắt kiểu Excel (viền nét đứt, <b>dán mới chuyển đi</b>, <kbd>Esc</kbd> huỷ) · <kbd>{modKey}+D</kbd> chép xuống · <kbd>{modKey}+R</kbd> chép phải · kéo (hoặc nhấp đúp) ô vuông góc dưới-phải · <kbd>{modKey}+Z</kbd>/<kbd>{modKey}+Y</kbd> hoàn tác–làm lại.</p>
               <p><b>Hàng:</b> <kbd>{modKey}+Shift++</kbd> chèn hàng dưới · <kbd>Shift+Space</kbd> rồi <kbd>{modKey}+-</kbd> xóa các hàng đang chọn · <kbd>Alt+Enter</kbd> xuống dòng trong ô · <kbd>Alt+↓</kbd> mở gợi ý hạng mục theo rạp.</p>
