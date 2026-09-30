@@ -201,6 +201,16 @@ gộp **toàn bảng** `QuoteSheet` để đếm trang: `_count: { sheets }` c�
 đẩy được khoá JOIN vào subquery có `GROUP BY` — không index nào cứu được. Nay
 `listQuotes` đếm trang riêng, chỉ cho id của trang đang xem (`soTrangTheoBaoGia`).
 
+Câu đếm trang đó (`SELECT COUNT(*) … GROUP BY "quoteId"`) từng lọt vào miễn trừ
+"đếm tổng" của cổng — mục ấy tha **mọi** câu mở đầu bằng `COUNT(*)` trên **mọi**
+bảng, nên câu đếm trang có quét cả bảng `QuoteSheet` thì cổng vẫn xanh. Nay mỗi mục
+miễn trừ (`CHAP_NHAN`) nêu đúng một bảng: đếm tổng chỉ được tha theo khuôn
+`prisma.count` của `Quote` và `Customer`. Cổng đo thêm danh sách báo giá bằng phiên
+**không** có quyền bảng nội bộ — phiên của phần lớn nhân viên, nơi câu đếm trang là
+câu duy nhất chạm `QuoteSheet` (phiên toàn quyền còn chạy câu bảng nội bộ, cũng đi
+index của `QuoteSheet`, và gỡ index thì câu ĐÓ đỏ trước). Khi đỏ, cổng liệt kê mọi
+câu quét tuần tự của đường đó, không chỉ câu tệ nhất.
+
 Cổng chỉ chạy khi được gọi thẳng (`laTepChinh` so **đường thật** của `argv[1]` với
 `import.meta.url`): gọi qua junction/symlink bằng đường tuyệt đối thì bản so chuỗi
 cũ thoát 0 mà không in gì, trông y hệt cổng xanh.

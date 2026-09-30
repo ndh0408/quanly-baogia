@@ -222,11 +222,28 @@ async function inChanDoan(x) {
 }
 
 /**
- * Những lần quét tuần tự ĐÃ SOÁT và CHẤP NHẬN. Khoá: `<tên đường>|<bảng>`.
+ * Khuôn SQL mà Prisma 7 sinh cho `prisma.<bang>.count({ where })` — ĐẾM TỔNG của một danh sách phân trang:
+ *
+ *   SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."<bang>"."id" FROM "public"."<bang>" WHERE … OFFSET $n) AS "sub"
+ *
+ * Neo cả ĐẦU lẫn CUỐI câu, đúng tên bảng, và không có GROUP BY ở bất cứ đâu. Câu lệch khuôn — đếm có
+ * nhóm, đếm bảng khác, câu đếm lồng trong câu khác — KHÔNG phải đếm tổng, và cổng soi nó như mọi câu.
+ * Prisma đổi khuôn thì mục dùng khuôn này thôi khớp và cổng ĐỎ ở câu đếm tổng (đỏ oan, nhưng ồn ào —
+ * không phải xanh im lặng); tests/ds-bao-gia-dem-trang.test.js đối chiếu khuôn với câu Prisma chạy thật.
+ */
+export const khuonDemTong = (bang) =>
+  new RegExp(
+    String.raw`^\s*SELECT COUNT\(\*\) AS "_count\$_all" FROM \(SELECT "public"\."${bang}"\."id" FROM "public"\."${bang}" ` +
+      String.raw`(?![\s\S]*\bGROUP BY\b)[\s\S]*\) AS "sub"\s*$`,
+  );
+
+/**
+ * Những lần quét tuần tự ĐÃ SOÁT và CHẤP NHẬN — mỗi mục là MỘT bảng + khuôn câu SQL + lý do.
  *
  * Có danh sách này vì một cổng hay báo động giả sẽ bị người ta tắt — lúc đó còn tệ hơn không có
  * cổng nào. Mỗi mục phải kèm LÝ DO ĐO ĐƯỢC, và mục mới chỉ được thêm sau khi đã thật sự xem kế
- * hoạch, không phải để cho qua chuyện.
+ * hoạch, không phải để cho qua chuyện. Không có mục "mọi bảng": khuôn câu nào cũng có ngày khớp một
+ * câu mới mà người viết mục chưa từng thấy (xem hai mục ĐẾM TỔNG ở cuối).
  */
 export const CHAP_NHAN = [
   {
@@ -244,21 +261,41 @@ export const CHAP_NHAN = [
     sql: /"searchText"(::text)?\s*(NOT\s+)?I?LIKE/i,
     lyDo: "Cùng lý do: Quote_searchText_trgm_idx tồn tại; ở cỡ này quét tuần tự rẻ hơn.",
   },
+  // ĐẾM TỔNG. Bản trước là MỘT mục `{ bang: null, sql: /^\s*SELECT COUNT\(\*\)/i }` — tha mọi câu mở
+  // đầu bằng COUNT(*) trên MỌI bảng. Câu đếm TRANG của listQuotes (`prisma.quoteSheet.groupBy` →
+  // `SELECT COUNT(*) AS "_count$_all", "quoteId" … GROUP BY "quoteId"`) lọt đúng vào đó: nó có quét
+  // tuần tự cả bảng QuoteSheet thì cổng vẫn XANH (người soát, 2026-09-29). Nay chỉ tha câu đếm tổng của
+  // hai danh sách được đo, đúng khuôn prisma.count, đúng bảng nó đếm.
   {
-    bang: null, // mọi bảng
-    sql: /^\s*SELECT COUNT\(\*\)/i,
+    bang: "Quote",
+    sql: khuonDemTong("Quote"),
     lyDo:
-      "ĐẾM TỔNG cho phân trang. Đếm mọi dòng còn sống thì BẮT BUỘC phải đọc hết chúng — không " +
-      "index nào bỏ qua được việc đó, chỉ làm nó rẻ hơn (index-only scan). Đây là cái giá cố hữu " +
-      "của phân trang kiểu OFFSET có hiển thị tổng số trang; muốn bỏ hẳn thì phải đổi sang phân " +
-      "trang theo con trỏ (keyset) và không hiện tổng — một thay đổi HÀNH VI, không phải thêm " +
-      "index. Ở quy mô hiện tại: 1–2 ms cho 5.000 dòng.",
+      "ĐẾM TỔNG cho phân trang của danh sách báo giá (`prisma.quote.count` trong listQuotes). Đếm mọi " +
+      "dòng còn sống thì BẮT BUỘC phải đọc hết chúng — không index nào bỏ qua được việc đó, chỉ làm nó " +
+      "rẻ hơn (index-only scan). Đây là cái giá cố hữu của phân trang kiểu OFFSET có hiển thị tổng số " +
+      "trang; muốn bỏ hẳn thì phải đổi sang phân trang theo con trỏ (keyset) và không hiện tổng — một " +
+      "thay đổi HÀNH VI, không phải thêm index. Ở quy mô hiện tại: 1–2 ms cho 5.000 dòng.",
+  },
+  {
+    bang: "Customer",
+    sql: khuonDemTong("Customer"),
+    lyDo:
+      "ĐẾM TỔNG cho phân trang của danh sách khách hàng (`prisma.customer.count` trong listCustomers) — " +
+      "cùng lý do với mục đếm tổng báo giá ngay trên.",
   },
 ];
 
-/** `true` nếu lần quét tuần tự này đã được soát và chấp nhận (xem CHAP_NHAN). */
-export const daChapNhan = (bang, sql) =>
-  CHAP_NHAN.some((c) => (c.bang === null || c.bang === bang) && c.sql.test(sql));
+/** `true` nếu lần quét tuần tự trên `bang` đã được soát và chấp nhận (xem CHAP_NHAN) — khớp ĐÚNG bảng. */
+export const daChapNhan = (bang, sql) => CHAP_NHAN.some((c) => c.bang === bang && c.sql.test(sql));
+
+/**
+ * Quyền của phiên KHÔNG thấy bảng nội bộ: mọi quyền, trừ hai quyền mở nhánh bảng nội bộ của listQuotes
+ * (`canBangNoiBo` trong src/services/quoteService.ts). Đó là phiên của phần lớn nhân viên, và ở đó câu
+ * đếm trang là câu DUY NHẤT chạm QuoteSheet. Phiên toàn quyền còn chạy bangNoiBoTheoSheet — cũng đi
+ * index của QuoteSheet — nên gỡ index thì câu ĐÓ đỏ, và lượt kiểm ngược tưởng câu đếm trang được canh.
+ */
+export const quyenKhongBangNoiBo = (P) =>
+  Object.values(P).filter((q) => q !== P.QUOTE_HN_FILL && q !== P.QUOTE_INTERNAL_VIEW);
 
 async function giaiThich(ten, chay) {
   batDuoc = [];
@@ -272,6 +309,7 @@ async function giaiThich(ten, chay) {
   // (count + findMany), và câu chậm hơn chưa chắc là câu quét tuần tự. Bản đầu của file này chọn
   // theo thời gian nên nó báo XANH cho danh sách báo giá trong khi câu findMany đang Seq Scan.
   let xauNhat = null;
+  const doCa = []; // MỌI câu còn quét tuần tự bảng lớn sau miễn trừ, không chỉ câu tệ nhất
   const teHon = (a, b) => {
     if (!b) return true;
     if (a.seq.length !== b.seq.length) return a.seq.length > b.seq.length;
@@ -294,6 +332,7 @@ async function giaiThich(ten, chay) {
       .filter((s) => s.dong >= NGUONG_SEQ_SCAN)
       .filter((s) => !daChapNhan(s.bang, q.sql));
     const ungVien = { thoiGian, seq, sql: q.sql, params: q.params, ke };
+    if (seq.length) doCa.push(ungVien);
     if (teHon(ungVien, xauNhat)) xauNhat = ungVien;
   }
   if (!xauNhat) {
@@ -303,6 +342,15 @@ async function giaiThich(ten, chay) {
   const nhan = `${ten} — ${xauNhat.thoiGian.toFixed(1)} ms`;
   if (xauNhat.seq.length) {
     xau(`${nhan} · QUÉT TUẦN TỰ bảng lớn: ${xauNhat.seq.map((s) => `${s.bang} (${s.dong} dòng)`).join(", ")}`);
+    // Đỏ vì câu NÀO phải đọc ra được ngay: một đường có thể có vài câu cùng quét tuần tự (gỡ index
+    // QuoteSheet thì cả câu đếm trang lẫn bangNoiBoTheoSheet), mà chẩn đoán dưới chỉ dựng cho câu tệ
+    // nhất — bản trước chỉ in câu đó, và một lượt kiểm ngược đã quy nhầm câu gây đỏ (người soát, 2026-09-29).
+    if (doCa.length > 1) {
+      loiRa(`${doCa.length} câu của đường này quét tuần tự bảng lớn:`);
+      for (const x of doCa) {
+        loiRa(`  · ${x.seq.map((s) => `${s.bang} (${s.dong} dòng)`).join(", ")} :: ${x.sql.replace(/\s+/g, " ").trim().slice(0, 220)}`);
+      }
+    }
     await inChanDoan(xauNhat);
   } else {
     ok(nhan);
@@ -383,6 +431,8 @@ async function main() {
     params: {},
     body: {},
   };
+  // Nhân viên thường: không thấy bảng nội bộ — xem quyenKhongBangNoiBo.
+  const reqKhongNoiBo = { ...req, session: { ...req.session, role: "employee", permissions: quyenKhongBangNoiBo(PERMISSIONS) } };
 
   buoc("EXPLAIN ANALYZE các đường nóng");
   const quoteService = await import("../../dist/services/quoteService.js");
@@ -395,6 +445,9 @@ async function main() {
   const sau = trangSau(SO_DONG);
   await giaiThich("danh sách báo giá (trang 1)", async () => {
     await quoteService.listQuotes({ ...req, query: { ...chung, page: 1 } });
+  });
+  await giaiThich("danh sách báo giá (trang 1 · KHÔNG quyền bảng nội bộ)", async () => {
+    await quoteService.listQuotes({ ...reqKhongNoiBo, query: { ...chung, page: 1 } });
   });
   await giaiThich("danh sách báo giá (TÌM không dấu)", async () => {
     await quoteService.listQuotes({ ...req, query: { ...chung, q: "bao gia thu 4321", page: 1 } });

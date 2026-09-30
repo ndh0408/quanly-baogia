@@ -8,7 +8,8 @@
  * INFRA-10: app không khai stop_grace_period (Docker SIGKILL sau 10s = đúng lưới tắt 10s của app).
  * INFRA-11: không đường nào đang chạy quét lỗ hổng của IMAGE.
  * §17: explain-hot-paths đỏ/xanh theo LỊCH SỬ của bảng (thứ tự vật lý), không theo index; gọi qua
- *   junction thì thoát 0 im lặng; không dựng trang (QuoteSheet) nên mù trước truy vấn đếm trang.
+ *   junction thì thoát 0 im lặng; không dựng trang (QuoteSheet) nên mù trước truy vấn đếm trang; miễn
+ *   trừ "ĐẾM TỔNG" tha mọi câu COUNT(*) trên mọi bảng — kể cả câu đếm trang mới.
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync, mkdtempSync, symlinkSync, unlinkSync, rmdirSync, realpathSync } from "node:fs";
@@ -16,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { dongVoNghia } from "../scripts/ci/check-line-refs.mjs";
+import { dongVoNghia, dsTep, RE } from "../scripts/ci/check-line-refs.mjs";
 
 const GOC = path.resolve(import.meta.dirname, "..");
 const doc = (f) => readFileSync(path.join(GOC, f), "utf8");
@@ -33,7 +34,7 @@ describe("DOC-11 — dongVoNghia bắt dòng chỉ có dấu đóng", () => {
 });
 
 // Người soát (2026-09-29): commit đổi tham chiếu sang TÊN còn sót sáu chỗ `tệp:dòng` ĐÃ TRÔI mà
-// check-line-refs không thể bắt — bốn chỗ rơi vào một dòng MÃ khác nghĩa (vd `src/logger.ts:51` giờ
+// check-line-refs không thể bắt — bốn chỗ rơi vào một dòng MÃ khác nghĩa (vd `src/logger.ts` dòng 51 giờ
 // là `export const redactConfig`), hai chỗ rơi vào dòng chú thích (cổng chỉ liệt kê, không chặn).
 // Cổng không kiểm được ngữ nghĩa, nên ở đây neo từng chỗ: số dòng cũ không còn, và TÊN được nêu thay
 // thế có thật ở tệp đích — đổi tên bước/hàm mà quên tài liệu thì bài này đỏ, thay vì im lặng trôi.
@@ -63,6 +64,23 @@ describe("DOC-11 — tham chiếu đã đổi sang TÊN trỏ vào thứ có th�
       tep: "docs/adr/0006-go-spa-vanilla-cu.md", cu: /web\/src\/main\.tsx:\d/, nhac: /`import "\.\.\/\.\.\/public\/style\.css"` trong `web\/src\/main\.tsx`/,
       dich: "web/src/main.tsx", neo: /^import "\.\.\/\.\.\/public\/style\.css";$/m,
     },
+    // Người soát (vòng 2): tham chiếu `docker-compose.prod.yml` + số dòng 288 trong Dockerfile đã trôi sang một dòng chú thích
+    // (NODE_OPTIONS thật của app ở dòng khác); check-line-refs không quét Dockerfile (không đuôi) và
+    // không soi tệp ở gốc repo (regex đòi `/`). Rà cùng lớp trong Dockerfile/compose: thêm ba chỗ.
+    {
+      tep: "Dockerfile", cu: /docker-compose\.prod\.yml:\d/, nhac: /khoá `NODE_OPTIONS` của service `app` trong docker-compose\.prod\.yml/,
+      // ĐÚNG service app: chặn trước dòng thụt 2 kế tiếp (service khác) — worker cũng khai NODE_OPTIONS.
+      dich: "docker-compose.prod.yml", neo: /^ {2}app:\n(?:(?!^ {2}\S)[\s\S])*?^ {6}NODE_OPTIONS: "--max-old-space-size=2048"/m,
+    },
+    {
+      tep: "Dockerfile", cu: /check-runtime-command\.sh:\d/, nhac: /scripts\/ci\/check-runtime-command\.sh \(bước `▶ Dockerfile CMD trỏ dist\/`\)/,
+      dich: "scripts/ci/check-runtime-command.sh", neo: /^echo "▶ Dockerfile CMD trỏ dist\/"\ngrep -qE '\^CMD .*dist\/server.*' Dockerfile \\$/m,
+    },
+    ...["docker-compose.prod.yml", "docker-compose.staging.yml"].map((tep) => ({
+      tep, cu: /postgres\.yaml:\d/, nhac: /`securityContext` của container postgres trong infra\/k8s\/postgres\.yaml/,
+      dich: "infra/k8s/postgres.yaml",
+      neo: /- name: postgres\n\s+image: postgres[\s\S]*?securityContext:\n\s+allowPrivilegeEscalation: false\n[\s\S]*?drop: \["ALL"\]/,
+    })),
   ];
   for (const { tep, cu, nhac, dich, neo } of NEO) {
     it(`${tep}: không còn ${cu.source.replace(/\\d/g, "N").replace(/\\/g, "")}, và tên nêu thay có thật ở ${dich}`, () => {
@@ -72,6 +90,30 @@ describe("DOC-11 — tham chiếu đã đổi sang TÊN trỏ vào thứ có th�
       expect(doc(dich).replace(/\r\n/g, "\n"), `${dich} không còn thứ tài liệu nêu tên`).toMatch(neo);
     });
   }
+
+  it("Dockerfile: lượt tự kiểm nhánh NỐI THÊM dùng ĐÚNG giá trị NODE_OPTIONS mà service app nhận", () => {
+    const app = doc("docker-compose.prod.yml").replace(/\r\n/g, "\n").match(/^ {2}app:\n(?:(?!^ {2}\S)[\s\S])*?^ {6}NODE_OPTIONS: "([^"]+)"/m);
+    expect(app, "service app không còn khai NODE_OPTIONS").not.toBeNull();
+    expect(doc("Dockerfile")).toContain(`&& NODE_OPTIONS=${app[1]} /usr/local/bin/bat-source-map node -e`);
+  });
+
+  it("check-line-refs quét Dockerfile (tệp không đuôi) và soi tham chiếu tới tệp ở GỐC repo", () => {
+    expect(dsTep()).toContain("Dockerfile");
+    // Mẫu ghép từ hai mảnh: viết liền thì chính check-line-refs soi dòng này như tham chiếu THẬT tới
+    // compose (bài kế tiếp canh điều đó).
+    const m = [...("sang ĐÚNG giá trị mà docker-compose.prod.yml" + ":288 gửi cho app").matchAll(RE)];
+    expect(m.map((x) => [x[1], x[2]])).toEqual([["docker-compose.prod.yml", "288"]]);
+    // Đường có thư mục vẫn bắt TRỌN đường, không cắt đuôi thành tên tệp trần.
+    expect([...("xem src/services/quoteService.ts" + ":12").matchAll(RE)].map((x) => x[1])).toEqual(["src/services/quoteService.ts"]);
+  });
+
+  it("tệp test này không tự đẻ tham chiếu tệp:dòng giả cho check-line-refs soi (dữ liệu mẫu phải ghép mảnh)", () => {
+    // Người soát (v1): mẫu viết liền trong chú thích + dữ liệu mẫu bị cổng liệt kê như tham chiếu thật
+    // tới dòng compose — compose đổi là cổng đỏ vì chuỗi trong test chứ không vì tài liệu trôi.
+    const loi = doc("tests/ops-cong-kiem.test.js").split(/\r?\n/)
+      .flatMap((dong, i) => [...dong.matchAll(RE)].map((x) => `${i + 1}: ${x[1]}:${x[2]}`));
+    expect(loi).toEqual([]);
+  });
 });
 
 describe("GAP1-08 — rc-qa.mjs không chấm đạt quá dễ", () => {
@@ -274,5 +316,60 @@ describe("§17 — explain-hot-paths: phán quyết theo INDEX, không theo th�
       Plans: [{ "Node Type": "Seq Scan", "Relation Name": "Quote", "Actual Rows": 1, "Rows Removed by Filter": 4999, "Actual Loops": 2 }],
     };
     expect(m.timSeqScan(ke).map((s) => [s.bang, s.dong])).toEqual([["Quote", 10000]]);
+  });
+
+  // Người soát (vòng 2, 2026-09-29): mục "ĐẾM TỔNG" của CHAP_NHAN là `{ bang: null, sql: /^\s*SELECT COUNT\(\*\)/i }`
+  // — tha MỌI câu mở đầu bằng COUNT(*) trên MỌI bảng. Câu đếm TRANG mới của listQuotes
+  // (`prisma.quoteSheet.groupBy` → `SELECT COUNT(*) AS "_count$_all", "quoteId" … GROUP BY`) lọt đúng vào
+  // đó: nó quét tuần tự cả bảng QuoteSheet thì cổng vẫn XANH. Các câu dưới đây chép NGUYÊN VĂN log Prisma 7
+  // của một lượt thật; tests/ds-bao-gia-dem-trang.test.js đối chiếu cùng luật với SQL nghe được lúc chạy,
+  // nên Prisma đổi khuôn câu thì bài bên đó đỏ, không để các chuỗi này âm thầm cũ đi.
+  const SQL = {
+    demTrang:
+      'SELECT COUNT(*) AS "_count$_all", "public"."QuoteSheet"."quoteId" FROM "public"."QuoteSheet" WHERE "public"."QuoteSheet"."quoteId" IN ($1,$2,$3) GROUP BY "public"."QuoteSheet"."quoteId" OFFSET $4',
+    demTrangCaBang:
+      'SELECT COUNT(*) AS "_count$_all", "public"."QuoteSheet"."quoteId" FROM "public"."QuoteSheet" WHERE 1=1 GROUP BY "public"."QuoteSheet"."quoteId" OFFSET $1',
+    tongBaoGia:
+      'SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."Quote"."id" FROM "public"."Quote" WHERE "public"."Quote"."deletedAt" IS NULL OFFSET $1) AS "sub"',
+    tongKhach:
+      'SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."Customer"."id" FROM "public"."Customer" WHERE "public"."Customer"."deletedAt" IS NULL OFFSET $1) AS "sub"',
+  };
+
+  it("CHAP_NHAN: mọi mục nêu ĐÚNG MỘT bảng kèm lý do — không mục nào tha mọi bảng", () => {
+    expect(m.CHAP_NHAN.length).toBeGreaterThan(0);
+    for (const c of m.CHAP_NHAN) {
+      expect(typeof c.bang === "string" && c.bang.length > 0, `mục ${c.sql} tha MỌI bảng (bang: ${c.bang})`).toBe(true);
+      expect(c.lyDo?.length ?? 0, `mục ${c.bang} ${c.sql} thiếu lý do`).toBeGreaterThan(40);
+    }
+  });
+
+  it("câu đếm TRANG (groupBy theo quoteId) KHÔNG được tha — kể cả khi nó gộp cả bảng", () => {
+    expect(m.daChapNhan("QuoteSheet", SQL.demTrang)).toBe(false);
+    expect(m.daChapNhan("QuoteSheet", SQL.demTrangCaBang)).toBe(false);
+  });
+
+  it("đếm TỔNG của prisma.count vẫn được tha — chỉ trên đúng bảng nó đếm, không có GROUP BY", () => {
+    expect(m.daChapNhan("Quote", SQL.tongBaoGia)).toBe(true);
+    expect(m.daChapNhan("Customer", SQL.tongKhach)).toBe(true);
+    expect(m.daChapNhan("QuoteSheet", SQL.tongBaoGia), "Seq Scan ở bảng KHÁC bảng được đếm").toBe(false);
+    expect(m.daChapNhan("Customer", SQL.tongBaoGia)).toBe(false);
+    expect(m.daChapNhan("QuoteSheet", SQL.tongBaoGia.replaceAll('"Quote"', '"QuoteSheet"')), "đếm tổng bảng không được nêu").toBe(false);
+    const coNhom = SQL.tongBaoGia.replace(' OFFSET $1) AS "sub"', ' GROUP BY "public"."Quote"."status" OFFSET $1) AS "sub"');
+    expect(m.daChapNhan("Quote", coNhom), "đếm có GROUP BY không phải đếm tổng").toBe(false);
+    expect(m.daChapNhan("Quote", `${SQL.tongBaoGia} UNION ALL SELECT 1`), "khuôn phải phủ TRỌN câu").toBe(false);
+  });
+
+  // Nhân viên thường không có quote:hn:fill / quote:internal:view nên listQuotes của họ KHÔNG nạp bảng nội bộ:
+  // câu đếm trang là câu DUY NHẤT chạm QuoteSheet. Phiên toàn quyền còn chạy thêm bangNoiBoTheoSheet (cũng
+  // đi index QuoteSheet) — gỡ index thì CÂU ĐÓ đỏ, và lượt kiểm ngược cũ tưởng là câu đếm trang đỏ.
+  it("có đường đo danh sách báo giá bằng phiên KHÔNG quyền bảng nội bộ", () => {
+    const P = { QUOTE_READ_ALL: "quote:read:all", QUOTE_HN_FILL: "quote:hn:fill", QUOTE_INTERNAL_VIEW: "quote:internal:view", KHAC: "customer:read:all" };
+    expect(m.quyenKhongBangNoiBo(P)).toEqual(["quote:read:all", "customer:read:all"]);
+    // bỏ ĐÚNG hai quyền đang mở nhánh bảng nội bộ — listQuotes đổi điều kiện đó thì bài này đỏ
+    expect(doc("src/services/quoteService.ts")).toMatch(
+      /const canBangNoiBo = can\(req\.session, P\.QUOTE_HN_FILL\) \|\| can\(req\.session, P\.QUOTE_INTERNAL_VIEW\);/,
+    );
+    expect(src).toMatch(/permissions: quyenKhongBangNoiBo\(PERMISSIONS\)/);
+    expect(src).toMatch(/await quoteService\.listQuotes\(\{ \.\.\.reqKhongNoiBo, query: \{ \.\.\.chung, page: 1 \} \}\);/);
   });
 });

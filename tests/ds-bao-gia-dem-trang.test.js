@@ -15,7 +15,11 @@
 //    trò thường lẫn vai trò xem nội bộ (nhánh đó gắn thêm `sheets` giả vào dòng).
 // 2. Hình dạng truy vấn: nghe ĐÚNG câu SQL Prisma chạy (PRISMA_LOG_QUERIES, cùng đường với cổng
 //    explain-hot-paths) — mọi câu chạm "QuoteSheet" phải lọc theo danh sách quoteId của trang.
+// 3. Cổng explain-hot-paths SOI được câu đếm trang: luật miễn trừ "ĐẾM TỔNG" từng tha MỌI câu mở đầu
+//    bằng COUNT(*) — câu groupBy đếm trang cũng mở đầu như thế, nên nó có quét cả bảng thì cổng vẫn
+//    xanh (người soát, vòng 2). Đối chiếu luật với CHÍNH câu Prisma chạy, không với chuỗi chép tay.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { daChapNhan } from "../scripts/db/explain-hot-paths.mjs";
 
 // PHẢI đặt TRƯỚC khi nạp src/db.js: mức log `query` là tham số DỰNG client, db.ts đọc biến này đúng
 // một lần lúc nạp module. Trả lại ngay sau đó để không lọt sang thứ gì khác trong tiến trình.
@@ -83,5 +87,28 @@ describe.runIf(dbAvailable)("Danh sách báo giá — số trang đếm theo id 
         expect(s, `câu này gộp/quét QuoteSheet mà không giới hạn theo quoteId:\n${s}`).toMatch(/"quoteId"\s+IN\s*\(|"quoteId"\s*=\s*ANY\s*\(/);
       }
     }, 60_000);
+
+    it(`${vaiTro}: cổng explain-hot-paths KHÔNG tha Seq Scan cho câu nào chạm "QuoteSheet"`, async () => {
+      batDuoc = [];
+      await listQuotes(reqGia(perms));
+      const cham = batDuoc.filter((s) => s.includes('"QuoteSheet"'));
+      expect(cham.length, "không câu nào chạm QuoteSheet — bài này không còn đo gì").toBeGreaterThan(0);
+      for (const s of cham) {
+        expect(daChapNhan("QuoteSheet", s), `CHAP_NHAN tha Seq Scan QuoteSheet cho câu này — cổng mù trước nó:\n${s}`).toBe(false);
+      }
+    }, 60_000);
   }
+
+  // Chiều ngược lại: thu hẹp luật mà khuôn không còn khớp câu đếm TỔNG thật thì cổng ĐỎ OAN ở mọi lượt
+  // (đếm tổng buộc phải đọc mọi dòng — xem lý do ở mục CHAP_NHAN). Không tìm kiếm: chắc chắn là luật
+  // đếm tổng tha, không phải luật tìm không dấu.
+  it("câu đếm TỔNG thật của listQuotes vẫn được luật đếm tổng tha — đúng bảng Quote, không bảng nào khác", async () => {
+    batDuoc = [];
+    await listQuotes({ query: { page: 1, size: 20, sort: "createdAt", order: "desc" }, session: { userId: 0, role: "employee", permissions: ["quote:read:all"] } });
+    const tong = batDuoc.filter((s) => /^\s*SELECT COUNT\(\*\)/.test(s) && !s.includes('"QuoteSheet"'));
+    expect(tong, `không nghe được đúng MỘT câu đếm tổng:\n${batDuoc.join("\n")}`).toHaveLength(1);
+    expect(tong[0]).not.toMatch(/searchText/);
+    expect(daChapNhan("Quote", tong[0]), `luật đếm tổng không khớp câu Prisma sinh:\n${tong[0]}`).toBe(true);
+    expect(daChapNhan("QuoteSheet", tong[0])).toBe(false);
+  }, 60_000);
 });
