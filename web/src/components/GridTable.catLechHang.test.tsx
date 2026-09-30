@@ -32,14 +32,14 @@ afterEach(async () => {
   hop?.remove(); root = null; hop = null; document.body.innerHTML = "";
 });
 
-function Vo({ items }: { items: ItemK[] }) {
+function Vo({ items, anh = false }: { items: ItemK[]; anh?: boolean }) {
   const [, b] = useState(0);
   return <GridTable items={items} usesDays={false} showDetail={false} numberSubs={false} editable internalNote={false}
-    groupSubtotal={false} fxBar onChange={() => b((v) => v + 1)} />;
+    groupSubtotal={false} fxBar showImages={anh} onShowImages={() => {}} onChange={() => b((v) => v + 1)} />;
 }
-function moLuoi(items: ItemK[]) {
+function moLuoi(items: ItemK[], anh = false) {
   hop = document.createElement("div"); document.body.appendChild(hop); root = createRoot(hop);
-  act(() => root!.render(<Vo items={items} />));
+  act(() => root!.render(<Vo items={items} anh={anh} />));
 }
 const o = (row: number, f: string) => hop!.querySelector(`tr[data-row="${row}"] [data-f="${f}"]`) as HTMLInputElement & HTMLTextAreaElement;
 const phim = (el: Element, init: KeyboardEventInit) => act(() => { el.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
@@ -106,5 +106,120 @@ describe("L7 — cắt–dán chỉ xoá đúng hàng nguồn", () => {
     dan(2, kho);
     expect(tom(items)).toEqual([":0x0", "B:0x0", "A:1x5"]);
     expect(Object.keys(items[0]), "ô STT (ô tính) bị ghi thành thuộc tính của hạng mục").not.toContain("_stt");
+  });
+});
+
+// Soát vòng 2 (2026-09-29): (3) ở trên chỉ phủ đường GÕ (markEditUndo). Mọi thao tác sửa bảng khác cũng phải huỷ
+// chế độ cắt: payload chốt nội dung lúc Ctrl+X, cắt còn sống thì dán xong nguồn bị xoá theo bản chụp cũ còn đích
+// nhận giá trị cũ — thứ vừa sửa ở hàng nguồn mất hẳn, im lặng. Huỷ thì dán chỉ là CHÉP và onPaste báo rõ.
+describe("L7 — Delete / Ctrl+D / Ctrl+R / thanh công thức / Ctrl+Enter / ảnh sau Ctrl+X cũng huỷ chế độ cắt", () => {
+  const ANH = "data:image/png;base64,QUFB";
+  const bonHang = () => [mk({ name: "A", unit: "bộ", quantity: 1, unitPrice: 5 }), mk({ name: "B", unit: "cái", quantity: 2, unitPrice: 10 }), mk({ name: "C" }), mk({ name: "D" })];
+  const toastChu = () => document.getElementById("toast-host")?.textContent ?? "";
+  /** Đứng ở ô (1, f) với vùng chọn MỘT ô — Ctrl+X vừa để lại vùng chọn cả hàng (Shift+Space), nên đi từ hàng trên xuống. */
+  function veO(f: string) {
+    act(() => { o(0, f).focus(); });
+    phim(o(0, f), { key: "ArrowDown" });
+    expect(document.activeElement, `không tới được ô ${f} của hàng nguồn`).toBe(o(1, f));
+  }
+  /** Dán khối vừa cắt ở hàng 3: phải là CHÉP — hàng nguồn 1 còn hạng mục B, hàng 3 nhận B, có báo. */
+  function danLaChep(items: ItemK[], kho: Kho) {
+    dan(3, kho);
+    expect(items[1].name, "sửa hàng nguồn sau Ctrl+X mà cắt vẫn chạy: hàng nguồn bị xoá trắng").toBe("B");
+    expect(items[3].name).toBe("B");
+    expect(toastChu()).toContain("KHÔNG phải di chuyển");
+  }
+
+  it("Delete ô ĐVT của hàng nguồn rồi dán: ô vừa xoá không sống lại, hàng nguồn còn nguyên", () => {
+    const items = bonHang();
+    moLuoi(items);
+    const kho = catHang(1);
+    veO("unit");
+    phim(o(1, "unit"), { key: "Delete" });
+    expect(items[1].unit).toBe("");
+    danLaChep(items, kho);
+    expect(items[1].unit).toBe("");
+  });
+
+  it("Ctrl+D chép ĐVT của hàng trên xuống hàng nguồn rồi dán: hàng nguồn giữ ĐVT vừa điền", () => {
+    const items = bonHang();
+    moLuoi(items);
+    const kho = catHang(1);
+    act(() => { o(0, "unit").focus(); });
+    phim(o(0, "unit"), { key: "ArrowDown", shiftKey: true });
+    phim(document.activeElement!, { key: "d", ctrlKey: true });
+    expect(items[1].unit).toBe("bộ");
+    danLaChep(items, kho);
+    expect(items[1].unit).toBe("bộ");
+  });
+
+  it("Ctrl+R trong hàng nguồn (Hạng Mục → ĐVT) rồi dán: hàng nguồn giữ ĐVT vừa điền", () => {
+    const items = bonHang();
+    moLuoi(items);
+    const kho = catHang(1);
+    veO("name");
+    phim(o(1, "name"), { key: "ArrowRight", shiftKey: true });
+    phim(document.activeElement!, { key: "r", ctrlKey: true });
+    expect(items[1].unit).toBe("B");
+    danLaChep(items, kho);
+    expect(items[1].unit).toBe("B");
+  });
+
+  it("chốt SL của hàng nguồn qua THANH CÔNG THỨC rồi dán: hàng nguồn giữ công thức vừa chốt", () => {
+    const items = bonHang();
+    moLuoi(items);
+    const kho = catHang(1);
+    veO("quantity");
+    const fx = document.getElementById("fx-input") as HTMLInputElement;
+    act(() => { fx.focus(); fx.value = "=3+4"; });
+    phim(fx, { key: "Enter" });
+    expect([items[1].quantity, items[1].formulas?.quantity]).toEqual([7, "=3+4"]);
+    danLaChep(items, kho);
+    expect(items[1].quantity).toBe(7);
+  });
+
+  it("F2 rồi Ctrl+Enter điền cả vùng trong hàng nguồn rồi dán: hàng nguồn giữ nội dung vừa điền", () => {
+    const items = bonHang();
+    moLuoi(items);
+    const kho = catHang(1);
+    veO("unit");
+    phim(o(1, "unit"), { key: "ArrowRight", shiftKey: true });
+    phim(document.activeElement!, { key: "F2" });
+    phim(document.activeElement!, { key: "Enter", ctrlKey: true });
+    expect(items[1].unit, "Ctrl+Enter không điền cả vùng").toBe("2");
+    danLaChep(items, kho);
+    expect(items[1].unit).toBe("2");
+  });
+
+  it("xoá ẢNH của hàng nguồn rồi dán: hàng nguồn còn nguyên (không bị xoá trắng theo bản chụp lúc cắt)", () => {
+    const items = bonHang();
+    items[1].images = [ANH];
+    moLuoi(items, true);
+    const kho = catHang(1);
+    act(() => { (hop!.querySelector('tr[data-row="1"] .img-rm') as HTMLButtonElement).click(); });
+    expect(items[1].images ?? []).toEqual([]);
+    danLaChep(items, kho);
+    expect(items[1].images ?? []).toEqual([]);
+  });
+
+  it("THÊM ảnh vào hàng nguồn rồi dán: ảnh vừa thêm không mất", async () => {
+    // jsdom không giải mã ảnh: Image giả gọi onload ngay, canvas trả null → fileToImg trả nguyên data-URL.
+    class AnhGia { onload: null | (() => void) = null; onerror: null | (() => void) = null; width = 20; height = 10; set src(_v: string) { setTimeout(() => this.onload?.(), 0); } }
+    vi.stubGlobal("Image", AnhGia);
+    const khoiCanvas = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    try {
+      const items = bonHang();
+      moLuoi(items, true);
+      const kho = catHang(1);
+      const inp = hop!.querySelector('tr[data-row="1"] .img-add input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(inp, "files", { value: [new File(["moi"], "moi.png", { type: "image/png" })], configurable: true });
+      act(() => { inp.dispatchEvent(new Event("change", { bubbles: true })); });
+      await act(async () => { for (let k = 0; k < 10 && !(items[1].images || []).length; k++) await new Promise((r) => setTimeout(r, 20)); });
+      expect((items[1].images || []).length, "ảnh chưa vào hàng nguồn").toBe(1);
+      danLaChep(items, kho);
+      expect((items[1].images || []).length, "ảnh vừa thêm bị xoá cùng hàng nguồn").toBe(1);
+    } finally {
+      vi.unstubAllGlobals(); khoiCanvas.mockRestore();
+    }
   });
 });

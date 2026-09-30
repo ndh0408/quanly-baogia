@@ -9,7 +9,9 @@
  *
  * Nhân bản (luật chốt 2026-09-29): LƯU KHO là trạng thái công việc của dự án cũ — như duyệt / đã trả —
  * nên bị CẮT; NS và CHỨNG TỪ là phân loại của dòng chi phí nên GIỮ. Trước bản vá, catTrangThai chép nguyên
- * cả ba: bản sao mở ra đã "lưu kho" những thứ chưa hề mua.
+ * cả ba: bản sao mở ra đã "lưu kho" những thứ chưa hề mua. Luật áp cho CẢ HAI nút — "Nhân bản" (mã dự án
+ * mới) và "Bản mới" (sameProject, v2 cùng mã dự án): "Bản mới" cũng cắt đã trả / duyệt, nên LƯU KHO đi theo
+ * (soát vòng 2 — trước đó chỉ bài sameProject chạy, còn "Nhân bản" chưa bài nào chốt LƯU KHO).
  *
  * Phần Hà Nội ĐÃ CHỐT (gửi duyệt / đã duyệt): ba trường bị khoá như giá. Hai cửa riêng: saveHn chặn account
  * Hà Nội theo hnStatus; chotHnTables chặn người không được duyệt (account phụ) bằng vân tay vanTayHn — cửa
@@ -150,9 +152,10 @@ describe.runIf(dbAvailable)("Bảng nội bộ: NS · CHỨNG TỪ · LƯU KHO �
     expect(r.status).toBe(400);
   }, 60_000);
 
-  it("nhân bản: GIỮ NS + chứng từ, XOÁ lưu kho — bảng theo trang lẫn bảng Hà Nội; bản gốc không đổi", async () => {
+  // Hai nút ở QuoteList cùng gọi POST /:id/duplicate: "Nhân bản" gửi {} (mã dự án mới), "Bản mới" gửi sameProject.
+  it.each([["Nhân bản (mã dự án mới)", {}], ["Bản mới (cùng mã dự án)", { sameProject: true }]])("%s: GIỮ NS + chứng từ, XOÁ lưu kho — bảng theo trang lẫn bảng Hà Nội; bản gốc không đổi", async (_nut, than) => {
     const chu = await dangNhap(chuU);
-    const r = await chu.post(`/api/quotes/${quoteId}/duplicate`).send({ sameProject: true });
+    const r = await chu.post(`/api/quotes/${quoteId}/duplicate`).send(than);
     expect(r.status, JSON.stringify(r.body).slice(0, 400)).toBe(201);
 
     const moi = (await chu.get(`/api/quotes/${r.body.id}`)).body;
@@ -164,6 +167,42 @@ describe.runIf(dbAvailable)("Bảng nội bộ: NS · CHỨNG TỪ · LƯU KHO �
     const goc = await docChu();
     expect(ba(hangTen(bangCua(goc, "hcm").items, "Standee")), "nhân bản đụng vào bản gốc").toEqual(["Kho Q7\ntầng 2", "HDNS", true]);
     expect(ba(hangTen(goc.hnTables[0].items, "Nhân công HN"))).toEqual(["Tiên ứng", "HDNS", true]);
+  }, 60_000);
+
+  // LƯU KHO là trạng thái thật của hạng mục, cùng loại với ĐÃ THANH TOÁN / DUYỆT: nút nào cắt cái này thì cắt
+  // cái kia. Hàng dựng đúng trạng thái sau khi kế toán /pay, admin duyệt và thủ kho tích lưu kho (ghi thẳng
+  // CSDL). Đọc tận CSDL — lớp trình bày giấu paidProof nên không đủ để thấy ảnh chứng từ có bị chép hay không.
+  it("'Nhân bản' lẫn 'Bản mới' đối xử LƯU KHO như ĐÃ THANH TOÁN / DUYỆT — cả hai cắt, không nút nào giữ cái này bỏ cái kia", async () => {
+    const chu = await dangNhap(chuU);
+    const tao = await chu.post("/api/quotes").send({
+      title: `${TAG} đã trả + lưu kho`, companyId, toCompany: "Khách thử", vatPercent: 8,
+      sheets: [{ name: "Trang 1", order: 0, templateId, items: [{ kind: "item", name: "Màn LED", quantity: 1, unitPrice: 5000000, order: 0 }],
+        extraTables: [{ category: "hcm", name: "HCM", items: [muc("Backdrop", { ns: "Anh Tuấn", chungTu: "VAT", luuKho: true })] }] }],
+      hnTables: [{ name: "HN", templateId, items: [muc("Nhân công HN", { ns: "Anh Nam", chungTu: "TM", luuKho: true })] }],
+    });
+    expect(tao.status, JSON.stringify(tao.body).slice(0, 400)).toBe(201);
+    const nguon = await prisma.quote.findUnique({ where: { id: tao.body.id }, include: { sheets: true } });
+    const daTra = { paid: true, paidAt: "2026-09-02T00:00:00.000Z", paidById: chuU.id, paidProof: "data:image/png;base64,AAAA", approved: true, approvedAt: "2026-09-01T00:00:00.000Z", approvedBy: chuU.id };
+    const s0 = nguon.sheets[0];
+    await prisma.quoteSheet.update({ where: { id: s0.id }, data: { extraTables: s0.extraTables.map((t) => ({ ...t, items: t.items.map((it) => ({ ...it, ...daTra })) })) } });
+    await prisma.quote.update({ where: { id: nguon.id }, data: { hnTables: nguon.hnTables.map((t) => ({ ...t, items: t.items.map((it) => ({ ...it, approved: true, approvedAt: daTra.approvedAt, approvedBy: chuU.id })) })) } });
+
+    const trangThai = (it) => ({ paid: !!it?.paid, paidProof: it?.paidProof ?? null, approved: !!it?.approved, luuKho: !!it?.luuKho });
+    for (const [nut, than] of [["Nhân bản", {}], ["Bản mới", { sameProject: true }]]) {
+      const r = await chu.post(`/api/quotes/${nguon.id}/duplicate`).send(than);
+      expect(r.status, `${nut}: ${JSON.stringify(r.body).slice(0, 300)}`).toBe(201);
+      if (than.sameProject) expect([r.body.projectCode, r.body.projectVersion], "Bản mới phải CÙNG mã dự án, v2").toEqual([nguon.projectCode ?? nguon.quoteNumber, 2]);
+      const moi = await prisma.quote.findUnique({ where: { id: r.body.id }, include: { sheets: true } });
+      const hcm = moi.sheets[0].extraTables[0].items[0], hn = moi.hnTables[0].items[0];
+      expect(trangThai(hcm), `${nut}: hàng HCM mang trạng thái của dự án cũ`).toEqual({ paid: false, paidProof: null, approved: false, luuKho: false });
+      expect([hcm.ns, hcm.chungTu], `${nut}: NS / chứng từ là phân loại của dòng chi phí — phải giữ`).toEqual(["Anh Tuấn", "VAT"]);
+      expect(trangThai(hn), `${nut}: hàng Hà Nội mang trạng thái của dự án cũ`).toEqual({ paid: false, paidProof: null, approved: false, luuKho: false });
+      expect([hn.ns, hn.chungTu]).toEqual(["Anh Nam", "TM"]);
+    }
+    // Bản gốc không đổi: vẫn đã trả + lưu kho.
+    const gocSau = await prisma.quote.findUnique({ where: { id: nguon.id }, include: { sheets: true } });
+    expect(trangThai(gocSau.sheets[0].extraTables[0].items[0])).toEqual({ paid: true, paidProof: daTra.paidProof, approved: true, luuKho: true });
+    expect(trangThai(gocSau.hnTables[0].items[0])).toEqual({ paid: false, paidProof: null, approved: true, luuKho: true });
   }, 60_000);
 
   // ── Phần Hà Nội ĐÃ CHỐT. Các bài dưới đổi hnStatus nên đứng SAU mọi bài cần phần HN còn mở. ──

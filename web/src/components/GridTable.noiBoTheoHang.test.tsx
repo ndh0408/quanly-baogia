@@ -346,3 +346,156 @@ describe("bảng nội bộ — Delete khối hạng mục xoá luôn ba trườ
     expect(baTruong(a)).toEqual(["Anh Tuấn", "VAT", true]);
   });
 });
+
+// ── Soát vòng 2 (2026-09-29) ───────────────────────────────────────────────────────────────────────────
+const oChungTu = (row: number) => hop!.querySelector(`tr[data-row="${row}"] td.col-chung-tu select`) as HTMLSelectElement;
+const oLuuKho = (row: number) => hop!.querySelector(`tr[data-row="${row}"] td.col-luu-kho input`) as HTMLInputElement;
+const toastChu = () => document.getElementById("toast-host")?.textContent ?? "";
+
+describe("bảng nội bộ — đổi CHỨNG TỪ / LƯU KHO / DUYỆT sau Ctrl+X là SỬA bảng: huỷ chế độ cắt như gõ vào ô (L7)", () => {
+  // Payload cắt chốt ba trường LÚC Ctrl+X. Cắt mà còn sống qua lần đổi ô chọn thì dán xong hàng nguồn về mặc
+  // định theo bản chụp cũ, đích nhận giá trị cũ — lựa chọn vừa đổi mất hẳn, không một lời báo. Gõ vào ô chữ
+  // thì từ lâu đã huỷ cắt (markEditUndo): dán sau đó chỉ CHÉP, nguồn giữ nguyên thứ vừa sửa.
+  it("cắt Backdrop (Hạng Mục → Đơn giá), đổi CHỨNG TỪ hàng đó sang HĐNS rồi dán: HĐNS còn nguyên — dán chỉ là CHÉP, có báo", () => {
+    const items = [mk({ name: "Backdrop", unitPrice: 250000, ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }), mk({ name: "" })];
+    moLuoi(items);
+    chonKhoi(0, 3);
+    const cb = chepKhoi(true);
+    expect(hop!.querySelector("td.cell-cut"), "chưa vào chế độ cắt").toBeTruthy();
+    act(() => { oChungTu(0).focus(); oChungTu(0).value = "HDNS"; oChungTu(0).dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(hop!.querySelector("td.cell-cut"), "đổi chứng từ mà viền cắt vẫn còn").toBeNull();
+    dan(1, cb);
+    const [a, b] = items as NB[];
+    expect([a.name, ...baTruong(a)], "lựa chọn HĐNS vừa đổi ở hàng nguồn bị nuốt").toEqual(["Backdrop", "Anh Tuấn", "HDNS", true]);
+    expect([b.name, b.unitPrice, ...baTruong(b)]).toEqual(["Backdrop", 250000, "Anh Tuấn", "VAT", true]);
+    expect(toastChu(), "dán sau khi huỷ cắt phải báo là CHÉP").toContain("KHÔNG phải di chuyển");
+  });
+
+  it("bỏ tích LƯU KHO của hàng đang cắt rồi dán: hàng nguồn giữ hạng mục lẫn lựa chọn vừa đổi", () => {
+    const items = [mk({ name: "Backdrop", unitPrice: 250000, ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }), mk({ name: "" })];
+    moLuoi(items);
+    chonKhoi(0, 3);
+    const cb = chepKhoi(true);
+    act(() => { oLuuKho(0).click(); });
+    expect((items[0] as NB).luuKho).toBe(false);
+    dan(1, cb);
+    const [a, b] = items as NB[];
+    expect([a.name, ...baTruong(a)], "bỏ tích lưu kho rồi dán: hàng nguồn bị xoá trắng").toEqual(["Backdrop", "Anh Tuấn", "VAT", false]);
+    expect([b.name, ...baTruong(b)]).toEqual(["Backdrop", "Anh Tuấn", "VAT", true]);
+  });
+
+  it("tích DUYỆT sau Ctrl+X cũng huỷ cắt: hàng nguồn không bị xoá trắng còn trơ dấu duyệt", () => {
+    const items = [mk({ name: "Backdrop", unitPrice: 250000, chungTu: "VAT" }), mk({ name: "" })];
+    function VoDuyet() {
+      const [, buoc] = useState(0);
+      return <GridTable items={items} usesDays={false} showDetail={false} numberSubs={false} editable internalNote={false}
+        cotNoiBo approveCol canApprove groupSubtotal={false} onChange={() => buoc((v) => v + 1)} />;
+    }
+    hop = document.createElement("div");
+    document.body.appendChild(hop);
+    root = createRoot(hop);
+    act(() => root!.render(<VoDuyet />));
+    chonKhoi(0, 3);
+    const cb = chepKhoi(true);
+    const duyet = hop.querySelector('tr[data-row="0"] td.col-approve input') as HTMLInputElement;
+    act(() => { duyet.click(); });
+    expect(!!items[0].approved).toBe(true);
+    dan(1, cb);
+    expect([items[0].name, !!items[0].approved], "hàng nguồn bị xoá trắng mà vẫn mang dấu duyệt").toEqual(["Backdrop", true]);
+    expect(items[1].name).toBe("Backdrop");
+  });
+});
+
+describe("bảng nội bộ — dán khối Hạng Mục + tiền mà clipboard KHÔNG mang ba trường: đổi tên thì về mặc định, cùng tên thì giữ", () => {
+  // Excel / Sheets NGOÀI (không payload nội bộ), lưới chính: không biết NS / chứng từ / lưu kho của hạng mục vừa
+  // dán, nên xét DANH TÍNH từng hàng. Tên đổi = hạng mục bị THAY → không được mang ba trường của hạng mục bị đè.
+  // Cùng tên = vẫn hạng mục đó (dán lại danh sách từ Excel để cập nhật giá) → giữ.
+  const danNgoai = (row: number, tsv: string, f = "name") => { const cb = clipGia(); cb.setData("text/plain", tsv); danVaoO(row, f, cb); };
+  const standee = () => mk({ name: "Standee", unit: "cái", unitPrice: 90000, ns: "Chị Lan", chungTu: "TM", luuKho: true });
+
+  it("'Màn LED ⇥ bộ ⇥ 1 ⇥ 5000000' từ Excel đè lên Standee (Chị Lan · TM · lưu kho): Màn LED không mang ba trường của Standee", () => {
+    const items = [standee()];
+    moLuoi(items);
+    danNgoai(0, "Màn LED\tbộ\t1\t5000000");
+    const a = items[0] as NB;
+    expect([a.name, a.unit, a.unitPrice]).toEqual(["Màn LED", "bộ", 5000000]);
+    expect(baTruong(a), "hạng mục mới mang NS / chứng từ / lưu kho của hạng mục bị đè").toEqual([null, null, false]);
+    expect([oChungTu(0).value, oLuuKho(0).checked], "ô chọn / ô tích trên màn không theo model").toEqual(["", false]);
+    bam({ key: "z", ctrlKey: true });
+    expect([items[0].name, ...baTruong(items[0] as NB)], "Ctrl+Z không trả lại ba trường").toEqual(["Standee", "Chị Lan", "TM", true]);
+  });
+
+  it("dán lại CÙNG tên để cập nhật giá (khác hoa thường, thừa khoảng trắng): giữ ba trường", () => {
+    const items = [standee()];
+    moLuoi(items);
+    danNgoai(0, "STANDEE \tcái\t1\t95000");
+    const a = items[0] as NB;
+    expect(a.unitPrice).toBe(95000);
+    expect(baTruong(a)).toEqual(["Chị Lan", "TM", true]);
+  });
+
+  it("khối nhiều hàng xét TỪNG hàng: hàng cùng tên giữ, hàng đổi tên về mặc định", () => {
+    const items = haiHang();
+    moLuoi(items);
+    danNgoai(0, "Backdrop\tm2\t1\t260000\nMàn LED\tbộ\t1\t5000000");
+    expect([items[0].unitPrice, ...baTruong(items[0] as NB)]).toEqual([260000, "Anh Tuấn", "VAT", true]);
+    expect([items[1].name, ...baTruong(items[1] as NB)], "Standee thành Màn LED mà vẫn Chị Lan · TM").toEqual(["Màn LED", null, null, false]);
+  });
+
+  it("khối trải tới cột NS: NS lấy theo khối, chứng từ / lưu kho của hạng mục bị đè về mặc định", () => {
+    // FIELDS của lưới thử: _stt · name · unit · quantity · unitPrice · notes · ns.
+    const items = [standee()];
+    moLuoi(items);
+    danNgoai(0, "Màn LED\tbộ\t1\t5000000\tgấp\tAnh Hải");
+    const a = items[0] as NB;
+    expect([a.name, a.notes]).toEqual(["Màn LED", "gấp"]);
+    expect(baTruong(a)).toEqual(["Anh Hải", null, false]);
+  });
+
+  it("dán LỆCH CỘT (bắt đầu ở ô ĐVT) — tên đích không đổi nên giữ; khối CHỈ chữ (Hạng Mục + ĐVT) cũng không đụng — biên của luật", () => {
+    const items = [standee(), mk({ name: "Backdrop", unitPrice: 250000, ns: "Anh Tuấn", chungTu: "VAT", luuKho: true })];
+    moLuoi(items);
+    danNgoai(0, "Màn LED\tbộ\t1\t5000000", "unit");
+    expect([items[0].name, ...baTruong(items[0] as NB)]).toEqual(["Standee", "Chị Lan", "TM", true]);
+    danNgoai(1, "Màn LED\tbộ");
+    expect([items[1].name, ...baTruong(items[1] as NB)], "chỉ sửa chữ mà mất ba trường").toEqual(["Màn LED", "Anh Tuấn", "VAT", true]);
+  });
+
+  it("khối bản xuất có chữ nhóm (lưới DỰNG LẠI hàng): hạng mục cùng tên giữ ba trường, hàng bị thay bằng hạng mục khác về mặc định", () => {
+    const items = [mk({ name: "NHÓM 1", kind: "section" } as Partial<NB>), mk({ name: "Backdrop", unit: "m2", unitPrice: 250000, ns: "Anh Tuấn", chungTu: "VAT", luuKho: true }), standee()];
+    moLuoi(items);
+    danNgoai(0, "A\tNHÓM 1\t\t\t\t\n1\tBackdrop\tm2\t1\t260000\t260000\n2\tMàn LED\tbộ\t1\t5000000\t5000000");
+    expect(items.map((x) => `${x.kind}:${x.name}:${x.unitPrice}`), "không đi đường dựng lại").toEqual(["section:NHÓM 1:0", "item:Backdrop:260000", "item:Màn LED:5000000"]);
+    expect(baTruong(items[1] as NB), "dán lại đúng Backdrop mà mất NS / chứng từ / lưu kho").toEqual(["Anh Tuấn", "VAT", true]);
+    expect(baTruong(items[2] as NB)).toEqual([null, null, false]);
+  });
+
+  it("dán nguyên hàng CÙNG tên từ LƯỚI CHÍNH (lấy giá theo báo giá): giữ ba trường — cùng luật với Excel ngoài", () => {
+    const chinh = [mk({ name: "Màn LED", unitPrice: 5500000 })];
+    const noiBo = [mk({ name: "Màn LED", unitPrice: 5000000, ns: "Chị Lan", chungTu: "TM", luuKho: true })];
+    function HaiLuoi() {
+      const [, buoc] = useState(0);
+      return (
+        <>
+          <div className="luoi-chinh"><GridTable items={chinh} usesDays={false} showDetail={false} numberSubs={false} editable internalNote groupSubtotal={false} onChange={() => buoc((v) => v + 1)} /></div>
+          <div className="luoi-noi-bo"><GridTable items={noiBo} usesDays={false} showDetail={false} numberSubs={false} editable internalNote={false} cotNoiBo groupSubtotal={false} onChange={() => buoc((v) => v + 1)} /></div>
+        </>
+      );
+    }
+    hop = document.createElement("div");
+    document.body.appendChild(hop);
+    root = createRoot(hop);
+    act(() => root!.render(<HaiLuoi />));
+    const ten = (lop: string) => hop!.querySelector(`.${lop} tr[data-row="0"] [data-f="name"]`) as HTMLTextAreaElement;
+    act(() => { ten("luoi-chinh").focus(); });
+    bam({ key: " ", code: "Space", shiftKey: true });
+    const cb = chepKhoi();
+    act(() => { ten("luoi-noi-bo").focus(); });
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: cb });
+    act(() => { ten("luoi-noi-bo").dispatchEvent(ev); });
+    const b = noiBo[0] as NB;
+    expect([b.name, b.unitPrice]).toEqual(["Màn LED", 5500000]);
+    expect(baTruong(b), "cùng hạng mục mà mất NS / chứng từ / lưu kho").toEqual(["Chị Lan", "TM", true]);
+  });
+});
