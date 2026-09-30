@@ -333,7 +333,13 @@ function GridTableInner(props: GridTableProps) {
   // theo nó. Chỉ tên (± Chi tiết / ĐVT) là đang sửa CHỮ — như chép riêng cột tên, không đụng ba trường.
   const laKhoiHangMuc = (fs: readonly string[] | undefined) => !!fs?.includes("name") && fs.some((f) => NUMERIC.has(f));
   const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
-  const snap = () => khoAnhRef.current.snap(items);
+  // MỐC UNDO = 1 ký tự cờ + JSON của items. Cờ là ô "Thành Tiền nhóm" LÚC CHỤP ("1" bật / "0" tắt): nó không
+  // nằm trong `items` nên trước đây Ctrl+Z / Esc / xoá-rồi-hoàn-tác trả nhóm SL > 1 về mà cờ đứng nguyên (hoặc
+  // bị đoán lại) — báo giá cũ "tắt + SL 3" bị bật + khoá hộ mà không lùi được (xem restore / khoiPhucCoVeMoc).
+  // Đọc qua ref vì mốc có thể được chụp từ bộ xử lý của lượt vẽ cũ.
+  const coNhomRef = useRef(groupSubtotal);
+  coNhomRef.current = groupSubtotal;
+  const snap = () => (coNhomRef.current ? "1" : "0") + khoAnhRef.current.snap(items);
   const pushUndo = () => { histRef.current.mark(snap()); };
   // Ghi mốc undo cho ô đang gõ — CHỈ ở ký tự đầu của phiên, và PHẢI gọi TRƯỚC khi ghi giá trị mới
   // vào items (onNumInput ghi thẳng vào model mỗi lần gõ, chụp sau là dính luôn số mới).
@@ -1156,16 +1162,31 @@ function GridTableInner(props: GridTableProps) {
   };
   // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
   // sheetSubtotalGrouped ép mult=1 → MẤT hệ số ×N → tổng ÂM THẦM SAI (như SPA autoEnableGroupSub).
-  const autoEnableGroupSub = (lo: number, hi: number) => {
+  //
+  // `truoc` (từ chupNhom, chụp TRƯỚC khi vùng bị ghi): chỉ bật khi thao tác này THẬT SỰ đưa vào một nhóm SL > 1
+  // — hàng vốn không phải nhóm mà thành nhóm, hoặc nhóm có SL khác lúc trước. Không có `truoc` thì quét như xưa
+  // (dùng khi CẢ HÀNG bị thay bằng dữ liệu mới: dán dựng lại từ Excel). Quét cả hàng mà không so sánh thì điền /
+  // dán một cột chữ (ĐVT, Ghi chú, Tên) qua hàng nhóm của báo giá cũ "tắt + SL 3" cũng bật ô và nhân tổng ×3 — và
+  // từ khi ô bị khoá, người dùng không còn cách bỏ tích.
+  const laNhom = (it?: { kind?: string }) => it?.kind === "section" || it?.kind === "subsection";
+  const chupNhom = (lo: number, hi: number): number[] => {
+    const r: number[] = [];
+    for (let i = lo; i <= hi; i++) r.push(i >= 0 && laNhom(items[i]) ? M.groupMult(items[i]) : 0);
+    return r;
+  };
+  const autoEnableGroupSub = (lo: number, hi: number, truoc?: number[]) => {
     if (groupSubtotal) return;
     for (let i = Math.max(0, lo); i <= hi && i < items.length; i++) {
       const it = items[i];
-      if ((it.kind === "section" || it.kind === "subsection") && M.groupMult(it) > 1) { onGroupSubtotal?.(true); return; }   // theo SỐ ĐANG HIỆN
+      if (!laNhom(it)) continue;
+      const mult = M.groupMult(it);   // theo SỐ ĐANG HIỆN
+      if (mult > 1 && (!truoc || truoc[i - lo] !== mult)) { onGroupSubtotal?.(true); return; }
     }
   };
   const fillDown = () => {
     const rc = rectOf(selRef.current); if (!rc || rc.r1 <= rc.r0) return;
     ghiSua();
+    const nhomTruoc = chupNhom(rc.r0, rc.r1);
     for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; if (RO_FIELDS.has(f)) continue; const top = items[rc.r0] as Record<string, unknown>; for (let r = rc.r0 + 1; r <= rc.r1; r++) {
       if (items[r].kind === "info") continue;
       const it = items[r] as Record<string, unknown>; it[f] = top[f]; boCoO(it, f);
@@ -1193,7 +1214,7 @@ function GridTableInner(props: GridTableProps) {
         if (coO(items[r])) { it.chungTu = ct; it.luuKho = lk; it.ns = ns; } else { it.chungTu = null; it.luuKho = false; it.ns = null; }
       }
     }
-    autoEnableGroupSub(rc.r0, rc.r1);
+    autoEnableGroupSub(rc.r0, rc.r1, nhomTruoc);
     recomputeAll(); onChange();
     syncActiveCell();   // Shift+↓ đã dời tiêu điểm xuống hàng DƯỚI — ô đó vừa bị điền đè (L6)
   };
@@ -1201,6 +1222,7 @@ function GridTableInner(props: GridTableProps) {
   const fillRight = () => {
     const rc = rectOf(selRef.current); if (!rc || rc.c1 <= rc.c0) return;
     ghiSua();
+    const nhomTruoc = chupNhom(rc.r0, rc.r1);
     for (let r = rc.r0; r <= rc.r1; r++) {
       if (items[r]?.kind === "info") continue;
       const it = items[r] as Record<string, unknown>; const src = FIELDS[rc.c0];
@@ -1221,7 +1243,7 @@ function GridTableInner(props: GridTableProps) {
         else if (fx) delete fx[f];
       }
     }
-    autoEnableGroupSub(rc.r0, rc.r1);
+    autoEnableGroupSub(rc.r0, rc.r1, nhomTruoc);
     recomputeAll(); onChange();
     syncActiveCell();   // Shift+→ đã dời tiêu điểm sang ô PHẢI — ô đó vừa bị điền đè (L6)
   };
@@ -1378,15 +1400,21 @@ function GridTableInner(props: GridTableProps) {
     // thành Y). Cùng họ với soát toàn diện L6.
     const trDangChon = (document.activeElement as HTMLElement | null)?.closest?.("tr[data-row]");
     const kDangChon = trDangChon && tableRef.current?.contains(trDangChon) ? items[parseInt(trDangChon.getAttribute("data-row") || "-1", 10)]?._k : undefined;
-    const arr = khoAnhRef.current.parse<ItemK[]>(json); arr.forEach((it) => { if (it._k == null) it._k = nextK(); });
-    const coNhomTruoc = coNhomNhanHeSo(items);
+    const arr = khoAnhRef.current.parse<ItemK[]>(json.slice(1)); arr.forEach((it) => { if (it._k == null) it._k = nextK(); });
     items.splice(0, items.length, ...arr);
-    // Ô "Thành Tiền nhóm" KHÔNG nằm trong ảnh chụp hoàn tác (chỉ có items) nên lùi/tiến có thể trả về một
-    // nhóm SL > 1 trong khi ô đã bị bỏ tích (vd SL nhóm 2 → đưa về 1 → bỏ tích → Ctrl+Z): tổng ÂM THẦM SAI.
-    // Bật lại NGAY khi lượt lùi/tiến vừa ĐƯA nhóm SL > 1 vào. Điều kiện "trước đó chưa có" là cố ý: báo
-    // giá cũ đã lưu ở trạng thái tắt + nhóm SL > 1 thì Ctrl+Z một sửa đổi không liên quan KHÔNG được bật
-    // ô (bật là đổi tổng của báo giá cũ — chờ chủ repo quyết có vá dữ liệu hay không).
-    if (!groupSubtotal && !coNhomTruoc && coNhomNhanHeSo(items)) tuBatNhomGianTiep();
+    // Ô "Thành Tiền nhóm" nằm trong MỐC (ký tự đầu, xem snap) nên lùi/tiến trả nó về đúng trạng thái lúc chụp
+    // KHI mốc có nhóm SL > 1 — chỉ khi đó cờ mới đổi được tổng (SL nhóm ≤ 1 thì hệ số vẫn ×1, để yên cờ người
+    // dùng vừa tự đặt):
+    //  · mốc ĐANG BẬT mà ô đã bị bỏ tích (SL nhóm 2 → về 1 → bỏ tích → Ctrl+Z): bật lại + nói vì sao, kẻo tổng
+    //    sai im lặng;
+    //  · mốc ĐANG TẮT (chỉ có ở báo giá cũ đã lưu "tắt + nhóm SL > 1") mà ô đã bị bật giữa chừng — bởi tự bật
+    //    khi gõ / điền, hoặc do người dùng tích: trả về TẮT, đúng tổng đã lưu. Không trả thì "xoá nhóm rồi
+    //    Ctrl+Z" là bật + khoá ô và nhân tổng ×N, và người dùng không còn cách quay lại.
+    if (coNhomNhanHeSo(items)) {
+      const batLucChup = json.charAt(0) === "1";
+      if (batLucChup && !groupSubtotal) tuBatNhomGianTiep();
+      else if (!batLucChup && groupSubtotal) onGroupSubtotal?.(false);
+    }
     const last = Math.max(0, items.length - 1);
     const sel = selRef.current;
     if (sel) { sel.anchor.row = Math.min(sel.anchor.row, last); sel.focus.row = Math.min(sel.focus.row, last); }
@@ -1566,9 +1594,10 @@ function GridTableInner(props: GridTableProps) {
       };
       if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {   // có vùng chọn → fill ra TOÀN vùng (Excel)
         e.preventDefault(); pushUndo();
+        const nhomTruoc = chupNhom(rc.r0, rc.r1);
         for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, ...dich1(r, FIELDS[c]), soThoNguon(0), quGoc(0, 0), bao); coSlTheoNguon(r, 0, FIELDS[c], fSrc1); }   // GRID-15: STT là ô tính, không ghi
         if (movingCut) finishCutMove(rc);
-        autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
+        autoEnableGroupSub(rc.r0, rc.r1, nhomTruoc);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
         syncActiveCell();   // ô đang focus nằm trong vùng (Shift+↓ đã dời tiêu điểm xuống) — L6
         baoSoDan(); baoChiChep();
@@ -1777,6 +1806,7 @@ function GridTableInner(props: GridTableProps) {
     const vaiDich = Array.from({ length: Math.max(...rows.map((row) => row.length)) }, (_, c) => truongDich(c) ?? "");
     const xetDanhTinh = cotNoiBo && !blockNoiBo && (internal ? sameBlock && thayHangMuc && laKhoiHangMuc(internal.fields) : laKhoiHangMuc(vaiDich));
     const tenTruoc = xetDanhTinh ? rows.map((_, r) => tenHangMuc(items[startRow + r]?.name)) : null;
+    const nhomTruoc = chupNhom(startRow, startRow + rows.length - 1);   // để tự bật CHỈ khi khối đưa vào nhóm SL > 1
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       const it = items[ri] as Record<string, unknown>;
@@ -1829,7 +1859,7 @@ function GridTableInner(props: GridTableProps) {
     if (sameBlock && laCatCuaLuoi) {
       finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs);
     }
-    autoEnableGroupSub(startRow, startRow + rows.length - 1);
+    autoEnableGroupSub(startRow, startRow + rows.length - 1, nhomTruoc);
     recomputeAll(); onChange();
     if (blockImgs) setImgVer((v) => v + 1);   // ô ảnh không tự vẽ lại theo items (xem addImages)
     selRef.current = { anchor: { row: startRow, field: FIELDS[dc0] }, focus: { row: startRow + rows.length - 1, field: FIELDS[dc1] } };
@@ -2149,7 +2179,13 @@ function GridTableInner(props: GridTableProps) {
           // Phiên sửa đã bị huỷ → bỏ luôn mốc undo của nó, nếu không Ctrl+Z kế tiếp chỉ "nuốt"
           // một nhịp rỗng thay vì lùi thao tác thật trước đó.
           const m = editUndoRef.current;
-          if (m && m.i === i && m.f === f) { histRef.current.dropMark(); editUndoRef.current = null; }
+          if (m && m.i === i && m.f === f) {
+            const moc = histRef.current.dropMark(); editUndoRef.current = null;
+            // Phiên gõ SL nhóm đã tự BẬT ô (báo giá cũ "tắt + SL 3": gõ '5' → bật) thì huỷ phiên phải trả luôn cờ về
+            // như mốc của nó — không thì SL về 3 mà ô kẹt bật + khoá. Chỉ khi nhóm SL > 1 vẫn còn (SL ≤ 1 thì cờ
+            // không đổi tổng, giữ như cũ).
+            if (moc !== undefined && moc.charAt(0) === "0" && groupSubtotal && coNhomNhanHeSo(items)) onGroupSubtotal?.(false);
+          }
         }
         lockCell(esc);
         selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
@@ -2873,6 +2909,9 @@ function GridTableInner(props: GridTableProps) {
   const datVaoDock = (nut: React.ReactNode) =>
     anThanhThem ? null : dock === undefined ? nut : dock ? createPortal(nut, dock) : null;
 
+  // Ô "Thành Tiền nhóm" đang khoá (xem khối vẽ ô ở cuối) — dùng cả để dàn dòng lý do và nhãn "Hiện ảnh" sau nó.
+  const khoaNhom = editable && !!onGroupSubtotal && khoaBatNhom(groupSubtotal, items);
+
   return (
     <>
       {fxBar && (
@@ -3036,7 +3075,7 @@ function GridTableInner(props: GridTableProps) {
         // giữ nguyên trạng thái đang có. `disabled` chặn chuột/bàn phím; onChange vẫn tự chặn phòng khi một
         // đường nào đó (kiểm thử, trợ năng) bắn được sự kiện vào ô đã khoá — và nó nhìn items SỐNG chứ không
         // nhìn `khoa` chụp lúc vẽ: gõ SL nhóm xong, vẽ lại còn hoãn 180ms, ô chưa kịp `disabled`.
-        const khoa = khoaBatNhom(groupSubtotal, items);
+        const khoa = khoaNhom;
         return (
           <>
             <label className={`toggle-totals gf-group-sub${khoa ? " gf-group-sub-khoa" : ""}`} title={khoa ? LY_DO_KHOA_NHOM : undefined}
@@ -3048,12 +3087,15 @@ function GridTableInner(props: GridTableProps) {
             </label>
             {/* Vùng báo trạng thái LUÔN có mặt (rỗng khi không khoá): trình đọc màn hình chỉ đọc lên chữ ĐỔI trong một
                 vùng đã có sẵn, còn vùng mới chèn vào thì bỏ sót — mà ô tự khoá giữa phiên (gõ SL nhóm ở chỗ khác). */}
-            <span id={idLyDoKhoaNhom} role="status" className="gf-group-sub-ly-do" style={{ margin: khoa ? "2px 0 8px 8px" : 0, fontSize: 12, color: "var(--muted)" }}>{khoa ? LY_DO_KHOA_NHOM : ""}</span>
+            {/* Khi khoá, dòng lý do là MỘT DÒNG RIÊNG dưới nhãn (thụt thẳng chữ nhãn): để inline thì ở điện thoại 375px nó quấn
+                dòng lệch dưới ô tích và nhãn "Hiện ảnh" chen vào ngay sau chữ cuối của lý do. */}
+            <span id={idLyDoKhoaNhom} role="status" className="gf-group-sub-ly-do"
+              style={khoa ? { display: "block", margin: "0 0 8px 24px", fontSize: 12, color: "var(--muted)" } : { margin: 0, fontSize: 12, color: "var(--muted)" }}>{khoa ? LY_DO_KHOA_NHOM : ""}</span>
           </>
         );
       })()}
       {editable && onShowImages && (
-        <label className="toggle-totals gf-show-images" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px 16px", fontSize: 13, cursor: "pointer" }}>
+        <label className="toggle-totals gf-show-images" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: khoaNhom ? "2px 0 8px" : "2px 0 8px 16px", fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" checked={!!showImages} onChange={(e) => onShowImages(e.target.checked)} />
           <span>Hiện cột <strong>Hình ảnh</strong> (chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span>
         </label>
