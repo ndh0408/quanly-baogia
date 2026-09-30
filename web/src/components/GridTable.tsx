@@ -79,6 +79,10 @@ type BaoDan = { moHo: string[]; khongSo: string[]; boiSo: [string, number][] };
  *  của tab còn chạy bản trước chỉ có hai phần tử — bản đó chỉ gửi khi khối có cột NS, NS đi theo ô. */
 type NoiBoHang = [string | null, boolean, (string | null)?];
 const NOI_BO_MAC_DINH: NoiBoHang = [null, false, null];
+/** Danh tính của hạng mục khi dán một khối KHÔNG mang ba trường nội bộ (Excel ngoài, lưới chính): cùng danh
+ *  tính = vẫn hạng mục đó. Bỏ khoảng trắng thừa / xuống dòng, không phân biệt hoa thường hay dấu dựng sẵn / tổ
+ *  hợp — danh sách chép lại từ Excel để sửa giá hay lệch đúng mấy thứ đó mà vẫn là một hạng mục. */
+const tenHangMuc = (v: unknown) => String(v ?? "").normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote", "ns"]);
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
@@ -337,6 +341,12 @@ function GridTableInner(props: GridTableProps) {
     pushUndo(); editUndoRef.current = { i, f };
     cancelCut();   // gõ vào bảng = Excel bỏ chế độ cắt; dán sau đó chỉ CHÉP, không xoá nội dung vừa gõ (L7)
   };
+  // Mốc hoàn tác của MỘT thao tác sửa bảng không qua gõ (ô chọn CHỨNG TỪ, ô tích LƯU KHO / DUYỆT, Delete,
+  // Ctrl+D / Ctrl+R, thêm / xoá ảnh) — và như gõ (markEditUndo), sửa bảng là huỷ chế độ cắt đang chờ. Payload
+  // cắt chốt nội dung LÚC Ctrl+X; để cắt sống qua lần sửa thì dán xong finishCutMove xoá hàng nguồn còn đích
+  // nhận bản chụp CŨ: cắt Backdrop, đổi chứng từ của nó sang HĐNS rồi dán → HĐNS mất hẳn, không một lời báo
+  // (soát vòng 2). Huỷ thì dán sau đó chỉ CHÉP (onPaste báo rõ), nguồn giữ đúng thứ vừa sửa.
+  const ghiSua = () => { pushUndo(); cancelCut(); };
   /** Ô (i, f) đã có GÕ trong phiên này chưa — mốc undo của phiên chỉ đặt ở ký tự đầu (markEditUndo). */
   const daGoO = (i: number, f: string) => { const m = editUndoRef.current; return !!m && m.i === i && m.f === f; };
   // dongBo: thao tác vừa GHI ĐÈ model hàng loạt (dán khối / dựng lại) — lượt vẽ kế tiếp kéo ô đang giữ
@@ -866,6 +876,7 @@ function GridTableInner(props: GridTableProps) {
     const inEl = fxInputRef.current; const sel = selRef.current; if (!inEl || !sel) return;
     const { row, field } = sel.anchor;
     if (!editable || field === "_amount" || field === "_stt") return;
+    cancelCut();   // chốt ô qua thanh công thức cũng là sửa bảng — xem ghiSua
     commitCell(row, field, inEl.value, true); recomputeAll(); clearActiveRefs(); onChange();   // thanh fx không ghi live → chuỗi y nguyên = không sửa
     if (move) moveTo(row + 1, field, false);
   };
@@ -1092,7 +1103,8 @@ function GridTableInner(props: GridTableProps) {
   // HÀNG NGUỒN TÌM THEO `_k` (soát toàn diện L7): chỉ số lưu lúc Ctrl+X lệch ngay khi bảng chèn/xoá
   // hàng — dán lên hàng NHÓM tự chèn hàng trống dưới nhóm, nguồn nằm dưới trôi xuống, xoá theo chỉ số
   // cũ là xoá trắng hạng mục KHÁC. Hàng nguồn đã bị xoá khỏi bảng thì thôi. Các thao tác sửa bảng
-  // khác (gõ, chèn/xoá hàng) huỷ hẳn chế độ cắt như Excel — xem cancelCut ở markEditUndo, removeRow…
+  // khác (gõ, ô chọn / ô tích, Delete, Ctrl+D, chèn/xoá hàng…) huỷ hẳn chế độ cắt như Excel — xem
+  // cancelCut ở markEditUndo, ghiSua, removeRow…
   // anhDaSang: ảnh của khối THỰC SỰ đã được ghi sang đích (soát toàn diện L21). cp.images chỉ chốt lúc
   // Ctrl+X; tới lúc dán mà cột Hình ảnh đã tắt, hay khối rơi vào nhánh 1 ô (không bao giờ chép ảnh) thì
   // ảnh không sang được — xoá ở nguồn là ảnh mất hẳn. Không sang → ảnh ở lại hàng nguồn.
@@ -1135,7 +1147,7 @@ function GridTableInner(props: GridTableProps) {
   };
   const fillDown = () => {
     const rc = rectOf(selRef.current); if (!rc || rc.r1 <= rc.r0) return;
-    pushUndo();
+    ghiSua();
     for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; if (RO_FIELDS.has(f)) continue; const top = items[rc.r0] as Record<string, unknown>; for (let r = rc.r0 + 1; r <= rc.r1; r++) {
       if (items[r].kind === "info") continue;
       const it = items[r] as Record<string, unknown>; it[f] = top[f]; boCoO(it, f);
@@ -1170,7 +1182,7 @@ function GridTableInner(props: GridTableProps) {
   // Ctrl/⌘+R — chép ô TRÁI NHẤT của vùng sang các cột còn lại (Excel: Fill Right).
   const fillRight = () => {
     const rc = rectOf(selRef.current); if (!rc || rc.c1 <= rc.c0) return;
-    pushUndo();
+    ghiSua();
     for (let r = rc.r0; r <= rc.r1; r++) {
       if (items[r]?.kind === "info") continue;
       const it = items[r] as Record<string, unknown>; const src = FIELDS[rc.c0];
@@ -1198,7 +1210,7 @@ function GridTableInner(props: GridTableProps) {
   // Delete/Backspace khi đang CHỌN ô (không sửa) → xoá sạch nội dung vùng chọn, như Excel.
   const clearRange = () => {
     const rc = rectOf(selRef.current); if (!rc) return;
-    pushUndo();
+    ghiSua();
     const noiBoCuaHangMuc = cotNoiBo && laKhoiHangMuc(FIELDS.slice(rc.c0, rc.c1 + 1));
     for (let r = rc.r0; r <= rc.r1; r++) {
       const it = items[r] as Record<string, unknown> | undefined; if (!it) continue;
@@ -1611,6 +1623,21 @@ function GridTableInner(props: GridTableProps) {
       // Thành Tiền của khối); ca không chắc → giữ công thức gốc + cờ _fxWarn (ô ĐỎ để sửa tay).
       retargetPastedFormulas(rebuilt, rows, roles, { webLetter: (role) => letterOf(role) || null, baseRow: startRow });
       const built = rebuilt.map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
+      // Bảng nội bộ: hàng dựng lại là object MỚI nên NS · CHỨNG TỪ · LƯU KHO của hàng bị thay mất hết, kể cả khi
+      // khối dán lại ĐÚNG hạng mục đó để sửa giá. Clipboard ngoài không chở ba trường → xét danh tính như đường
+      // dán khối bên dưới: CÙNG tên thì vẫn là hạng mục đó, giữ; khác tên thì về mặc định; hàng nhóm / dòng thông
+      // tin không có ô nào nên không mang gì. NS thì theo khối khi khối có cột đó (vai trò "ns" của sơ đồ đích).
+      if (cotNoiBo) {
+        const iNs = roles.indexOf("ns");
+        const coO = (x: Record<string, unknown> | undefined) => !!x && x.kind !== "section" && x.kind !== "subsection" && x.kind !== "info";
+        built.forEach((b, k) => {
+          const bb = b as Record<string, unknown>, cu = items[startRow + k] as Record<string, unknown> | undefined;
+          if (!coO(bb)) { bb.chungTu = null; bb.luuKho = false; bb.ns = null; return; }
+          const giu = cu && coO(cu) && tenHangMuc(cu.name) === tenHangMuc(bb.name) ? cu : null;   // hàng cũ CÙNG hạng mục
+          bb.chungTu = giu ? (giu.chungTu ?? null) : null; bb.luuKho = giu ? !!giu.luuKho : false;
+          if (!(iNs >= 0 && iNs < (rows[k]?.length ?? 0))) bb.ns = giu ? (giu.ns ?? null) : null;
+        });
+      }
       items.splice(startRow, rows.length, ...built);
       if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
       autoEnableGroupSub(startRow, startRow + built.length - 1);
@@ -1703,16 +1730,23 @@ function GridTableInner(props: GridTableProps) {
       return fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : vaiNgoai ? (vaiNgoai[c] || null) : (FIELDS[startCol + c] ?? null);
     };
     // NS / chứng từ / lưu kho của từng hàng (onCopyCut gửi khi khối mang cái hạng mục — laKhoiHangMuc).
-    // Đích phải là bảng nội bộ — lưới chính không có ba cột này. Khối mang hạng mục mà KHÔNG chở ba trường
-    // (chép từ lưới chính / lưới không bật cột nội bộ) vẫn là THAY hạng mục của hàng đích: giữ NS / chứng
-    // từ cũ là gắn chứng từ của hạng mục bị đè lên hạng mục vừa dán → về mặc định.
+    // Đích phải là bảng nội bộ — lưới chính không có ba cột này.
     // CHỈ khi hạng mục của hàng đích THẬT SỰ bị thay: cột Hạng Mục của khối rơi đúng vào cột Hạng Mục đích
     // (soát vòng 1). Dán LỆCH CỘT kiểu Excel — khối Hạng Mục → Đơn giá bắt đầu ở ô ĐVT — thì tên nguồn rơi
     // vào ĐVT, tên đích giữ nguyên: đích vẫn là hạng mục cũ, nhận chứng từ của hạng mục khác là sai.
     const cotTenNguon = internal?.fields?.indexOf("name") ?? -1;
     const thayHangMuc = cotTenNguon >= 0 && truongDich(cotTenNguon) === "name";
-    const noiBoTuNguon = sameBlock && cotNoiBo && thayHangMuc ? (internal?.noiBo ?? null) : null;
-    const blockNoiBo: NoiBoHang[] | null = noiBoTuNguon ?? (sameBlock && cotNoiBo && thayHangMuc && laKhoiHangMuc(internal?.fields) ? rows.map(() => NOI_BO_MAC_DINH) : null);
+    const blockNoiBo: NoiBoHang[] | null = sameBlock && cotNoiBo && thayHangMuc ? (internal?.noiBo ?? null) : null;
+    // Khối mang hạng mục mà clipboard KHÔNG chở ba trường — lưới chính / lưới không bật cột nội bộ, tab chạy bản
+    // cũ, và Excel / Sheets NGOÀI (xét theo cột ĐÍCH: có cột rơi đúng Hạng Mục, kèm cột tiền) — thì không biết
+    // ba trường của hạng mục vừa dán, nên xét DANH TÍNH từng hàng (tenHangMuc): tên sau khi dán khác tên trước
+    // → hạng mục bị THAY, giữ NS / chứng từ cũ là gắn chứng từ của hạng mục bị đè lên hạng mục mới → về mặc
+    // định; cùng tên → vẫn hạng mục đó (dán lại danh sách để cập nhật giá) → giữ. Bản trước: khối ngoài không
+    // bao giờ chạm ba trường ("Màn LED ⇥ bộ ⇥ 1 ⇥ 5000000" đè lên Standee vẫn "Chị Lan · TM · lưu kho", soát
+    // vòng 2), còn khối từ lưới chính thì xoá cả khi dán lại đúng hạng mục đó.
+    const vaiDich = Array.from({ length: Math.max(...rows.map((row) => row.length)) }, (_, c) => truongDich(c) ?? "");
+    const xetDanhTinh = cotNoiBo && !blockNoiBo && (internal ? sameBlock && thayHangMuc && laKhoiHangMuc(internal.fields) : laKhoiHangMuc(vaiDich));
+    const tenTruoc = xetDanhTinh ? rows.map((_, r) => tenHangMuc(items[startRow + r]?.name)) : null;
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       const it = items[ri] as Record<string, unknown>;
@@ -1733,9 +1767,11 @@ function GridTableInner(props: GridTableProps) {
         it.chungTu = ct ?? null; it.luuKho = !!lk;
         if (ns !== undefined) it.ns = ns;   // khối có cột NS thì ô bên dưới ghi lại đúng chữ này
       }
+      let ghiNs = false;   // hàng này có ô NS trong khối → NS theo khối, xét danh tính bên dưới không xoá nó
       cells.forEach((val, c) => {
         const f = truongDich(c);
         if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
+        if (f === "ns") ghiNs = true;
         { const ci = FIELDS.indexOf(f); if (ci < cotDau) cotDau = ci; if (ci > cotCuoi) cotCuoi = ci; }
         // Khối copy TRONG lưới → biết được nó dời bao nhiêu hàng/cột, dịch tham chiếu như Excel.
         // (Khối dán từ file Excel NGOÀI đi đường riêng: retargetPastedFormulas dò mốc neo.)
@@ -1750,6 +1786,7 @@ function GridTableInner(props: GridTableProps) {
         pasteCellVal(ri, f, val, dR, dC, soThoNguon(c), quGoc(r, c) ?? quDan, bao);
         coSlTheoNguon(ri, r, f, internal?.fields?.[c]);
       });
+      if (tenTruoc && tenHangMuc(it.name) !== tenTruoc[r]) { it.chungTu = null; it.luuKho = false; if (!ghiNs) it.ns = null; }
       // Hàng vừa THÀNH nhóm / nhóm con / dòng thông tin (khối mang loại hàng, vd chép STT + Hạng Mục của
       // một nhóm) không có ô NS · chứng từ · lưu kho nào: giữ giá trị của hạng mục bị đè là để chúng sống
       // ẨN trên hàng nhóm — vẫn được Lưu, vẫn tính là "bảng có dữ liệu".
@@ -1974,6 +2011,7 @@ function GridTableInner(props: GridTableProps) {
           const raw = ae!.value;
           const m = editUndoRef.current;
           if (!(m && m.i === i && m.f === f)) pushUndo();   // phiên gõ đã có mốc thì snapshot cũ phủ đủ
+          cancelCut();   // điền cả vùng là sửa bảng (F2 rồi Ctrl+Enter không qua markEditUndo) — xem ghiSua
           for (let r = rcFill.r0; r <= rcFill.r1; r++) { if (items[r]?.kind === "info") continue; for (let c = rcFill.c0; c <= rcFill.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; commitCell(r, FIELDS[c], raw); } }   // GRID-15: bỏ cột STT (ô tính)
           recomputeAll(); onChange(); doiMocEscTaiCho(ae, i, f); lockCell(ae); paintSel();   // giữ nguyên vùng chọn như Excel
           return;
@@ -2378,16 +2416,16 @@ function GridTableInner(props: GridTableProps) {
   // SOÁT (`checked`, xem dataCells): `defaultChecked` chỉ ghi thuộc tính HTML, mà ô người dùng đã
   // bấm thì trình duyệt thôi nghe thuộc tính đó (dirty checkedness) → sau Ctrl+Z ô vẫn hiện ✓ trong
   // khi model đã bỏ duyệt, Lưu là lưu ngược cái đang thấy. onChange ở đây luôn vẽ lại nên ô bám model.
-  const toggleApprove = (i: number, checked: boolean) => { pushUndo(); const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
+  const toggleApprove = (i: number, checked: boolean) => { ghiSua(); const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
   xuLyRef.current = {
     so: onNumInput, chu: onTxtInput, ta: onTaInput,
     tenNhom: (i, el) => { cancelCut(); (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); },
     tenHang: (i, el) => { editingRef.current = true; markEditUndo(i, "name"); (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); nameSuggest(i, el); },
     anh: (i, el) => { addImages(i, el.files); el.value = ""; },
     duyet: toggleApprove,
-    // Tích / chọn là MỘT bước hoàn tác (như Duyệt) và vẽ lại ngay để ô bám model.
-    luuKho: (i, checked) => { pushUndo(); (items[i] as Record<string, unknown>).luuKho = checked; onChange(); },
-    chungTu: (i, v) => { pushUndo(); (items[i] as Record<string, unknown>).chungTu = v || null; onChange(); },
+    // Tích / chọn là MỘT bước hoàn tác (như Duyệt) và vẽ lại ngay để ô bám model; huỷ chế độ cắt như gõ (ghiSua).
+    luuKho: (i, checked) => { ghiSua(); (items[i] as Record<string, unknown>).luuKho = checked; onChange(); },
+    chungTu: (i, v) => { ghiSua(); (items[i] as Record<string, unknown>).chungTu = v || null; onChange(); },
     bam: (vai, i, el) => {
       if (vai === "xoa-dong") removeRow(i);
       else if (vai === "xem-tt") revealAmount(i, el);
@@ -2715,12 +2753,12 @@ function GridTableInner(props: GridTableProps) {
     const them = out.slice(0, IMG_MAX - cur.length);
     if (them.length < out.length) toast(`Tối đa ${IMG_MAX} ảnh mỗi ô — bỏ ${out.length - them.length} ảnh thừa`, "info");
     if (!them.length) return;
-    pushUndo(); (items[j] as Record<string, unknown>).images = [...cur, ...them]; onChange(); setImgVer((v) => v + 1);
+    ghiSua(); (items[j] as Record<string, unknown>).images = [...cur, ...them]; onChange(); setImgVer((v) => v + 1);
   };
   const removeImage = (i: number, k: number) => {
     if (!editable) return;
     const cur = (items[i].images || []) as string[];
-    pushUndo(); (items[i] as Record<string, unknown>).images = cur.filter((_, idx) => idx !== k); onChange(); setImgVer((v) => v + 1);
+    ghiSua(); (items[i] as Record<string, unknown>).images = cur.filter((_, idx) => idx !== k); onChange(); setImgVer((v) => v + 1);
   };
   const imagesCell = (i: number) => {
     const imgs = (items[i].images || []) as string[];
