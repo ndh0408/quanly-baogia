@@ -2099,6 +2099,13 @@ export async function duplicateQuote(req: Request) {
   // Ba cột nội bộ (4e24308) chia hai phe: LƯU KHO là TRẠNG THÁI công việc của dự án cũ (hàng đó đã vào kho
   // chưa) — như duyệt / đã trả, bản sao chưa có gì vào kho nên CẮT; còn NS (ai ứng / nguồn chi) và CHỨNG
   // TỪ (VAT / HĐNS / TM) là PHÂN LOẠI của dòng chi phí, dự án mới làm lại hạng mục đó vẫn theo cách ấy nên GIỮ.
+  // Hàm này chạy cho CẢ HAI nút: "Nhân bản" (mã dự án mới) và "Bản mới" (sameProject — v2/v3 CÙNG mã dự án,
+  // QuoteList gọi duplicateQuote(id, true)). Ở "Bản mới" hàng có thể VẪN đang nằm trong kho thật, nhưng LƯU KHO
+  // là trạng thái thật của hạng mục đúng như ĐÃ THANH TOÁN — mà tiền của hạng mục đó cũng đã chi thật, vậy mà
+  // "Bản mới" vẫn cắt đã trả / duyệt (chốt: tests/mn-nhan-ban-cat-trang-thai-bang-noi-bo.test.js): bản v2 theo
+  // dõi trạng thái lại từ đầu. Nên LƯU KHO cắt theo cùng luật — giữ một cắt một là bản v2 hiện "đã lưu kho"
+  // cạnh "chưa thanh toán" cho cùng một hàng. Muốn "Bản mới" mang trạng thái sang thì mang CẢ HAI, ở đúng hàm
+  // này (tests/vdb-noi-bo-ba-truong-luu-tai-lai.test.js chốt hai thứ đi cùng nhau, cho cả hai nút).
   const catTrangThai = (it: any) => {
     const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, luuKho: _lk, ...con } = it || {};
     return con;
