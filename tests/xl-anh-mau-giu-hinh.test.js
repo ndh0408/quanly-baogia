@@ -41,8 +41,9 @@
 // · Mẫu kế thừa Colorfull muốn TẮT cờ bằng `{ ...clofull_decor, anhMau: null }`. Tham số mặc định
 //   `tuyChon = {}` của `chupAnhMau` chỉ thay `undefined`, nên mã cũ đọc `null.giuTiLeAnhGoc` → TypeError
 //   ngay ở ảnh mẫu đầu tiên, CẢ lần xuất hỏng (500). Nay `null` = không khai.
-// · ĐỌC KHÔNG RA kích thước ảnh ⇒ giữ hình tệp mẫu như không bật cờ. Thử năm kiểu: PNG cụt, JPEG mang
-//   đuôi .png, PNG khai cao 0, JPEG cụt trước khối SOF, đuôi .emf. Ca "JPEG mang đuôi .png" lộ một lỗi thật:
+// · ĐỌC KHÔNG RA kích thước ảnh ⇒ giữ hình tệp mẫu như không bật cờ. Thử bảy kiểu: PNG cụt, JPEG mang
+//   đuôi .png, PNG khai cao 0, JPEG cụt trước khối SOF, PNG mang đuôi .jpeg, PNG
+//   có chữ ký mà khối đầu không phải IHDR, đuôi .emf. Ca "JPEG mang đuôi .png" lộ một lỗi thật:
 //   `imgDims` không soát chữ ký tệp, đọc 8 byte của khối JFIF ra 65536 × 4292542531px ⇒ logo bị ép còn
 //   0,0012px bề ngang. Nay `imgDims` chỉ đọc khi byte đúng là định dạng mà đuôi khai.
 // · Ảnh JPEG mang đuôi .jpeg / .jpg / .JPG, lưu thành tệp mẫu rồi NẠP LẠI (ExcelJS lấy đuôi từ tên tệp trong
@@ -50,9 +51,10 @@
 //   nhỏ 160×120 nằm trong khối Exif đứng trước nó.
 // ĐỎ TRÊN MÃ CŨ (a410028, đo 2026-09-29): "tuyChon = null" và ca xuất thật `anhMau: null` (TypeError), ca
 // "JPEG mang đuôi .png" (bề ngang 0,0012px). Đột biến trên mã đã sửa (mỗi lần một chỗ, chạy tệp này):
-//   · `tiLeAnhGoc` trả `d ? d.w / d.h : 1` (đọc không ra coi như vuông) → cả năm ca "đọc KHÔNG ra" đỏ;
+//   · `tiLeAnhGoc` trả `d ? d.w / d.h : 1` (đọc không ra coi như vuông) → cả bảy ca "đọc KHÔNG ra" đỏ;
 //   · bỏ phép đổi jpg → jpeg → ca .jpg và .JPG đỏ; bỏ `.toLowerCase()` → ca .JPG đỏ;
-//   · `imgDims` bỏ soát chữ ký PNG → ca "JPEG mang đuôi .png" đỏ;
+//   · `imgDims` bỏ soát chữ ký PNG → ca "JPEG mang đuôi .png" đỏ; bỏ chốt SOI của JPEG → ca "PNG mang đuôi
+//     .jpeg" đỏ; bỏ chốt khối đầu IHDR → ca "PNG … khối đầu không phải IHDR" đỏ;
 //   · `imgDims` quét JPEG từng byte thay vì nhảy qua từng khối → ba ca JPEG đỏ (vớ SOF của ảnh thu nhỏ, 4:3);
 //     đảo cao / rộng khi đọc SOF → ba ca JPEG đỏ (1:3);
 //   · `tiLeAnhGoc` bỏ điều kiện cao > 0 → ca "PNG khai cao 0" đỏ: tỉ lệ vô cực, neo ra `col 16383, colOff
@@ -240,8 +242,9 @@ describe("logo GIA NGUYỄN: neo KHÔNG đổi — nó đi theo khối \"From:\"
   }
 });
 
-/** PNG hợp lệ w×h (một màu) — đủ để ExcelJS nhúng và ghi ra tệp. */
-function png(w, h) {
+/** PNG hợp lệ w×h (một màu) — đủ để ExcelJS nhúng và ghi ra tệp. `khoiDau: [loại, dữ liệu]` chèn một khối
+ *  TRƯỚC IHDR (PNG sai quy cách: khối đầu không phải IHDR). */
+function png(w, h, { khoiDau } = {}) {
   const chunk = (type, data) => {
     const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
     const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
@@ -253,6 +256,7 @@ function png(w, h) {
   const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0x80)]);
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    ...(khoiDau ? [chunk(khoiDau[0], Buffer.from(khoiDau[1], "latin1"))] : []),
     chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(Buffer.concat(Array.from({ length: h }, () => row)))), chunk("IEND", Buffer.alloc(0)),
   ]);
 }
@@ -397,6 +401,14 @@ describe("chupAnhMau / datLaiAnhMau: mọi kiểu neo, cột bị ẩn, hàng đ
     ["JPEG mang đuôi .png (khai sai đuôi)", { buffer: jpeg(60, 20), extension: "png" }],
     ["PNG khai cao 0 (IHDR 40×0)", { buffer: png(40, 0), extension: "png" }],
     ["JPEG cụt — đứt trước khối SOF", { buffer: jpeg(60, 20).subarray(0, 60), extension: "jpg" }],
+    // Hai ca dưới khoá hai chốt chữ ký còn lại của `imgDims` (soát lượt v1). Mỗi ca dựng sao cho bỏ chốt thì
+    // `imgDims` đọc ra một kích thước RÁC thay vì null:
+    // · PNG mang đuôi .jpeg: bề ngang 65472 = 0x0000FFC0 đặt cặp FF C0 ở byte 18–19. Bỏ chốt SOI (FF D8) thì vòng
+    //   quét marker coi đó là khối SOF0, đọc ra 512 × 264px (tỉ lệ ≈ 1,94) — lỗi 0,0012px theo chiều ngược lại.
+    // · PNG có chữ ký nhưng khối đầu là tEXt "Software…": bỏ chốt IHDR thì byte 16–23 ("Software") bị đọc làm
+    //   1399809652 × 2002875013px (tỉ lệ ≈ 0,70).
+    ["PNG mang đuôi .jpeg (khai sai đuôi; có cặp FF C0 trong IHDR)", { buffer: png(0xffc0, 1), extension: "jpeg" }],
+    ["PNG có chữ ký nhưng khối đầu không phải IHDR (tEXt)", { buffer: png(40, 20, { khoiDau: ["tEXt", "Software\0Paint"] }), extension: "png" }],
     ["đuôi .emf — ảnh vector, imgDims không đọc định dạng này", { buffer: Buffer.from("EMF: ảnh vector, không có kích thước pixel", "utf8"), extension: "emf" }],
   ];
   for (const [nhan, anh] of KHONG_DOC_RA) {
