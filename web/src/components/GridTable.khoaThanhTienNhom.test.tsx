@@ -21,7 +21,7 @@
  *   · ExtraTables (Chi phí HCM / Phí khách hàng) và HnTables (Hà Nội) dùng CHÍNH lưới này → cũng khoá.
  * ============================================================================
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { GridTable, type GridTableProps } from "./GridTable";
@@ -29,11 +29,12 @@ import { ExtraTables, type ExtraTable } from "./ExtraTables";
 import { HnTables, type HnTable } from "./HnTables";
 import * as M from "../lib/quoteMath";
 import { nextK, type ItemK } from "../lib/gridShared";
-import { LY_DO_KHOA_NHOM } from "../lib/khoaThanhTienNhom";
+import { LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM } from "../lib/khoaThanhTienNhom";
 import type { EditorTemplate } from "../lib/api";
 
 vi.mock("../lib/venueCatalog", async (g) => ({ ...(await g<typeof import("../lib/venueCatalog")>()), loadCatalog: () => Promise.resolve({ entries: [], venues: [] }) }));
-vi.mock("../lib/ui", async (g) => ({ ...(await g<typeof import("../lib/ui")>()), toast: () => {}, confirmModal: async () => true }));
+const { toastMock } = vi.hoisted(() => ({ toastMock: vi.fn<(msg: string, kind?: string) => void>() }));
+vi.mock("../lib/ui", async (g) => ({ ...(await g<typeof import("../lib/ui")>()), toast: toastMock, confirmModal: async () => true }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // ── giàn dựng ────────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ const muc = (o: Partial<ItemK> = {}): ItemK => mk({ name: "Backdrop", unit: "m2"
 
 const hops: HTMLDivElement[] = [];
 const roots: Root[] = [];
+beforeEach(() => { toastMock.mockClear(); });
 afterEach(async () => {
   await act(async () => { await new Promise((r) => setTimeout(r, 220)); });   // cho hẹn giờ vẽ-hoãn 180ms nổ trong act
   for (const r of roots.splice(0)) act(() => r.unmount());
@@ -76,7 +78,12 @@ function moLuoi(items: ItemK[], batDau: boolean, them: Partial<GridTableProps> =
 
 /** Ô tích "Hiện Thành Tiền nhóm" trong một vùng (mặc định: cả trang). */
 const oTich = (goc: ParentNode = document) => goc.querySelector<HTMLInputElement>("label.gf-group-sub input[type=\"checkbox\"]");
-const lyDo = (goc: ParentNode = document) => goc.querySelector<HTMLElement>(".gf-group-sub-ly-do");
+/** Dòng lý do khoá — là vùng `role="status"` LUÔN có mặt (để trình đọc màn hình báo khi vừa khoá), nên chỉ tính
+ *  là "có" khi nó đang mang chữ. */
+const lyDo = (goc: ParentNode = document) => {
+  const e = goc.querySelector<HTMLElement>(".gf-group-sub-ly-do");
+  return e && e.textContent ? e : null;
+};
 
 const xaHen = () => act(async () => { await new Promise((r) => setTimeout(r, 220)); });
 const vao = (el: HTMLElement) => act(() => { el.focus(); });
@@ -426,5 +433,201 @@ describe("HnTables (Báo giá Hà Nội)", () => {
     expect(t.groupSubtotal).toBe(true);
     await xaHen();
     expect([oTich(thung)!.checked, oTich(thung)!.disabled]).toEqual([true, true]);
+  });
+});
+
+// ── (8) SOÁT VÒNG 1: các kẽ hở còn lại của luật "SL nhóm > 1 ⇒ bật + khoá" ────
+//
+// Người soát đo trên bản sao nháp; mỗi bài dưới đây ĐỎ trên mã 87ba425 và xanh sau bản sửa.
+
+describe("báo giá CŨ (tắt + nhóm SL 3) — sửa ô KHÔNG phải SL của nhóm thì không đụng tổng", () => {
+  const cu = () => [nhom({ quantity: 3, name: "Nhóm cũ" }), muc({ quantity: 2, unitPrice: 100_000 })];
+
+  it("DÁN một chữ vào ô TÊN của hàng nhóm: đổi tên thật, nhưng KHÔNG bật ô (trước đây bật + nhân tổng ×3)", async () => {
+    const items = cu();
+    const { o, ghiCo } = moLuoi(items, false);
+    vao(o(0, "name"));
+    dan("Tên mới");
+    expect(items[0].name, "phải dán được (nếu không bài này vô nghĩa)").toBe("Tên mới");
+    await xaHen();
+    expect(ghiCo, "đổi TÊN nhóm mà tổng nhảy ×3 là đụng tiền báo giá cũ").not.toHaveBeenCalled();
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([false, false]);
+    expect(M.sheetSubtotalGrouped(items, false, false)).toBe(200_000);
+  });
+
+  it("DÁN vào ô ĐVT của hàng nhóm cũng không bật", async () => {
+    const items = cu();
+    const { o, ghiCo } = moLuoi(items, false);
+    vao(o(0, "unit"));
+    dan("bộ");
+    expect(items[0].unit).toBe("bộ");
+    await xaHen();
+    expect(ghiCo).not.toHaveBeenCalled();
+    expect(oTich()!.checked).toBe(false);
+  });
+
+  it("nhưng DÁN vào chính ô SL của nhóm thì vẫn bật + khoá (đường người dùng chủ động đặt SL nhóm)", async () => {
+    const items = cu();
+    const { o, ghiCo } = moLuoi(items, false);
+    vao(o(0, "quantity"));
+    dan("4");
+    expect(items[0].quantity).toBe(4);
+    expect(ghiCo).toHaveBeenCalledWith(true);
+    await xaHen();
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([true, true]);
+  });
+
+  it("chỉ ĐI NGANG qua ô SL của nhóm (bấm vào rồi Enter / bấm ra, không gõ) KHÔNG bật ô", async () => {
+    const items = cu();
+    const { o, ghiCo } = moLuoi(items, false);
+    vao(o(0, "quantity"));
+    phim(o(0, "quantity"), "Enter");
+    await xaHen();
+    vao(o(0, "quantity"));
+    act(() => { o(0, "quantity").blur(); });
+    await xaHen();
+    expect(ghiCo, "đi ngang ô không phải là sửa — bật là đổi tổng báo giá cũ và ô còn bị khoá luôn").not.toHaveBeenCalled();
+    expect(items[0].quantity).toBe(3);
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([false, false]);
+  });
+
+  it("GÕ lại đúng số cũ vào ô SL của nhóm là có sửa → vẫn bật (giữ luật 'gõ thì bật')", async () => {
+    const { o, ghiCo } = moLuoi(cu(), false);
+    await nhapSL(() => o(0, "quantity"), "3");
+    expect(ghiCo).toHaveBeenCalledWith(true);
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([true, true]);
+  });
+});
+
+describe("SL của nhóm là CÔNG THỨC tham chiếu ô khác — sửa ô tham chiếu đẩy nhóm lên > 1", () => {
+  // Cột D = Số Lượng khi ẩn Chi Tiết (A STT · B Hạng Mục · C ĐVT · D SL · E Đơn giá), nên "=D2" là SL của hàng 2.
+  const congThuc = (slMuc: number, slNhom = slMuc) => [nhom({ quantity: slNhom, formulas: { quantity: "=D2" } }), muc({ quantity: slMuc, unitPrice: 100_000 }), muc()];
+
+  it("ô đang TẮT, SL nhóm (=D2) 1 → gõ SL mục 3 làm nhóm thành 3: tự bật, khoá, và nói vì sao", async () => {
+    const items = congThuc(1);
+    const { o, ghiCo } = moLuoi(items, false);
+    await nhapSL(() => o(1, "quantity"), "3");
+    expect(items[0].quantity, "công thức phải đẩy SL nhóm lên 3 (nếu không bài này vô nghĩa)").toBe(3);
+    expect(ghiCo).toHaveBeenCalledWith(true);
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([true, true]);
+    expect(toastMock, "bật gián tiếp phải có lời báo").toHaveBeenCalledWith(TB_TU_BAT_NHOM, "info");
+  });
+
+  it("ô đang BẬT thì không báo gì thêm; SL mục về 1 → nhả khoá, giữ bật", async () => {
+    const items = congThuc(3);
+    const { o, ghiCo } = moLuoi(items, true);
+    expect(oTich()!.disabled).toBe(true);
+    await nhapSL(() => o(1, "quantity"), "1");
+    expect(items[0].quantity).toBe(1);
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([true, false]);
+    expect(ghiCo).not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  it("báo giá CŨ (tắt + nhóm SL 3 do công thức): MỞ ra và sửa ô KHÔNG liên quan không bật", async () => {
+    const items = congThuc(3);
+    const { o, ghiCo } = moLuoi(items, false);
+    await xaHen();
+    expect(ghiCo, "mở ra").not.toHaveBeenCalled();
+    await nhapSL(() => o(1, "unitPrice"), "250.000");
+    expect(items[1].unitPrice).toBe(250_000);
+    expect(ghiCo, "sửa Đơn giá — SL nhóm vẫn 3, không có gì mới đi vào").not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalled();
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([false, false]);
+  });
+
+  it("gõ thẳng SL nhóm 2 (đường trực tiếp) vẫn bật MÀ KHÔNG toast — người dùng đang nhìn ô đó", async () => {
+    const { o } = moLuoi([nhom({ quantity: 1 }), muc()], false);
+    await nhapSL(() => o(0, "quantity"), "2");
+    expect(oTich()!.disabled).toBe(true);
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Ctrl+Z / Ctrl+Y tự bật lại thì phải NÓI (ô tích tự đổi + khoá, tổng nhảy ×N)", () => {
+  it("nhóm SL 2 → về 1 → bỏ tích → Ctrl+Z trả SL 2: bật lại + toast", async () => {
+    const items = [nhom({ quantity: 2 }), muc()];
+    const { o } = moLuoi(items, true);
+    await nhapSL(() => o(0, "quantity"), "1");
+    bam(oTich()!);
+    expect(toastMock).not.toHaveBeenCalled();
+    vao(o(0, "quantity"));
+    phim(o(0, "quantity"), "z", { ctrl: true });
+    await xaHen();
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([true, true]);
+    expect(toastMock).toHaveBeenCalledWith(TB_TU_BAT_NHOM, "info");
+    expect(toastMock, "chỉ MỘT lời báo (restore rồi tính lại công thức không được báo hai lần)").toHaveBeenCalledTimes(1);
+  });
+
+  it("Ctrl+Y (làm lại) đưa nhóm SL > 1 vào khi ô đang tắt: bật lại + toast", async () => {
+    const items = [nhom({ quantity: 1 }), muc()];
+    const { o } = moLuoi(items, false);
+    await nhapSL(() => o(0, "quantity"), "3");          // tự bật (gõ trực tiếp: không toast)
+    vao(o(0, "quantity"));
+    phim(o(0, "quantity"), "z", { ctrl: true });        // SL 1, ô vẫn bật
+    await xaHen();
+    bam(oTich()!);                                      // người dùng tắt (được phép: đang SL 1)
+    expect(toastMock).not.toHaveBeenCalled();
+    vao(o(0, "quantity"));
+    phim(o(0, "quantity"), "y", { ctrl: true });        // tiến → SL 3 mà ô đang tắt
+    await xaHen();
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([true, true]);
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(toastMock).toHaveBeenCalledWith(TB_TU_BAT_NHOM, "info");
+  });
+
+  it("Ctrl+Z bình thường (ô vẫn bật) không toast", async () => {
+    const { o } = moLuoi([nhom({ quantity: 1 }), muc()], false);
+    await nhapSL(() => o(0, "quantity"), "2");
+    vao(o(0, "quantity"));
+    phim(o(0, "quantity"), "z", { ctrl: true });
+    await xaHen();
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ô tích khoá: chặn theo dữ liệu SỐNG, không theo ảnh lúc vẽ", () => {
+  it("ô BẬT, nhóm SL 1: gõ '5' vào SL nhóm (chưa rời ô, chưa vẽ lại) rồi bấm ô tích → KHÔNG tắt được", async () => {
+    // Vẽ lại sau khi gõ là hoãn 180ms nên ô tích chưa kịp `disabled`; trình duyệt thật blur ô nhập trước khi
+    // click (chốt + vẽ lại) nhưng bàn phím ảo / sự kiện tổng hợp thì không — bộ xử lý phải tự nhìn items hiện tại.
+    const items = [nhom({ quantity: 1 }), muc()];
+    const { o, ghiCo } = moLuoi(items, true);
+    vao(o(0, "quantity"));
+    go(o(0, "quantity"), "5");
+    expect(items[0].quantity).toBe(5);
+    expect(oTich()!.disabled, "chưa vẽ lại — đúng là cửa sổ hở").toBe(false);
+    bam(oTich()!);
+    expect(ghiCo, "tắt ô khi nhóm đã SL 5 là tổng sai im lặng").not.toHaveBeenCalledWith(false);
+    await xaHen();
+    expect([oTich()!.checked, oTich()!.disabled]).toEqual([true, true]);
+  });
+
+  it("ô BẬT, nhóm SL 1, người dùng KHÔNG gõ gì: bấm ô tích vẫn tắt được như thường", () => {
+    const { ghiCo } = moLuoi([nhom({ quantity: 1 }), muc()], true);
+    bam(oTich()!);
+    expect(ghiCo).toHaveBeenLastCalledWith(false);
+    expect(oTich()!.checked).toBe(false);
+  });
+});
+
+describe("vùng báo trạng thái cho trình đọc màn hình", () => {
+  const vung = (goc: ParentNode = document) => goc.querySelector<HTMLElement>(".gf-group-sub-ly-do");
+
+  it("luôn có mặt (role=status) để lần khoá giữa phiên được đọc lên; rỗng khi không khoá, mang lý do khi khoá", async () => {
+    const { o } = moLuoi([nhom({ quantity: 1 }), muc()], true);
+    expect(vung(), "phải có sẵn từ đầu — vùng mới chèn vào thì trình đọc màn hình bỏ sót").not.toBeNull();
+    expect(vung()!.getAttribute("role")).toBe("status");
+    expect(vung()!.textContent).toBe("");
+    await nhapSL(() => o(0, "quantity"), "2");
+    expect(vung()!.textContent).toBe(LY_DO_KHOA_NHOM);
+    expect(vung()!.id).toBe(oTich()!.getAttribute("aria-describedby"));
+    await nhapSL(() => o(0, "quantity"), "1");
+    expect(vung()!.textContent).toBe("");
+    expect(oTich()!.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("chỉ xem: không có vùng này", () => {
+    const { hop } = moLuoi([nhom({ quantity: 2 }), muc()], true, { editable: false });
+    expect(vung(hop)).toBeNull();
   });
 });

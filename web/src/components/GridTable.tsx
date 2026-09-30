@@ -11,7 +11,7 @@ import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, createImagePool, undoRedoKey } from "../lib/gridUndo";
 import { doanBoCot } from "../lib/doanBoCot";
-import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM } from "../lib/khoaThanhTienNhom";
+import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM } from "../lib/khoaThanhTienNhom";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
@@ -576,8 +576,17 @@ function GridTableInner(props: GridTableProps) {
   // TRỪ `oDangGo` — ô onNumInput đang gõ LIVE: công thức gõ dở ("=", "=F1*", "=ROUND(") vốn chưa tính được,
   // tô đỏ ở đó là nháy đỏ mỗi phím, và cờ bật khi gõ làm commitCell lúc chốt tưởng ô "đã đỏ từ trước" nên
   // nuốt lời báo GRID-03 (tách đối số bằng ;). Ô đó để commitCell tô + báo lúc chốt (phản biện đợt 3).
-  const recomputeAll = (oDangGo?: string) => {
+  // Tự bật "Thành Tiền nhóm" mà người dùng KHÔNG trực tiếp gõ/dán Số Lượng nhóm (Ctrl+Z / Ctrl+Y, công thức tham
+  // chiếu): ô tích tự đổi + khoá và tổng nhảy ×N, nên phải nói vì sao. Gõ/dán thẳng vào ô SL nhóm thì im.
+  const tuBatNhomGianTiep = () => { onGroupSubtotal?.(true); toast(TB_TU_BAT_NHOM, "info"); };
+  // `khongTuBat`: lượt tính lại lúc MỞ lưới (khôi phục Số Ngày) — mở báo giá cũ không bao giờ được tự bật ô.
+  const recomputeAll = (oDangGo?: string, khongTuBat = false) => {
     if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
+    // SL nhóm có thể là CÔNG THỨC ("=D2"): sửa ô được tham chiếu là đẩy nhóm lên > 1 mà không đường nào ở trên
+    // (commitCell / onNumInput / dán chỉ nhìn ô SL của chính hàng nhóm) thấy — ô đang tắt thì tổng sai im lặng.
+    // Chỉ bật khi lượt tính này VỪA ĐƯA nhóm SL > 1 vào (trước đó chưa có): báo giá cũ đã lưu "tắt + nhóm SL > 1"
+    // mà sửa ô không liên quan thì trước/sau đều có → không đụng (giống restore()).
+    const coNhomTruoc = coNhomNhanHeSo(items);
     const vong = oVongLap();
     const soFx = items.reduce((n, it) => n + (it.formulas ? Object.keys(it.formulas).length : 0), 0);
     for (let pass = 0; pass < Math.max(8, soFx + 1); pass++) {
@@ -586,6 +595,7 @@ function GridTableInner(props: GridTableProps) {
       for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f) && khoaO(i, f) !== oDangGo) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null || fxVongRef.current) continue; if (NUMERIC.has(f)) { if (!(typeof rec[f] === "number" && chiLechDauPhayDong(v, rec[f] as number))) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
+    if (!khongTuBat && !groupSubtotal && !coNhomTruoc && coNhomNhanHeSo(items)) tuBatNhomGianTiep();
   };
   const ngayDaKhoiPhucRef = useRef<ItemK[] | null>(null);
   useEffect(() => {
@@ -596,7 +606,7 @@ function GridTableInner(props: GridTableProps) {
     // Mẫu không-ngày lưu days=null nhưng giữ công thức ngày. Khi mở lại mẫu có-ngày,
     // tính lại trước lần xuất/lưu kế tiếp; nhánh thường không tính lại lúc mở để giữ số đã lưu.
     const truoc = items.map((it) => it.days);
-    recomputeAll();
+    recomputeAll(undefined, true);
     if (items.some((it, i) => it.days !== truoc[i])) onChange();
   });
   /* ── MỞ LƯỚI: CÔNG THỨC ĐÃ LƯU KHÔNG TÍNH ĐƯỢC PHẢI ĐỎ NGAY (soát toàn diện đợt 3) ──────────────
@@ -634,6 +644,7 @@ function GridTableInner(props: GridTableProps) {
   const commitCell = (i: number, f: string, raw: string, giuCoHong = false) => {
     const it = items[i] as Record<string, unknown>; raw = String(raw);
     const fxCu = (it.formulas as Record<string, string> | undefined)?.[f];   // công thức đã lưu TRƯỚC lần chốt này
+    const slTruoc = Number(it[f]) || 0;   // để biết lần chốt này có ĐỔI số không (xem điều kiện tự bật ở cuối)
     if (giuCoHong && (coThamChieuHong(it, f) || (it as CoDo)._fxLoi?.[f]) && raw.trim() === fxCu) return;
     // Người dùng đã sửa ô → bỏ cờ "tham chiếu hỏng / công thức Excel chưa dịch được" và cờ lỗi tính
     // cũ của ô này; công thức mới hỏng thì các nhánh dưới bật lại cờ lỗi tính.
@@ -669,7 +680,12 @@ function GridTableInner(props: GridTableProps) {
       if (it.formulas) { delete (it.formulas as Record<string, string>)[f]; if (!Object.keys(it.formulas).length) delete it.formulas; }
       it[f] = NUMERIC.has(f) ? (raw.trim() === "" ? 0 : M.parseVN(raw)) : (MULTILINE.has(f) ? raw : raw.trim().replace(/\s+/g, " "));
     }
-    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && (Number(it[f]) || 0) > 1 && !groupSubtotal) onGroupSubtotal?.(true);
+    // Tự bật khi SL nhóm > 1 — nhưng CHỈ khi người dùng thật sự sửa: có gõ (giuCoHong = false; onNumInput đã ghi số
+    // LIVE nên "số đổi" không còn dấu vết ở đây) hoặc lần chốt này làm đổi số (thanh công thức). Đi ngang qua ô SL
+    // của nhóm trên báo giá cũ "tắt + SL 3" (bấm vào rồi Enter / bấm ra) mà bật ô là đổi tổng báo giá cũ — và từ
+    // khi có khoá, ô còn không bỏ tích lại được.
+    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && (Number(it[f]) || 0) > 1 && !groupSubtotal
+      && (!giuCoHong || (Number(it[f]) || 0) !== slTruoc)) onGroupSubtotal?.(true);
   };
 
   // ── selection rectangle (sống qua redraw: tô lại từ selRef ở effect mỗi render) ─
@@ -1370,7 +1386,7 @@ function GridTableInner(props: GridTableProps) {
     // Bật lại NGAY khi lượt lùi/tiến vừa ĐƯA nhóm SL > 1 vào. Điều kiện "trước đó chưa có" là cố ý: báo
     // giá cũ đã lưu ở trạng thái tắt + nhóm SL > 1 thì Ctrl+Z một sửa đổi không liên quan KHÔNG được bật
     // ô (bật là đổi tổng của báo giá cũ — chờ chủ repo quyết có vá dữ liệu hay không).
-    if (!groupSubtotal && !coNhomTruoc && coNhomNhanHeSo(items)) onGroupSubtotal?.(true);
+    if (!groupSubtotal && !coNhomTruoc && coNhomNhanHeSo(items)) tuBatNhomGianTiep();
     const last = Math.max(0, items.length - 1);
     const sel = selRef.current;
     if (sel) { sel.anchor.row = Math.min(sel.anchor.row, last); sel.focus.row = Math.min(sel.focus.row, last); }
@@ -1570,7 +1586,10 @@ function GridTableInner(props: GridTableProps) {
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
         pasteCellVal(i0, f0, val, ...dich1(i0, f0), soThoNguon(0), quGoc(0, 0), bao); coSlTheoNguon(i0, 0, f0, fSrc1);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(f0), c1: FIELDS.indexOf(f0) });
-        autoEnableGroupSub(i0, i0);   // dán MỘT số vào ô SL của nhóm cũng phải tự bật (trước đây chỉ vùng nhiều ô mới có)
+        // Dán MỘT số vào ô SL của nhóm cũng phải tự bật (trước đây chỉ vùng nhiều ô mới có) — nhưng CHỈ khi đích là ô SL:
+        // autoEnableGroupSub quét cả HÀNG, nên dán "Tên mới" vào ô tên của nhóm SL 3 trên báo giá cũ đã bật ô và
+        // nhân tổng ×3 chỉ vì đổi tên.
+        if (f0 === "quantity") autoEnableGroupSub(i0, i0);
         recomputeAll(); onChange(); paintSel();
         const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = fmtField(i0, f0, (items[i0] as Record<string, unknown>)[f0]);
         // Dán CÔNG THỨC vào ô đang chọn: nhánh trên bỏ qua ô có công thức → ô kẹt số cũ, rời ô là
@@ -1586,7 +1605,7 @@ function GridTableInner(props: GridTableProps) {
         const fld = f0 || FIELDS[rc ? rc.c0 : 0];
         pasteCellVal(i0, fld, val, ...dich1(i0, fld), soThoNguon(0), quGoc(0, 0), bao);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(fld), c1: FIELDS.indexOf(fld) });
-        autoEnableGroupSub(i0, i0);   // như nhánh số ở trên: `fld` có thể là cột SL khi không có ô nào đang giữ tiêu điểm
+        if (fld === "quantity") autoEnableGroupSub(i0, i0);   // như nhánh số ở trên: `fld` có thể là cột SL khi không có ô nào đang giữ tiêu điểm
         recomputeAll(); onChange(); paintSel();
         // Ô chữ nhiều dòng (Hạng Mục/Chi Tiết/Ghi Chú) phải CAO LẠI ngay: trước chỉ ghi value, mà ô đang
         // chọn lại bị lượt đồng bộ bỏ qua → dán "Booth…⏎HCM…⏎HN…" chỉ thấy dòng đầu tới khi bấm Lưu.
@@ -3015,7 +3034,8 @@ function GridTableInner(props: GridTableProps) {
         // KHOÁ Ở TRẠNG THÁI BẬT khi còn nhóm SL > 1 (xem lib/khoaThanhTienNhom): bỏ tích lúc đó là mất hệ số
         // ×N của nhóm và tổng sai im lặng. Tính TƯƠI mỗi lần vẽ từ items nên SL nhóm về 1 là nhả ngay và
         // giữ nguyên trạng thái đang có. `disabled` chặn chuột/bàn phím; onChange vẫn tự chặn phòng khi một
-        // đường nào đó (kiểm thử, trợ năng) bắn được sự kiện vào ô đã khoá.
+        // đường nào đó (kiểm thử, trợ năng) bắn được sự kiện vào ô đã khoá — và nó nhìn items SỐNG chứ không
+        // nhìn `khoa` chụp lúc vẽ: gõ SL nhóm xong, vẽ lại còn hoãn 180ms, ô chưa kịp `disabled`.
         const khoa = khoaBatNhom(groupSubtotal, items);
         return (
           <>
@@ -3023,10 +3043,12 @@ function GridTableInner(props: GridTableProps) {
               style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px", fontSize: 13, cursor: khoa ? "not-allowed" : "pointer" }}>
               <input type="checkbox" checked={groupSubtotal} disabled={khoa} aria-disabled={khoa} aria-describedby={khoa ? idLyDoKhoaNhom : undefined}
                 style={khoa ? { cursor: "not-allowed" } : undefined}
-                onChange={(e) => { if (khoa) return; onGroupSubtotal(e.target.checked); }} />
+                onChange={(e) => { if (khoa || khoaBatNhom(groupSubtotal, items)) return; onGroupSubtotal(e.target.checked); }} />
               <span>Hiện <strong>Thành Tiền nhóm</strong> (Số Lượng nhóm × tổng các mục trong nhóm)</span>
             </label>
-            {khoa && <span id={idLyDoKhoaNhom} className="gf-group-sub-ly-do" style={{ margin: "2px 0 8px 8px", fontSize: 12, color: "var(--muted)" }}>{LY_DO_KHOA_NHOM}</span>}
+            {/* Vùng báo trạng thái LUÔN có mặt (rỗng khi không khoá): trình đọc màn hình chỉ đọc lên chữ ĐỔI trong một
+                vùng đã có sẵn, còn vùng mới chèn vào thì bỏ sót — mà ô tự khoá giữa phiên (gõ SL nhóm ở chỗ khác). */}
+            <span id={idLyDoKhoaNhom} role="status" className="gf-group-sub-ly-do" style={{ margin: khoa ? "2px 0 8px 8px" : 0, fontSize: 12, color: "var(--muted)" }}>{khoa ? LY_DO_KHOA_NHOM : ""}</span>
           </>
         );
       })()}
