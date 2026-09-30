@@ -77,7 +77,7 @@ Có Ctrl+Z / Ctrl+Y và fill-down (Ctrl+D); hoàn tác vẫn đúng sau khi dán
 
 | Loại dòng | Cộng vào nhóm chính | Cộng vào Tổng cộng | Ghi chú |
 |---|---|---|---|
-| **Nhóm** (A, B, C…) | — | ✅ | có Thành Tiền nhóm, nhân Số Lượng nếu bật |
+| **Nhóm** (A, B, C…) | — | ✅ | có Thành Tiền nhóm, nhân Số Lượng nếu bật. Nhập Số Lượng nhóm > 1 thì ô "Hiện Thành Tiền nhóm" **tự bật và bị khoá bật** (bỏ tích lúc đó là mất hệ số ×N, tổng sai im lặng); khoá tự nhả khi không còn nhóm nào Số Lượng > 1 và giữ nguyên trạng thái đang có. Báo giá cũ đã lưu "tắt + nhóm SL > 1" không bị tự bật lúc mở |
 | **Nhóm con** | ❌ | ✅ | thụt lề + dấu `↳`; **không chiếm chữ A/B/C** |
 | **Hàng con** (`↳`) | ✅ | ✅ | chi tiết trong một hạng mục. **Nút "↳ thêm hàng con" trên lưới đã bỏ (2026-09-23, chủ repo: "không còn cần sử dụng")** — hàng con có sẵn trong báo giá cũ vẫn hiển thị, tính tiền và xuất Excel như trước |
 | **Dòng thông tin** | ❌ | ❌ | ghi chú thuần, không tính tiền |

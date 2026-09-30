@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
@@ -11,6 +11,7 @@ import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, createImagePool, undoRedoKey } from "../lib/gridUndo";
 import { doanBoCot } from "../lib/doanBoCot";
+import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM } from "../lib/khoaThanhTienNhom";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
@@ -234,6 +235,7 @@ const CAT_DA_XONG = new Set<string>();
 function GridTableInner(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
+  const idLyDoKhoaNhom = useId();   // nối ô tích "Thành Tiền nhóm" với dòng giải thích khi bị khoá (nhiều lưới/trang → id riêng)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
   const histRef = useRef(createUndoStack());
   const khoAnhRef = useRef(createImagePool());   // GRID-09: mốc undo giữ MÃ ảnh, không chép lại base64
@@ -1361,7 +1363,14 @@ function GridTableInner(props: GridTableProps) {
     const trDangChon = (document.activeElement as HTMLElement | null)?.closest?.("tr[data-row]");
     const kDangChon = trDangChon && tableRef.current?.contains(trDangChon) ? items[parseInt(trDangChon.getAttribute("data-row") || "-1", 10)]?._k : undefined;
     const arr = khoAnhRef.current.parse<ItemK[]>(json); arr.forEach((it) => { if (it._k == null) it._k = nextK(); });
+    const coNhomTruoc = coNhomNhanHeSo(items);
     items.splice(0, items.length, ...arr);
+    // Ô "Thành Tiền nhóm" KHÔNG nằm trong ảnh chụp hoàn tác (chỉ có items) nên lùi/tiến có thể trả về một
+    // nhóm SL > 1 trong khi ô đã bị bỏ tích (vd SL nhóm 2 → đưa về 1 → bỏ tích → Ctrl+Z): tổng ÂM THẦM SAI.
+    // Bật lại NGAY khi lượt lùi/tiến vừa ĐƯA nhóm SL > 1 vào. Điều kiện "trước đó chưa có" là cố ý: báo
+    // giá cũ đã lưu ở trạng thái tắt + nhóm SL > 1 thì Ctrl+Z một sửa đổi không liên quan KHÔNG được bật
+    // ô (bật là đổi tổng của báo giá cũ — chờ chủ repo quyết có vá dữ liệu hay không).
+    if (!groupSubtotal && !coNhomTruoc && coNhomNhanHeSo(items)) onGroupSubtotal?.(true);
     const last = Math.max(0, items.length - 1);
     const sel = selRef.current;
     if (sel) { sel.anchor.row = Math.min(sel.anchor.row, last); sel.focus.row = Math.min(sel.focus.row, last); }
@@ -1561,6 +1570,7 @@ function GridTableInner(props: GridTableProps) {
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
         pasteCellVal(i0, f0, val, ...dich1(i0, f0), soThoNguon(0), quGoc(0, 0), bao); coSlTheoNguon(i0, 0, f0, fSrc1);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(f0), c1: FIELDS.indexOf(f0) });
+        autoEnableGroupSub(i0, i0);   // dán MỘT số vào ô SL của nhóm cũng phải tự bật (trước đây chỉ vùng nhiều ô mới có)
         recomputeAll(); onChange(); paintSel();
         const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = fmtField(i0, f0, (items[i0] as Record<string, unknown>)[f0]);
         // Dán CÔNG THỨC vào ô đang chọn: nhánh trên bỏ qua ô có công thức → ô kẹt số cũ, rời ô là
@@ -1576,6 +1586,7 @@ function GridTableInner(props: GridTableProps) {
         const fld = f0 || FIELDS[rc ? rc.c0 : 0];
         pasteCellVal(i0, fld, val, ...dich1(i0, fld), soThoNguon(0), quGoc(0, 0), bao);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(fld), c1: FIELDS.indexOf(fld) });
+        autoEnableGroupSub(i0, i0);   // như nhánh số ở trên: `fld` có thể là cột SL khi không có ô nào đang giữ tiêu điểm
         recomputeAll(); onChange(); paintSel();
         // Ô chữ nhiều dòng (Hạng Mục/Chi Tiết/Ghi Chú) phải CAO LẠI ngay: trước chỉ ghi value, mà ô đang
         // chọn lại bị lượt đồng bộ bỏ qua → dán "Booth…⏎HCM…⏎HN…" chỉ thấy dòng đầu tới khi bấm Lưu.
@@ -3000,12 +3011,25 @@ function GridTableInner(props: GridTableProps) {
           <div className="vs-hint">↑↓ chọn · Tab điền · Esc đóng — hoặc bấm chuột</div>
         </div>
       )}
-      {editable && onGroupSubtotal && (
-        <label className="toggle-totals gf-group-sub" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px", fontSize: 13, cursor: "pointer" }}>
-          <input type="checkbox" checked={groupSubtotal} onChange={(e) => onGroupSubtotal(e.target.checked)} />
-          <span>Hiện <strong>Thành Tiền nhóm</strong> (Số Lượng nhóm × tổng các mục trong nhóm)</span>
-        </label>
-      )}
+      {editable && onGroupSubtotal && (() => {
+        // KHOÁ Ở TRẠNG THÁI BẬT khi còn nhóm SL > 1 (xem lib/khoaThanhTienNhom): bỏ tích lúc đó là mất hệ số
+        // ×N của nhóm và tổng sai im lặng. Tính TƯƠI mỗi lần vẽ từ items nên SL nhóm về 1 là nhả ngay và
+        // giữ nguyên trạng thái đang có. `disabled` chặn chuột/bàn phím; onChange vẫn tự chặn phòng khi một
+        // đường nào đó (kiểm thử, trợ năng) bắn được sự kiện vào ô đã khoá.
+        const khoa = khoaBatNhom(groupSubtotal, items);
+        return (
+          <>
+            <label className={`toggle-totals gf-group-sub${khoa ? " gf-group-sub-khoa" : ""}`} title={khoa ? LY_DO_KHOA_NHOM : undefined}
+              style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px", fontSize: 13, cursor: khoa ? "not-allowed" : "pointer" }}>
+              <input type="checkbox" checked={groupSubtotal} disabled={khoa} aria-disabled={khoa} aria-describedby={khoa ? idLyDoKhoaNhom : undefined}
+                style={khoa ? { cursor: "not-allowed" } : undefined}
+                onChange={(e) => { if (khoa) return; onGroupSubtotal(e.target.checked); }} />
+              <span>Hiện <strong>Thành Tiền nhóm</strong> (Số Lượng nhóm × tổng các mục trong nhóm)</span>
+            </label>
+            {khoa && <span id={idLyDoKhoaNhom} className="gf-group-sub-ly-do" style={{ margin: "2px 0 8px 8px", fontSize: 12, color: "var(--muted)" }}>{LY_DO_KHOA_NHOM}</span>}
+          </>
+        );
+      })()}
       {editable && onShowImages && (
         <label className="toggle-totals gf-show-images" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px 16px", fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" checked={!!showImages} onChange={(e) => onShowImages(e.target.checked)} />
