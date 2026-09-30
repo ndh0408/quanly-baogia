@@ -26,20 +26,24 @@ const GOC = path.resolve(import.meta.dirname, "../..");
 const CHECK = process.argv.includes("--check");
 
 // Chỉ quét file được git theo dõi: node_modules/dist/.git nằm ngoài, và bản clone nào cũng như nhau.
-const dsTep = () => execFileSync("git", ["ls-files"], { cwd: GOC, encoding: "utf8", maxBuffer: 64 << 20 })
+export const dsTep = () => execFileSync("git", ["ls-files"], { cwd: GOC, encoding: "utf8", maxBuffer: 64 << 20 })
   .split("\n")
   .filter(Boolean)
-  // Nhị phân và ảnh chụp thì không có chú thích.
-  .filter((f) => /\.(ts|tsx|js|mjs|cjs|md|sh|yml|yaml|sql|json)$/.test(f))
+  // Nhị phân và ảnh chụp thì không có chú thích. Dockerfile KHÔNG có đuôi mà chú thích dày đặc tham
+  // chiếu sang compose/script — lọc theo đuôi thì nó lọt khỏi cổng, và `docker-compose.prod.yml:288`
+  // trong đó đã trôi sang một dòng chú thích mà không ai hay (người soát, 2026-09-29).
+  .filter((f) => /\.(ts|tsx|js|mjs|cjs|md|sh|yml|yaml|sql|json)$/.test(f) || /(^|\/)Dockerfile[^/]*$/.test(f))
   // package-lock: 30k dòng máy sinh, không ai viết chú thích ở đó.
   .filter((f) => f !== "package-lock.json")
   // docs/archive/ là ẢNH CHỤP LỊCH SỬ (bản kiểm toán của một thời điểm). Số dòng ở đó đúng VỚI
   // LÚC ẤY; sửa cho khớp HEAD là làm sai bản ghi. Bỏ ra khỏi phạm vi quét.
   .filter((f) => !f.startsWith("docs/archive/"));
 
-// `src/foo/bar.ts:123` — đòi có dấu `/` để khỏi bắt nhầm "abc.ts:12" trong một câu văn,
-// và đòi phần mở rộng là mã nguồn.
-const RE = /\b((?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|mjs|cjs|sh|sql|yml|yaml))(?::|,)?(\d+)\b/g;
+// `src/foo/bar.ts:123` hoặc `docker-compose.prod.yml:288` — đòi phần mở rộng là mã nguồn. Bản trước
+// đòi có dấu `/` "để khỏi bắt nhầm abc.ts:12 trong câu văn", nhưng tệp ở GỐC repo (compose, vitest
+// config…) vì thế KHÔNG BAO GIỜ được soi: `docker-compose.prod.yml:288` trong Dockerfile trôi mà cổng
+// không thấy. Bắt nhầm thì vô hại: tên không phải tệp có thật ở đúng đường đó bị bỏ qua (xem `doc`).
+export const RE = /\b((?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|js|mjs|cjs|sh|sql|yml|yaml))(?::|,)?(\d+)\b/g;
 // Dạng thứ hai, rất phổ biến trong repo này: "… src/foo.ts:12-15" hoặc ":118 và :169".
 const RE_PHU = /:(\d+)\b/g;
 

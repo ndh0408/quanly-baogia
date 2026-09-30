@@ -24,8 +24,8 @@ services:
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: quanly-postgres
     # Siết đặc quyền cho KHO DỮ LIỆU, không chỉ app/worker. Bản k8s song sinh siết từ lâu
-    # (infra/k8s/postgres.yaml:42-46 `allowPrivilegeEscalation: false` + `drop: ["ALL"]`), còn
-    # compose — thứ ĐANG CHẠY THẬT — thì chạy full capability.
+    # (`securityContext` của container postgres trong infra/k8s/postgres.yaml: `allowPrivilegeEscalation:
+    # false` + `drop: ["ALL"]`), còn compose — thứ ĐANG CHẠY THẬT — thì chạy full capability.
     # GIỮ LẠI đúng tập capability mà entrypoint chính thức cần. Cơ chế ĐỌC TỪ CHÍNH ẢNH đã ghim
     # digest ở trên (lấy lại bằng `docker cp <container>:/usr/local/bin/docker-entrypoint.sh -`):
     #   dòng 58  `find "$PGDATA" \! -user postgres -exec chown postgres '{}' +` → CHOWN, cộng

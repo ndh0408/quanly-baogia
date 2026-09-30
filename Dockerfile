@@ -84,7 +84,8 @@ WORKDIR /app
 # không đáng kể so với việc đọc được đúng tệp .ts và số dòng khi có sự cố. → BẬT.
 #
 # Đặt ở ENV (không phải ở CMD) vì hai lý do:
-#   1. scripts/ci/check-runtime-command.sh:18 đòi CMD KHỚP TỪNG KÝ TỰ `["node", "dist/server.js"]`;
+#   1. scripts/ci/check-runtime-command.sh (bước `▶ Dockerfile CMD trỏ dist/`) đòi CMD KHỚP TỪNG KÝ
+#      TỰ `["node", "dist/server.js"]`;
 #   2. bốn đường triển khai đều GHI ĐÈ lệnh khởi động (compose worker `command:`, k8s/helm
 #      `command:`/`args:`), nên cờ nhét vào CMD chỉ với tới đúng một đường.
 # k8s/helm KHÔNG khai NODE_OPTIONS nên biến này tới nơi. compose thì CÓ khai
@@ -147,11 +148,11 @@ RUN mkdir -p fonts \
 # hiệu lực ngay trong RUN này, nên một lượt kiểm chạy trần luôn rơi vào nhánh "đã có sẵn, không
 # nối thêm". Đúng cái nhánh mà compose phụ thuộc — nhánh NỐI THÊM — sẽ KHÔNG BAO GIỜ được chạy
 # lúc build, tức phép tự kiểm không bảo vệ thứ nó tưởng nó bảo vệ. Lượt thứ hai ép NODE_OPTIONS
-# sang ĐÚNG giá trị mà docker-compose.prod.yml:288 gửi cho app (--max-old-space-size=2048) để
-# buộc đi vào nhánh
-# đó, rồi đòi kết quả chứa CẢ hai cờ. Gán biến ngay trước lệnh (không gọi `env`) để lượt kiểm
-# không phụ thuộc một applet busybox nào — sandbox không có Docker daemon nên `env` của alpine là
-# thứ KHÔNG kiểm chứng được ở đây, còn dạng gán-tiền-tố thì /bin/sh nào cũng phải hiểu.
+# sang ĐÚNG giá trị mà khoá `NODE_OPTIONS` của service `app` trong docker-compose.prod.yml gửi cho
+# app (--max-old-space-size=2048) để buộc đi vào nhánh đó, rồi đòi kết quả chứa CẢ hai cờ. Gán
+# biến ngay trước lệnh (không gọi `env`) để lượt kiểm không phụ thuộc một applet busybox nào —
+# sandbox không có Docker daemon nên `env` của alpine là thứ KHÔNG kiểm chứng được ở đây, còn dạng
+# gán-tiền-tố thì /bin/sh nào cũng phải hiểu.
 # Đã đo bằng sh thật (dash), trên đúng khối script bên dưới:
 #   • wrapper THAY THẾ thay vì nối thêm  → lượt 1 XANH (không phát hiện), lượt 2 ĐỎ;
 #   • wrapper nối cờ hai lần             → phép "có mặt không" XANH, phép "đúng một lần" ĐỎ.

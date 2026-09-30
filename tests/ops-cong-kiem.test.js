@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { dongVoNghia } from "../scripts/ci/check-line-refs.mjs";
+import { dongVoNghia, dsTep, RE } from "../scripts/ci/check-line-refs.mjs";
 
 const GOC = path.resolve(import.meta.dirname, "..");
 const doc = (f) => readFileSync(path.join(GOC, f), "utf8");
@@ -64,6 +64,23 @@ describe("DOC-11 — tham chiếu đã đổi sang TÊN trỏ vào thứ có th�
       tep: "docs/adr/0006-go-spa-vanilla-cu.md", cu: /web\/src\/main\.tsx:\d/, nhac: /`import "\.\.\/\.\.\/public\/style\.css"` trong `web\/src\/main\.tsx`/,
       dich: "web/src/main.tsx", neo: /^import "\.\.\/\.\.\/public\/style\.css";$/m,
     },
+    // Người soát (vòng 2): `docker-compose.prod.yml:288` trong Dockerfile đã trôi sang một dòng chú thích
+    // (NODE_OPTIONS thật của app ở dòng khác); check-line-refs không quét Dockerfile (không đuôi) và
+    // không soi tệp ở gốc repo (regex đòi `/`). Rà cùng lớp trong Dockerfile/compose: thêm ba chỗ.
+    {
+      tep: "Dockerfile", cu: /docker-compose\.prod\.yml:\d/, nhac: /khoá `NODE_OPTIONS` của service `app` trong docker-compose\.prod\.yml/,
+      // ĐÚNG service app: chặn trước dòng thụt 2 kế tiếp (service khác) — worker cũng khai NODE_OPTIONS.
+      dich: "docker-compose.prod.yml", neo: /^ {2}app:\n(?:(?!^ {2}\S)[\s\S])*?^ {6}NODE_OPTIONS: "--max-old-space-size=2048"/m,
+    },
+    {
+      tep: "Dockerfile", cu: /check-runtime-command\.sh:\d/, nhac: /scripts\/ci\/check-runtime-command\.sh \(bước `▶ Dockerfile CMD trỏ dist\/`\)/,
+      dich: "scripts/ci/check-runtime-command.sh", neo: /^echo "▶ Dockerfile CMD trỏ dist\/"\ngrep -qE '\^CMD .*dist\/server.*' Dockerfile \\$/m,
+    },
+    ...["docker-compose.prod.yml", "docker-compose.staging.yml"].map((tep) => ({
+      tep, cu: /postgres\.yaml:\d/, nhac: /`securityContext` của container postgres trong infra\/k8s\/postgres\.yaml/,
+      dich: "infra/k8s/postgres.yaml",
+      neo: /- name: postgres\n\s+image: postgres[\s\S]*?securityContext:\n\s+allowPrivilegeEscalation: false\n[\s\S]*?drop: \["ALL"\]/,
+    })),
   ];
   for (const { tep, cu, nhac, dich, neo } of NEO) {
     it(`${tep}: không còn ${cu.source.replace(/\\d/g, "N").replace(/\\/g, "")}, và tên nêu thay có thật ở ${dich}`, () => {
@@ -73,6 +90,20 @@ describe("DOC-11 — tham chiếu đã đổi sang TÊN trỏ vào thứ có th�
       expect(doc(dich).replace(/\r\n/g, "\n"), `${dich} không còn thứ tài liệu nêu tên`).toMatch(neo);
     });
   }
+
+  it("Dockerfile: lượt tự kiểm nhánh NỐI THÊM dùng ĐÚNG giá trị NODE_OPTIONS mà service app nhận", () => {
+    const app = doc("docker-compose.prod.yml").replace(/\r\n/g, "\n").match(/^ {2}app:\n(?:(?!^ {2}\S)[\s\S])*?^ {6}NODE_OPTIONS: "([^"]+)"/m);
+    expect(app, "service app không còn khai NODE_OPTIONS").not.toBeNull();
+    expect(doc("Dockerfile")).toContain(`&& NODE_OPTIONS=${app[1]} /usr/local/bin/bat-source-map node -e`);
+  });
+
+  it("check-line-refs quét Dockerfile (tệp không đuôi) và soi tham chiếu tới tệp ở GỐC repo", () => {
+    expect(dsTep()).toContain("Dockerfile");
+    const m = [..."sang ĐÚNG giá trị mà docker-compose.prod.yml:288 gửi cho app".matchAll(RE)];
+    expect(m.map((x) => [x[1], x[2]])).toEqual([["docker-compose.prod.yml", "288"]]);
+    // Đường có thư mục vẫn bắt TRỌN đường, không cắt đuôi thành tên tệp trần.
+    expect([..."xem src/services/quoteService.ts:12".matchAll(RE)].map((x) => x[1])).toEqual(["src/services/quoteService.ts"]);
+  });
 });
 
 describe("GAP1-08 — rc-qa.mjs không chấm đạt quá dễ", () => {
