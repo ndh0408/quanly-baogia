@@ -8,7 +8,8 @@
  * INFRA-10: app không khai stop_grace_period (Docker SIGKILL sau 10s = đúng lưới tắt 10s của app).
  * INFRA-11: không đường nào đang chạy quét lỗ hổng của IMAGE.
  * §17: explain-hot-paths đỏ/xanh theo LỊCH SỬ của bảng (thứ tự vật lý), không theo index; gọi qua
- *   junction thì thoát 0 im lặng; không dựng trang (QuoteSheet) nên mù trước truy vấn đếm trang.
+ *   junction thì thoát 0 im lặng; không dựng trang (QuoteSheet) nên mù trước truy vấn đếm trang; miễn
+ *   trừ "ĐẾM TỔNG" tha mọi câu COUNT(*) trên mọi bảng — kể cả câu đếm trang mới.
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync, mkdtempSync, symlinkSync, unlinkSync, rmdirSync, realpathSync } from "node:fs";
@@ -274,5 +275,60 @@ describe("§17 — explain-hot-paths: phán quyết theo INDEX, không theo th�
       Plans: [{ "Node Type": "Seq Scan", "Relation Name": "Quote", "Actual Rows": 1, "Rows Removed by Filter": 4999, "Actual Loops": 2 }],
     };
     expect(m.timSeqScan(ke).map((s) => [s.bang, s.dong])).toEqual([["Quote", 10000]]);
+  });
+
+  // Người soát (vòng 2, 2026-09-29): mục "ĐẾM TỔNG" của CHAP_NHAN là `{ bang: null, sql: /^\s*SELECT COUNT\(\*\)/i }`
+  // — tha MỌI câu mở đầu bằng COUNT(*) trên MỌI bảng. Câu đếm TRANG mới của listQuotes
+  // (`prisma.quoteSheet.groupBy` → `SELECT COUNT(*) AS "_count$_all", "quoteId" … GROUP BY`) lọt đúng vào
+  // đó: nó quét tuần tự cả bảng QuoteSheet thì cổng vẫn XANH. Các câu dưới đây chép NGUYÊN VĂN log Prisma 7
+  // của một lượt thật; tests/ds-bao-gia-dem-trang.test.js đối chiếu cùng luật với SQL nghe được lúc chạy,
+  // nên Prisma đổi khuôn câu thì bài bên đó đỏ, không để các chuỗi này âm thầm cũ đi.
+  const SQL = {
+    demTrang:
+      'SELECT COUNT(*) AS "_count$_all", "public"."QuoteSheet"."quoteId" FROM "public"."QuoteSheet" WHERE "public"."QuoteSheet"."quoteId" IN ($1,$2,$3) GROUP BY "public"."QuoteSheet"."quoteId" OFFSET $4',
+    demTrangCaBang:
+      'SELECT COUNT(*) AS "_count$_all", "public"."QuoteSheet"."quoteId" FROM "public"."QuoteSheet" WHERE 1=1 GROUP BY "public"."QuoteSheet"."quoteId" OFFSET $1',
+    tongBaoGia:
+      'SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."Quote"."id" FROM "public"."Quote" WHERE "public"."Quote"."deletedAt" IS NULL OFFSET $1) AS "sub"',
+    tongKhach:
+      'SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."Customer"."id" FROM "public"."Customer" WHERE "public"."Customer"."deletedAt" IS NULL OFFSET $1) AS "sub"',
+  };
+
+  it("CHAP_NHAN: mọi mục nêu ĐÚNG MỘT bảng kèm lý do — không mục nào tha mọi bảng", () => {
+    expect(m.CHAP_NHAN.length).toBeGreaterThan(0);
+    for (const c of m.CHAP_NHAN) {
+      expect(typeof c.bang === "string" && c.bang.length > 0, `mục ${c.sql} tha MỌI bảng (bang: ${c.bang})`).toBe(true);
+      expect(c.lyDo?.length ?? 0, `mục ${c.bang} ${c.sql} thiếu lý do`).toBeGreaterThan(40);
+    }
+  });
+
+  it("câu đếm TRANG (groupBy theo quoteId) KHÔNG được tha — kể cả khi nó gộp cả bảng", () => {
+    expect(m.daChapNhan("QuoteSheet", SQL.demTrang)).toBe(false);
+    expect(m.daChapNhan("QuoteSheet", SQL.demTrangCaBang)).toBe(false);
+  });
+
+  it("đếm TỔNG của prisma.count vẫn được tha — chỉ trên đúng bảng nó đếm, không có GROUP BY", () => {
+    expect(m.daChapNhan("Quote", SQL.tongBaoGia)).toBe(true);
+    expect(m.daChapNhan("Customer", SQL.tongKhach)).toBe(true);
+    expect(m.daChapNhan("QuoteSheet", SQL.tongBaoGia), "Seq Scan ở bảng KHÁC bảng được đếm").toBe(false);
+    expect(m.daChapNhan("Customer", SQL.tongBaoGia)).toBe(false);
+    expect(m.daChapNhan("QuoteSheet", SQL.tongBaoGia.replaceAll('"Quote"', '"QuoteSheet"')), "đếm tổng bảng không được nêu").toBe(false);
+    const coNhom = SQL.tongBaoGia.replace(' OFFSET $1) AS "sub"', ' GROUP BY "public"."Quote"."status" OFFSET $1) AS "sub"');
+    expect(m.daChapNhan("Quote", coNhom), "đếm có GROUP BY không phải đếm tổng").toBe(false);
+    expect(m.daChapNhan("Quote", `${SQL.tongBaoGia} UNION ALL SELECT 1`), "khuôn phải phủ TRỌN câu").toBe(false);
+  });
+
+  // Nhân viên thường không có quote:hn:fill / quote:internal:view nên listQuotes của họ KHÔNG nạp bảng nội bộ:
+  // câu đếm trang là câu DUY NHẤT chạm QuoteSheet. Phiên toàn quyền còn chạy thêm bangNoiBoTheoSheet (cũng
+  // đi index QuoteSheet) — gỡ index thì CÂU ĐÓ đỏ, và lượt kiểm ngược cũ tưởng là câu đếm trang đỏ.
+  it("có đường đo danh sách báo giá bằng phiên KHÔNG quyền bảng nội bộ", () => {
+    const P = { QUOTE_READ_ALL: "quote:read:all", QUOTE_HN_FILL: "quote:hn:fill", QUOTE_INTERNAL_VIEW: "quote:internal:view", KHAC: "customer:read:all" };
+    expect(m.quyenKhongBangNoiBo(P)).toEqual(["quote:read:all", "customer:read:all"]);
+    // bỏ ĐÚNG hai quyền đang mở nhánh bảng nội bộ — listQuotes đổi điều kiện đó thì bài này đỏ
+    expect(doc("src/services/quoteService.ts")).toMatch(
+      /const canBangNoiBo = can\(req\.session, P\.QUOTE_HN_FILL\) \|\| can\(req\.session, P\.QUOTE_INTERNAL_VIEW\);/,
+    );
+    expect(src).toMatch(/permissions: quyenKhongBangNoiBo\(PERMISSIONS\)/);
+    expect(src).toMatch(/await quoteService\.listQuotes\(\{ \.\.\.reqKhongNoiBo, query: \{ \.\.\.chung, page: 1 \} \}\);/);
   });
 });
