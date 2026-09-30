@@ -36,6 +36,29 @@
 //     với 2,532, lệch 5,6% — và hai ca đơn vị `giuTiLeAnhGoc` đỏ (cờ bị bỏ qua).
 // Ca GN xanh ở mọi phía: GN không có gì phải sửa, và nó đỏ nếu ai đó "sửa" bằng cách ghim vị trí TUYỆT
 // ĐỐI cho mọi ảnh (logo GN sẽ rời khối "From:" 77px vì C/D của GN đổi).
+//
+// ── VÒNG 3: `anhMau: null` VÀ HAI NHÁNH DỰ PHÒNG CỦA `tiLeAnhGoc` ─────────────
+// · Mẫu kế thừa Colorfull muốn TẮT cờ bằng `{ ...clofull_decor, anhMau: null }`. Tham số mặc định
+//   `tuyChon = {}` của `chupAnhMau` chỉ thay `undefined`, nên mã cũ đọc `null.giuTiLeAnhGoc` → TypeError
+//   ngay ở ảnh mẫu đầu tiên, CẢ lần xuất hỏng (500). Nay `null` = không khai.
+// · ĐỌC KHÔNG RA kích thước ảnh ⇒ giữ hình tệp mẫu như không bật cờ. Thử bảy kiểu: PNG cụt, JPEG mang
+//   đuôi .png, PNG khai cao 0, JPEG cụt trước khối SOF, PNG mang đuôi .jpeg, PNG
+//   có chữ ký mà khối đầu không phải IHDR, đuôi .emf. Ca "JPEG mang đuôi .png" lộ một lỗi thật:
+//   `imgDims` không soát chữ ký tệp, đọc 8 byte của khối JFIF ra 65536 × 4292542531px ⇒ logo bị ép còn
+//   0,0012px bề ngang. Nay `imgDims` chỉ đọc khi byte đúng là định dạng mà đuôi khai.
+// · Ảnh JPEG mang đuôi .jpeg / .jpg / .JPG, lưu thành tệp mẫu rồi NẠP LẠI (ExcelJS lấy đuôi từ tên tệp trong
+//   xl/media/ — đúng đường `buildQuoteBuffer` đi): bề ngang theo khối SOF của ảnh chính, không theo ảnh thu
+//   nhỏ 160×120 nằm trong khối Exif đứng trước nó.
+// ĐỎ TRÊN MÃ CŨ (a410028, đo 2026-09-29): "tuyChon = null" và ca xuất thật `anhMau: null` (TypeError), ca
+// "JPEG mang đuôi .png" (bề ngang 0,0012px). Đột biến trên mã đã sửa (mỗi lần một chỗ, chạy tệp này):
+//   · `tiLeAnhGoc` trả `d ? d.w / d.h : 1` (đọc không ra coi như vuông) → cả bảy ca "đọc KHÔNG ra" đỏ;
+//   · bỏ phép đổi jpg → jpeg → ca .jpg và .JPG đỏ; bỏ `.toLowerCase()` → ca .JPG đỏ;
+//   · `imgDims` bỏ soát chữ ký PNG → ca "JPEG mang đuôi .png" đỏ; bỏ chốt SOI của JPEG → ca "PNG mang đuôi
+//     .jpeg" đỏ; bỏ chốt khối đầu IHDR → ca "PNG … khối đầu không phải IHDR" đỏ;
+//   · `imgDims` quét JPEG từng byte thay vì nhảy qua từng khối → ba ca JPEG đỏ (vớ SOF của ảnh thu nhỏ, 4:3);
+//     đảo cao / rộng khi đọc SOF → ba ca JPEG đỏ (1:3);
+//   · `tiLeAnhGoc` bỏ điều kiện cao > 0 → ca "PNG khai cao 0" đỏ: tỉ lệ vô cực, neo ra `col 16383, colOff
+//     Infinity` — tệp Excel coi là hỏng.
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
@@ -43,7 +66,7 @@ import zlib from "node:zlib";
 import JSZip from "jszip";
 import ExcelJS from "exceljs";
 import { buildQuoteBuffer, chupAnhMau, datLaiAnhMau } from "../src/excel.js";
-import { getConfig } from "../src/templateConfigs.js";
+import { getConfig, TEMPLATE_CONFIGS } from "../src/templateConfigs.js";
 
 const EMU_PX = 9525, EMU_PT = 12700;
 /** Bề rộng px Excel vẽ cho bề rộng LƯU `w` (96dpi, chữ số rộng nhất 7px — font Normal Calibri 11). */
@@ -98,6 +121,8 @@ async function hinhHoc(buf) {
     for (const m of d.matchAll(/<xdr:(twoCellAnchor|oneCellAnchor)([^>]*)>([\s\S]*?)<\/xdr:\1>/g)) {
       const from = diem(m[3], "from"), to = diem(m[3], "to");
       const ext = /<xdr:ext cx="(\d+)" cy="(\d+)"/.exec(m[3]);
+      // Neo không đọc được (vd. colOff "Infinity" khi tỉ lệ ảnh ra vô cực): báo thẳng XML, đừng để TypeError.
+      if (!from || (m[1] === "twoCellAnchor" ? !to : !ext)) throw new Error(`neo ảnh (${m[1]}) hỏng, XML: ${m[3].slice(0, 400)}`);
       const g = { kieu: m[1], editAs: thuocTinh(m[2]).editAs, from, to, x1: X(from), y1: Y(from) };
       if (to) Object.assign(g, { x2: X(to), y2: Y(to) });
       else Object.assign(g, { x2: g.x1 + ext[1] / EMU_PX, y2: g.y1 + ext[2] / EMU_PX });
@@ -217,8 +242,9 @@ describe("logo GIA NGUYỄN: neo KHÔNG đổi — nó đi theo khối \"From:\"
   }
 });
 
-/** PNG hợp lệ w×h (một màu) — đủ để ExcelJS nhúng và ghi ra tệp. */
-function png(w, h) {
+/** PNG hợp lệ w×h (một màu) — đủ để ExcelJS nhúng và ghi ra tệp. `khoiDau: [loại, dữ liệu]` chèn một khối
+ *  TRƯỚC IHDR (PNG sai quy cách: khối đầu không phải IHDR). */
+function png(w, h, { khoiDau } = {}) {
   const chunk = (type, data) => {
     const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
     const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
@@ -230,25 +256,54 @@ function png(w, h) {
   const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0x80)]);
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    ...(khoiDau ? [chunk(khoiDau[0], Buffer.from(khoiDau[1], "latin1"))] : []),
     chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(Buffer.concat(Array.from({ length: h }, () => row)))), chunk("IEND", Buffer.alloc(0)),
   ]);
 }
 
+/** JPEG baseline xám w×h HỢP LỆ: GDI+ và WIC của Windows giải mã ra đúng w×h, điểm ảnh xám 128 (thử
+ *  2026-09-29). Mọi khối 8×8 chỉ có DC = 0. Mỗi bảng Huffman có một mã dài 1 bit, nên mỗi khối là 2 bit "0"
+ *  (DC loại 0 + AC EOB), đệm bit 1 cho đủ byte. `thuNho: [w, h]` chèn TRƯỚC khối SOF một khối APP1 "Exif"
+ *  mang nguyên một JPEG thu nhỏ có SOF RIÊNG, như ảnh chụp từ điện thoại / máy ảnh. */
+function jpeg(w, h, { thuNho } = {}) {
+  const khoi = (ma, du) => { const dai = Buffer.alloc(2); dai.writeUInt16BE(du.length + 2); return Buffer.concat([Buffer.from([0xff, ma]), dai, du]); };
+  const u16 = (v) => [v >> 8, v & 255];
+  const soBit = 2 * Math.ceil(w / 8) * Math.ceil(h / 8);
+  const quet = Buffer.alloc(Math.ceil(soBit / 8));
+  if (soBit % 8) quet[quet.length - 1] = (1 << (8 - (soBit % 8))) - 1;
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8]),                                                                   // SOI
+    khoi(0xe0, Buffer.from("JFIF\0\x01\x01\0\0\x01\0\x01\0\0", "latin1")),                      // APP0
+    ...(thuNho ? [khoi(0xe1, Buffer.concat([Buffer.from("Exif\0\0MM\0*\0\0\0\x08\0\0\0\0\0\0", "latin1"), jpeg(...thuNho)]))] : []),
+    khoi(0xdb, Buffer.concat([Buffer.from([0]), Buffer.alloc(64, 1)])),                           // DQT
+    khoi(0xc0, Buffer.from([8, ...u16(h), ...u16(w), 1, 1, 0x11, 0])),                            // SOF0: CAO trước, RỘNG sau
+    khoi(0xc4, Buffer.from([0x00, 1, ...Array(15).fill(0), 0])),                                 // DHT (DC)
+    khoi(0xc4, Buffer.from([0x10, 1, ...Array(15).fill(0), 0])),                                 // DHT (AC)
+    khoi(0xda, Buffer.from([1, 1, 0, 0, 63, 0])), quet,                                          // SOS + dữ liệu quét
+    Buffer.from([0xff, 0xd9]),                                                                   // EOI
+  ]);
+}
+
 describe("chupAnhMau / datLaiAnhMau: mọi kiểu neo, cột bị ẩn, hàng đổi cao", () => {
-  /** Dựng một sheet "mẫu" (ảnh PNG 40×20 — tỉ lệ 2), chụp, đổi kích thước bằng `doi`, đặt lại, rồi đọc
-   *  hình học trước / sau từ tệp. `tuyChon` đi thẳng vào `chupAnhMau` (như `cfg.anhMau` của mẫu). */
-  async function thu(themAnh, doi, tuyChon) {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("S");
+  /** Dựng một sheet "mẫu" có một ảnh (mặc định PNG 40×20, tỉ lệ 2), chụp, đổi kích thước bằng `doi`, đặt
+   *  lại, rồi đọc hình học trước / sau từ tệp. `tuyChon` đi thẳng vào `chupAnhMau` (như `cfg.anhMau` của
+   *  mẫu). `anh` = { buffer, extension } thay ảnh mặc định. `napLai`: LƯU sheet mẫu ra tệp rồi NẠP LẠI, như
+   *  `buildQuoteBuffer` nạp tệp mẫu. Khi ấy ảnh mang đuôi của tệp trong xl/media/ (ExcelJS lấy đuôi từ tên
+   *  tệp), đúng thứ `tiLeAnhGoc` đọc lúc xuất thật. */
+  async function thu(themAnh, doi, tuyChon, { anh = { buffer: png(40, 20), extension: "png" }, napLai = false } = {}) {
+    let wb = new ExcelJS.Workbook();
+    let ws = wb.addWorksheet("S");
     [4, 12.36328125, 21.1796875, 50, 10].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     [30, 20, 40, 25].forEach((h, i) => { ws.getRow(i + 1).height = h; });
-    const id = wb.addImage({ buffer: png(40, 20), extension: "png" });
+    const id = wb.addImage(anh);
     themAnh(ws, id);
-    const truoc = await hinhHoc(Buffer.from(await wb.xlsx.writeBuffer()));
+    const tepMau = Buffer.from(await wb.xlsx.writeBuffer());
+    const truoc = await hinhHoc(tepMau);
+    if (napLai) { wb = new ExcelJS.Workbook(); await wb.xlsx.load(tepMau); ws = wb.getWorksheet("S"); }
     const chup = chupAnhMau(ws, tuyChon);
     doi(ws);
     datLaiAnhMau(ws, chup);
-    return { truoc, sau: await hinhHoc(Buffer.from(await wb.xlsx.writeBuffer())) };
+    return { truoc, sau: await hinhHoc(Buffer.from(await wb.xlsx.writeBuffer())), tepMau };
   }
   const n = (col, colOff, row, rowOff) => ({ nativeCol: col, nativeColOff: colOff, nativeRow: row, nativeRowOff: rowOff });
   const gan = (a, b, nhan) => { for (const k of ["x1", "x2", "y1", "y2"]) expect(Math.abs(a[k] - b[k]), `${nhan}: ${k} ${a[k]} ≠ ${b[k]}`).toBeLessThanOrEqual(1); };
@@ -322,5 +377,95 @@ describe("chupAnhMau / datLaiAnhMau: mọi kiểu neo, cột bị ẩn, hàng đ
     for (const k of ["x1", "y1", "y2"]) expect(Math.abs(b[k] - a[k]), `${k} ${b[k]} ≠ ${a[k]}`).toBeLessThanOrEqual(1);
     expect(b.x2 - b.x1).toBeCloseTo(80, 1);
     kiemNeoTrongO(sau, b.from, "tl");
+  });
+
+  // Ảnh mẫu vẽ MÉO, neo như logo Colorfull (B+62,7px → D+22px) nhưng trên lưới của `thu`: 194,33 × 75,33px,
+  // tỉ lệ 2,58. Sau đó cột B thu hẹp HƠN độ lệch và cột C nới ra. Nhờ vẽ méo, mọi tỉ lệ "đoán" (1, 2, 3…) đều
+  // ra hình KHÁC tệp mẫu.
+  const logoMeo = (ws, id) => ws.addImage(id, { tl: n(1, 596900, 0, 12700), br: n(3, 209550, 2, 95250), editAs: "oneCell" });
+  const doiCotDuoiLogo = (ws) => { ws.getColumn(2).width = 7; ws.getColumn(3).width = 34; };
+
+  // ── `tuyChon` = null là KHÔNG KHAI ──────────────────────────────────────────
+  // Bốn cách "không bật" phải ra cùng một hình: y tệp mẫu. Mã cũ ném TypeError với null.
+  for (const [nhan, tuyChon] of [["null", null], ["undefined", undefined], ["{}", {}], ["{ giuTiLeAnhGoc: false }", { giuTiLeAnhGoc: false }]]) {
+    it(`tuyChon = ${nhan} (mẫu không bật / tắt cờ): không ném, ảnh giữ đúng chỗ và cỡ như tệp mẫu`, async () => {
+      const { truoc, sau } = await thu(logoMeo, doiCotDuoiLogo, tuyChon);
+      gan(sau.anh[0], truoc.anh[0], `tuyChon = ${nhan}`);
+      kiemNeoTrongO(sau, sau.anh[0].from, "tl"); kiemNeoTrongO(sau, sau.anh[0].to, "br");
+    });
+  }
+
+  // ── Nhánh dự phòng 1 của `tiLeAnhGoc`: ĐỌC KHÔNG RA kích thước ảnh ⇒ giữ hình tệp mẫu như không bật cờ ──
+  const KHONG_DOC_RA = [
+    ["PNG cụt — đứt giữa khối IHDR (20 byte đầu)", { buffer: png(40, 20).subarray(0, 20), extension: "png" }],
+    ["JPEG mang đuôi .png (khai sai đuôi)", { buffer: jpeg(60, 20), extension: "png" }],
+    ["PNG khai cao 0 (IHDR 40×0)", { buffer: png(40, 0), extension: "png" }],
+    ["JPEG cụt — đứt trước khối SOF", { buffer: jpeg(60, 20).subarray(0, 60), extension: "jpg" }],
+    // Hai ca dưới khoá hai chốt chữ ký còn lại của `imgDims` (soát lượt v1). Mỗi ca dựng sao cho bỏ chốt thì
+    // `imgDims` đọc ra một kích thước RÁC thay vì null:
+    // · PNG mang đuôi .jpeg: bề ngang 65472 = 0x0000FFC0 đặt cặp FF C0 ở byte 18–19. Bỏ chốt SOI (FF D8) thì vòng
+    //   quét marker coi đó là khối SOF0, đọc ra 512 × 264px (tỉ lệ ≈ 1,94) — lỗi 0,0012px theo chiều ngược lại.
+    // · PNG có chữ ký nhưng khối đầu là tEXt "Software…": bỏ chốt IHDR thì byte 16–23 ("Software") bị đọc làm
+    //   1399809652 × 2002875013px (tỉ lệ ≈ 0,70).
+    ["PNG mang đuôi .jpeg (khai sai đuôi; có cặp FF C0 trong IHDR)", { buffer: png(0xffc0, 1), extension: "jpeg" }],
+    ["PNG có chữ ký nhưng khối đầu không phải IHDR (tEXt)", { buffer: png(40, 20, { khoiDau: ["tEXt", "Software\0Paint"] }), extension: "png" }],
+    ["đuôi .emf — ảnh vector, imgDims không đọc định dạng này", { buffer: Buffer.from("EMF: ảnh vector, không có kích thước pixel", "utf8"), extension: "emf" }],
+  ];
+  for (const [nhan, anh] of KHONG_DOC_RA) {
+    it(`giuTiLeAnhGoc · đọc KHÔNG ra kích thước ảnh — ${nhan}: giữ hình tệp mẫu, neo trong ô, vẫn ghi ra tệp`, async () => {
+      const { truoc, sau } = await thu(logoMeo, doiCotDuoiLogo, { giuTiLeAnhGoc: true }, { anh, napLai: true });
+      expect(sau.anh, "mất ảnh / thừa ảnh").toHaveLength(1);
+      const [a, b] = [truoc.anh[0], sau.anh[0]];
+      gan(b, a, `${nhan}: vẽ ${(b.x2 - b.x1).toFixed(4)} × ${(b.y2 - b.y1).toFixed(2)}px, tệp mẫu ${(a.x2 - a.x1).toFixed(2)} × ${(a.y2 - a.y1).toFixed(2)}px`);
+      kiemNeoTrongO(sau, b.from, "tl"); kiemNeoTrongO(sau, b.to, "br");
+    });
+  }
+
+  // ── Nhánh dự phòng 2 của `tiLeAnhGoc`: ảnh JPEG mang đuôi .jpg ────────────────
+  // Excel đặt tên "image1.jpeg", nhưng tệp do công cụ khác lưu có thể mang "image1.jpg". ExcelJS cũng ghi
+  // đúng đuôi được truyền vào `addImage` (bài soát tiền đề này). `imgDims` chỉ biết "jpeg", nên `tiLeAnhGoc`
+  // phải hạ chữ thường rồi đổi jpg → jpeg.
+  // Ảnh thử là JPEG 60×20 (tỉ lệ 3) có ảnh thu nhỏ 160×120 trong khối Exif đứng TRƯỚC khối SOF chính. Đọc
+  // nhầm SOF của ảnh thu nhỏ thì ra 4:3, đảo cao/rộng thì ra 1:3.
+  for (const duoi of ["jpeg", "jpg", "JPG"]) {
+    it(`giuTiLeAnhGoc · ảnh JPEG đuôi .${duoi} (tệp mẫu lưu ra rồi nạp lại): bề ngang = cao × 3 theo SOF của ảnh 60×20, không theo ảnh thu nhỏ trong Exif`, async () => {
+      const anh = { buffer: jpeg(60, 20, { thuNho: [160, 120] }), extension: duoi };
+      const { truoc, sau, tepMau } = await thu(logoMeo, doiCotDuoiLogo, { giuTiLeAnhGoc: true }, { anh, napLai: true });
+      const media = Object.keys((await JSZip.loadAsync(tepMau)).files).filter((t) => /^xl\/media\/[^/]+$/.test(t));
+      expect(media, "tiền đề: ảnh trong tệp mẫu phải mang đúng đuôi này").toEqual([`xl/media/image1.${duoi}`]);
+      const [a, b] = [truoc.anh[0], sau.anh[0]];
+      expect(Math.abs((a.x2 - a.x1) / (a.y2 - a.y1) / 3 - 1), "ca thử phải bắt đầu từ một ảnh vẽ MÉO").toBeGreaterThan(0.05);
+      for (const k of ["x1", "y1", "y2"]) expect(Math.abs(b[k] - a[k]), `${k} ${b[k]} ≠ ${a[k]}`).toBeLessThanOrEqual(1);
+      const tiLe = (b.x2 - b.x1) / (b.y2 - b.y1);
+      expect(Math.abs(tiLe / 3 - 1), `.${duoi}: tỉ lệ ${tiLe.toFixed(4)}; JPEG 60×20 = 3`).toBeLessThanOrEqual(0.005);
+      kiemNeoTrongO(sau, b.from, "tl"); kiemNeoTrongO(sau, b.to, "br");
+    });
+  }
+});
+
+describe("mẫu kế thừa Colorfull TẮT cờ bằng `anhMau: null`: coi như không khai, lần xuất không hỏng", () => {
+  it("{ ...clofull_decor, anhMau: null }: xuất được, logo y hệt khi bỏ hẳn `anhMau`, tức đúng chỗ và cỡ tệp mẫu", async () => {
+    const { anhMau: _, ...khongKhai } = TEMPLATE_CONFIGS.clofull_decor;
+    // Mã mẫu tạm, mở đầu "clofull" như mọi mẫu Colorfull. Gỡ trong `finally`.
+    const tam = { clofull_thu_anhmau_null: { ...TEMPLATE_CONFIGS.clofull_decor, anhMau: null }, clofull_thu_khong_khai: khongKhai };
+    Object.assign(TEMPLATE_CONFIGS, tam);
+    try {
+      const goc = await hinhHoc(tepMau("clofull_decor"));
+      const raNull = await hinhHoc(await buildQuoteBuffer(baoGia("clofull_thu_anhmau_null")));   // mã cũ: TypeError ở đây
+      const raKhongKhai = await hinhHoc(await buildQuoteBuffer(baoGia("clofull_thu_khong_khai")));
+      const raBatCo = await hinhHoc(await buildQuoteBuffer(baoGia("clofull_decor")));
+      expect(raNull.anh, "mất logo / thừa ảnh").toHaveLength(1);
+      const [g, r, k] = [goc.anh[0], raNull.anh[0], raKhongKhai.anh[0]];
+      expect({ editAs: r.editAs, from: r.from, to: r.to }, "`anhMau: null` phải ra y như không khai").toEqual({ editAs: k.editAs, from: k.from, to: k.to });
+      for (const t of ["x1", "y1", "x2", "y2"]) {
+        expect(Math.abs(r[t] - g[t]), `${t} = ${r[t].toFixed(2)}px, tệp mẫu ${g[t].toFixed(2)}px`).toBeLessThanOrEqual(1);
+      }
+      kiemNeoTrongO(raNull, r.from, "góc trên-trái"); kiemNeoTrongO(raNull, r.to, "góc dưới-phải");
+      // Tiền đề: bật cờ thì mép phải KHÁC tệp mẫu (bề ngang theo ảnh gốc), nên phép so ở trên phân biệt được
+      // "đã tắt cờ" với "cờ vẫn bật".
+      expect(Math.abs(raBatCo.anh[0].x2 - g.x2), "clofull_decor (bật cờ) phải vẽ logo rộng hơn tệp mẫu").toBeGreaterThan(5);
+    } finally {
+      for (const khoa of Object.keys(tam)) delete TEMPLATE_CONFIGS[khoa];
+    }
   });
 });
