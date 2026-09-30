@@ -75,18 +75,20 @@ describe("payload customerLogo của client cũ không lọt vào file xuất", 
     ["png", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="],
   ];
 
-  it.each(cases)("%s: file giống hệt về ô C3 và số media khi không gửi logo", async (_ext, customerLogo) => {
+  it.each(cases)("%s: file giống hệt về khối Kính gửi (B3) và số media khi không gửi logo", async (_ext, customerLogo) => {
     const [baseBuf, legacyBuf] = await Promise.all([
       buildQuoteBuffer(makeQuote("clofull_decor")),
       buildQuoteBuffer(makeQuote("clofull_decor", { customerLogo })),
     ]);
     const base = new ExcelJS.Workbook(), legacy = new ExcelJS.Workbook();
     await Promise.all([base.xlsx.load(baseBuf), legacy.xlsx.load(legacyBuf)]);
-    const baseC3 = String(base.worksheets[0].getCell("C3").value || "");
-    const legacyC3 = String(legacy.worksheets[0].getCell("C3").value || "");
-    expect(legacyC3).toBe(baseC3);
-    expect(legacyC3).toContain("Kính gửi:");
-    expect(legacyC3).not.toContain("logo cty khách hàng");
+    // Khối "Kính gửi" của Colorfull nay gộp B3:I3 (ô chủ B3) — chữ mồi "logo cty khách hàng" nằm ở C3 của mẫu.
+    const baseB3 = String(base.worksheets[0].getCell("B3").value || "");
+    const legacyB3 = String(legacy.worksheets[0].getCell("B3").value || "");
+    expect(legacyB3).toBe(baseB3);
+    expect(legacyB3).toContain("Kính gửi:");
+    expect(legacyB3).not.toContain("logo cty khách hàng");
+    expect(String(legacy.worksheets[0].getCell("C3").value || "")).not.toContain("logo cty khách hàng");
     expect(legacy.model.media).toHaveLength(base.model.media.length);
   });
 });

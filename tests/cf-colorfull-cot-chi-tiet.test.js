@@ -468,10 +468,14 @@ describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn",
     }
   }, 300_000);
 
-  it("khối \"Kính gửi\" ra GIỮA trang (gộp C3:I3, canh giữa) sau khi bỏ ô logo", async () => {
+  it("khối \"Kính gửi\" ra GIỮA trang (gộp B3:I3 từ cột STT, canh giữa) sau khi bỏ ô logo", async () => {
     const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor")));
-    expect(oChu(ws, "I3"), "khối Kính gửi chưa phủ tới I — vẫn dạt sang phải như cũ").toBe("C3");
-    expect(ws.getCell("C3").alignment?.horizontal, "khối Kính gửi không canh giữa").toBe("center");
+    expect(oChu(ws, "I3"), "khối Kính gửi chưa phủ tới I — vẫn dạt sang phải như cũ").toBe("B3");
+    // Phải bắt đầu ở B (cột STT) như dải tiêu đề B2:I2 và dải thông tin B5:I5 — gộp từ C thì B3 còn
+    // một ô trống lẻ bên trái khối. Chi tiết từng mẫu / từng mép: tests/cf-clf-khoi-kinh-gui-gop-tu-stt.test.js.
+    expect(oChu(ws, "B3"), "khối Kính gửi chưa gộp từ cột STT — B3 là ô lẻ").toBe("B3");
+    expect(oChu(ws, "C3"), "C3 phải là ô phụ của khối, không phải ô chủ riêng").toBe("B3");
+    expect(ws.getCell("B3").alignment?.horizontal, "khối Kính gửi không canh giữa").toBe("center");
   }, 300_000);
 
   it("hộp nhãn khối tổng GỌN ở F:G, các ô bên trái SẠCH nền — đúng như mẫu GN", async () => {
@@ -910,7 +914,7 @@ describe("Colorfull — bốn chỗ học theo GN", () => {
     const du = { toPhone: "0909 123 456", toAddress: "123 Nguyễn Văn Linh, Q.7", toEmail: "ninh@thienngan.vn" };
     for (const ma of MAU_CLF) {
       const ws = await moFile(await buildQuoteBuffer(baoGia4(ma, du)));
-      const v = ws.getCell("C3").value;
+      const v = ws.getCell("B3").value;
       // Chuỗi THƯỜNG, không richText: cả khối một font, dòng mã đứng như các dòng trên.
       expect(typeof v, `${ma}: khối Kính gửi không phải chuỗi thường`).toBe("string");
       const dong = v.split("\n");
@@ -919,7 +923,7 @@ describe("Colorfull — bốn chỗ học theo GN", () => {
       expect(dong, `${ma}: khối Kính gửi phải đủ 5 dòng + dòng mã`).toHaveLength(6);
       expect(dong.at(-1), `${ma}: dòng mã sai`).toBe("(Số://FP_A26_002)");
       expect(dong.at(-1), `${ma}: khác chuỗi GN in ở B8`).toBe(chu(gn.getCell("B8").value));
-      const o = ws.getCell("C3");
+      const o = ws.getCell("B3");
       expect(o.font?.italic ?? false, `${ma}: khối Kính gửi bị nghiêng`).toBe(false);
       expect(o.font?.name).toBe("Times New Roman");
       expect(o.font?.color, `${ma}: chữ đỏ của ô mồi lại lọt vào`).toEqual({ theme: 1 });
@@ -946,11 +950,11 @@ describe("Colorfull — bốn chỗ học theo GN", () => {
     const q = baoGia4("clofull_decor", { sheets: [s, { ...s, order: 2, name: "Lightbox", templateCode: "clofull_conngay" }] });
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await buildQuoteBuffer(q));
-    expect(chu(wb.worksheets[0].getCell("C3").value).split("\n").at(-1)).toBe("(Số://FP_A26_002_01)");
-    expect(chu(wb.worksheets[1].getCell("C3").value).split("\n").at(-1)).toBe("(Số://FP_A26_002_02)");
+    expect(chu(wb.worksheets[0].getCell("B3").value).split("\n").at(-1)).toBe("(Số://FP_A26_002_01)");
+    expect(chu(wb.worksheets[1].getCell("B3").value).split("\n").at(-1)).toBe("(Số://FP_A26_002_02)");
 
     const ws = await moFile(await buildQuoteBuffer(baoGia4("clofull_decor", { quoteNumber: null, projectCode: null })));
-    expect(ws.getCell("C3").value, "không có mã mà vẫn in dòng mã rỗng").toBe("Kính gửi: CTY CP PHIM THIÊN NGÂN\nMs. Ninh");
+    expect(ws.getCell("B3").value, "không có mã mà vẫn in dòng mã rỗng").toBe("Kính gửi: CTY CP PHIM THIÊN NGÂN\nMs. Ninh");
   }, 300_000);
 
   it("chữ HẠNG MỤC cùng màu số STT (theme 9 tint -0.5) — chỉ hàng hạng mục, nhóm / GN giữ nguyên", async () => {

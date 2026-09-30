@@ -167,6 +167,9 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // C3 = chữ mồi "logo cty khách hàng" (chữ ĐỎ) nằm sẵn trong file mẫu. Tính năng logo khách
       // đã gỡ khỏi cả giao diện lẫn máy chủ, nên chữ này phải biến mất — trước đây nó chỉ được thay
       // khi báo giá CÓ logo, tức gần như mọi file gửi khách đều in nguyên dòng chữ đỏ đó.
+      // Khối "Kính gửi" nay gộp B3:I3 (xem `headerMerges`) nên C3 thành ô PHỤ của vùng gộp — vùng gộp
+      // tự nuốt giá trị của ô phụ, nhưng vẫn xoá tường minh ở đây để chữ mồi không phụ thuộc vào
+      // thứ tự gộp/ghi (và để ai gỡ `headerMerges` đi cũng không làm chữ đỏ sống lại).
       extraCellsToClear: ["J5", "J8", "G22", "C3"],
       keepImagesAboveRow: 3,
     },
@@ -179,10 +182,13 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     cells: {
       title:       "B2",
       titleFormat: baoGiaTitle,
-      // KHỐI "KÍNH GỬI" RA GIỮA TRANG. Mẫu gốc đặt nó ở F3 (gộp F3:I3) để chừa chỗ bên trái cho ô
-      // logo khách hàng; nay tính năng đó đã gỡ nên khối này dạt sang phải một cách vô cớ, lệch hẳn
-      // bố cục của bản GN. `headerMerges` gộp lại C3:I3 và `toBlockCenter` canh giữa.
-      toBlockCell: "C3",
+      // KHỐI "KÍNH GỬI" RA GIỮA TRANG, GỘP LIỀN TỪ CỘT STT. Mẫu gốc đặt nó ở F3 (gộp F3:I3) để chừa
+      // chỗ bên trái cho ô logo khách hàng; nay tính năng đó đã gỡ nên khối này dạt sang phải một
+      // cách vô cớ, lệch hẳn bố cục của bản GN. `headerMerges` gộp lại B3:I3 (bản có ngày B3:J3) và
+      // `toBlockCenter` canh giữa. Ô chủ là B3, KHÔNG phải C3: bản đầu gộp từ C nên B3 ở lại thành một
+      // ô trống lẻ bên trái khối, trong khi dải tiêu đề B2:I2 và dải thông tin B5:I5 ngay trên/dưới
+      // đều gộp từ cột STT — chủ repo thấy ngay ("nó chưa gộp ô nằm ngang nữa").
+      toBlockCell: "B3",
       toBlockCenter: true,
       // 3-line recipient block matching the template (Cty / người liên hệ / Email).
       // Only lines with data are emitted, so it never prints empty "…" placeholders.
@@ -221,8 +227,11 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     // Footer "* Ghi chú" is a C:D merged cell that rides the item splice/duplicate;
     // re-merge it afterwards so the text doesn't duplicate across both columns.
     footerMerges: ["C17:D17"],
-    // Gộp lại đầu trang sau khi bỏ ô logo khách: khối "Kính gửi" phủ C3:I3 và canh giữa.
-    headerMerges: ["C3:I3"],
+    // Gộp lại đầu trang sau khi bỏ ô logo khách: khối "Kính gửi" phủ B3:I3 (từ cột STT tới hết bảng,
+    // cùng hai mép với dải tiêu đề B2:I2 và dải thông tin B5:I5) và canh giữa. Đỉnh vùng này PHẢI
+    // trùng `cells.toBlockCell` — src/excel.ts tìm vùng theo `${toBlockCell}:` để trải style ô chủ
+    // ra ô phụ; lệch thì chữ đỏ của ô mồi nằm lại trong tệp (tests/cf-clf-khoi-kinh-gui-gop-tu-stt).
+    headerMerges: ["B3:I3"],
     // Ô "* Ghi chú" có sẵn trong mẫu — nay CHỈ in khi người dùng bật ô Ghi chú ở màn soạn.
     noteFooterRange: "C17:D17",
     items: {
@@ -462,8 +471,9 @@ TEMPLATE_CONFIGS.clofull_conngay = {
     ...TEMPLATE_CONFIGS.clofull_decor.cells,
     date: "H17",   // bản không-ngày: G17 — dịch theo cột Số Ngày vừa chèn
   },
-  // Mọi toạ độ ngang đều dịch một cột theo cột SỐ NGÀY vừa chèn.
-  headerMerges: ["C3:J3"],
+  // Mọi toạ độ ngang đều dịch một cột theo cột SỐ NGÀY vừa chèn: khối "Kính gửi" B3:J3 (đầu vẫn ở B —
+  // ô chủ `toBlockCell` "B3" kế thừa từ bản không-ngày qua spread, chỉ đuôi dài thêm một cột).
+  headerMerges: ["B3:J3"],
   cleanup: {
     ...TEMPLATE_CONFIGS.clofull_decor.cleanup,
     // Toạ độ dịch theo cột Số Ngày đã chèn:
