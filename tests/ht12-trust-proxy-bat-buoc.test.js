@@ -6,7 +6,11 @@
 //   worker không cần biến này nên kiểm không nằm ở config.ts.
 // · 'false'/'off': `app.set("trust proxy", "false")` → proxy-addr ném "invalid IP address: false"
 //   trong createApp, lỗi không nói tên biến. Nay zod từ chối kèm tên biến.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Mỗi bài dựng một tiến trình node --import tsx (execFileSync tự cho phép 30s): dưới tải vượt trần 20s
+// của vitest (lượt verify 5 đỏ, chạy riêng xanh).
+vi.setConfig({ testTimeout: 90_000 });
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";

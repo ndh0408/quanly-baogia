@@ -6,7 +6,11 @@
 // =ROUND(-52500;-3) ra -52.000, Excel -53.000. Bước tự kiểm lúc xuất (cellFormula) dùng CHÍNH bộ tính
 // này nên vẫn ghi công thức kèm result sai; tệp có fullCalcOnLoad → Excel tính lại khi mở → Đơn giá,
 // Thành tiền, Tổng trong Excel khác app/PDF. Số kỳ vọng dưới đây ĐO BẰNG EXCEL 16 THẬT qua COM.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Vòng vét ~1,5 triệu phép so web/máy chủ: chạy riêng ~8s nhưng dưới tải của cả bộ song song vượt trần
+// 20s (lượt verify 5 đỏ, chạy riêng xanh).
+vi.setConfig({ testTimeout: 90_000 });
 import ExcelJS from "exceljs";
 import { evalEditorFormula } from "../src/quoteFormula.js";
 import { evalFormula as evalWeb } from "../web/src/lib/formula.ts";
