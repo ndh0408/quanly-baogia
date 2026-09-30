@@ -23,7 +23,12 @@
  *   cùng còn lại sau một sự cố trên host (xoá nhầm, mã hoá tống tiền).
  * ============================================================================
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+
+// Bài này chạy script bash THẬT (spawnSync, tự cho phép tới 60s). Mặc định vitest cắt bài ở 20s, mà trên
+// Windows dưới tải của verify đầy đủ, một lượt script mất 18–26s — bài đỏ vì hết giờ chứ không vì sai.
+// Trần 90s = trần spawn 60s + dư cho dọn dẹp; script treo thật vẫn bị spawnSync chặn ở 60s.
+vi.setConfig({ testTimeout: 90_000 });
 import { mkdtempSync, writeFileSync, chmodSync, readFileSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
