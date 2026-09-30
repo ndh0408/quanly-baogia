@@ -34,7 +34,7 @@ describe("DOC-11 — dongVoNghia bắt dòng chỉ có dấu đóng", () => {
 });
 
 // Người soát (2026-09-29): commit đổi tham chiếu sang TÊN còn sót sáu chỗ `tệp:dòng` ĐÃ TRÔI mà
-// check-line-refs không thể bắt — bốn chỗ rơi vào một dòng MÃ khác nghĩa (vd `src/logger.ts:51` giờ
+// check-line-refs không thể bắt — bốn chỗ rơi vào một dòng MÃ khác nghĩa (vd `src/logger.ts` dòng 51 giờ
 // là `export const redactConfig`), hai chỗ rơi vào dòng chú thích (cổng chỉ liệt kê, không chặn).
 // Cổng không kiểm được ngữ nghĩa, nên ở đây neo từng chỗ: số dòng cũ không còn, và TÊN được nêu thay
 // thế có thật ở tệp đích — đổi tên bước/hàm mà quên tài liệu thì bài này đỏ, thay vì im lặng trôi.
@@ -64,7 +64,7 @@ describe("DOC-11 — tham chiếu đã đổi sang TÊN trỏ vào thứ có th�
       tep: "docs/adr/0006-go-spa-vanilla-cu.md", cu: /web\/src\/main\.tsx:\d/, nhac: /`import "\.\.\/\.\.\/public\/style\.css"` trong `web\/src\/main\.tsx`/,
       dich: "web/src/main.tsx", neo: /^import "\.\.\/\.\.\/public\/style\.css";$/m,
     },
-    // Người soát (vòng 2): `docker-compose.prod.yml:288` trong Dockerfile đã trôi sang một dòng chú thích
+    // Người soát (vòng 2): tham chiếu `docker-compose.prod.yml` + số dòng 288 trong Dockerfile đã trôi sang một dòng chú thích
     // (NODE_OPTIONS thật của app ở dòng khác); check-line-refs không quét Dockerfile (không đuôi) và
     // không soi tệp ở gốc repo (regex đòi `/`). Rà cùng lớp trong Dockerfile/compose: thêm ba chỗ.
     {
@@ -99,10 +99,20 @@ describe("DOC-11 — tham chiếu đã đổi sang TÊN trỏ vào thứ có th�
 
   it("check-line-refs quét Dockerfile (tệp không đuôi) và soi tham chiếu tới tệp ở GỐC repo", () => {
     expect(dsTep()).toContain("Dockerfile");
-    const m = [..."sang ĐÚNG giá trị mà docker-compose.prod.yml:288 gửi cho app".matchAll(RE)];
+    // Mẫu ghép từ hai mảnh: viết liền thì chính check-line-refs soi dòng này như tham chiếu THẬT tới
+    // compose (bài kế tiếp canh điều đó).
+    const m = [...("sang ĐÚNG giá trị mà docker-compose.prod.yml" + ":288 gửi cho app").matchAll(RE)];
     expect(m.map((x) => [x[1], x[2]])).toEqual([["docker-compose.prod.yml", "288"]]);
     // Đường có thư mục vẫn bắt TRỌN đường, không cắt đuôi thành tên tệp trần.
-    expect([..."xem src/services/quoteService.ts:12".matchAll(RE)].map((x) => x[1])).toEqual(["src/services/quoteService.ts"]);
+    expect([...("xem src/services/quoteService.ts" + ":12").matchAll(RE)].map((x) => x[1])).toEqual(["src/services/quoteService.ts"]);
+  });
+
+  it("tệp test này không tự đẻ tham chiếu tệp:dòng giả cho check-line-refs soi (dữ liệu mẫu phải ghép mảnh)", () => {
+    // Người soát (v1): mẫu viết liền trong chú thích + dữ liệu mẫu bị cổng liệt kê như tham chiếu thật
+    // tới dòng compose — compose đổi là cổng đỏ vì chuỗi trong test chứ không vì tài liệu trôi.
+    const loi = doc("tests/ops-cong-kiem.test.js").split(/\r?\n/)
+      .flatMap((dong, i) => [...dong.matchAll(RE)].map((x) => `${i + 1}: ${x[1]}:${x[2]}`));
+    expect(loi).toEqual([]);
   });
 });
 
