@@ -628,8 +628,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // trống nào giữa khối này (hàng 3) và tiêu đề cột (hàng 4), mà CHÈN hàng thì phải dời
     // `infoBannerCell` — bộ nhập bám đúng toạ độ đó (src/excelImport.ts, `appBannerRow`) nên mọi tệp
     // Colorfull đã gửi khách nạp lại sẽ mất ÂM THẦM hàng hạng mục đầu tiên. Dải B5 cũng không được:
-    // người dùng đã chốt nó chỉ mang thông tin chương trình. Ô C3 thì bộ nhập không đọc, nên thêm một
-    // dòng vào đây không đổi gì khi nạp lại.
+    // người dùng đã chốt nó chỉ mang thông tin chương trình. Khối B3:I3 (ô chủ B3) thì bộ nhập không đọc —
+    // nó nằm TRÊN hàng tiêu đề cột — nên thêm một dòng vào đây không đổi gì khi nạp lại.
     const txt = c.toBlockFormat
       ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail, phone: quote.toPhone, address: quote.toAddress, quoteNumber: maSheet })
       : (quote.toCompany || "");
@@ -640,9 +640,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // CHỮ PHẢI VỀ MÀU MẶC ĐỊNH. Ô C3 của mẫu Colorfull VỐN là chữ mồi "logo cty khách hàng" màu
     // ĐỎ TƯƠI — đo trong cả `CLF_KhongNgay.xlsx` lẫn `CLF_CoNgay.xlsx`: font.color.argb =
     // FFFF0000. Bỏ tính năng logo khách hàng thì `extraCellsToClear` dọn GIÁ TRỊ nhưng GIỮ STYLE,
-    // rồi `headerMerges` nhân style đỏ ấy ra cả dải C3:I3, rồi khối "Kính gửi" được ghi vào đúng
-    // ô đó ⇒ MỌI báo giá Colorfull gửi khách in tên người nhận bằng CHỮ ĐỎ TƯƠI (đo trên cả ba
-    // mẫu CLF). Ô "Kính gửi" GỐC của mẫu (F3) dùng theme 1 — trả về đúng thế.
+    // rồi `headerMerges` gộp B3:I3 và `mergeCells` chép style ô CHỦ (B3, không đỏ) ra mọi ô phụ.
+    // Khối vốn được đặt ở C3 (bản gộp C3:I3) thì style đỏ ấy đi thẳng vào ô chủ và nhân ra cả dải ⇒
+    // MỌI báo giá Colorfull gửi khách in tên người nhận bằng CHỮ ĐỎ TƯƠI (đo trên cả ba mẫu CLF).
+    // Nay ô chủ là B3 (mẫu không tô đỏ ô này) nhưng vẫn đặt lại màu tường minh — không dựa vào việc
+    // ô nào tình cờ sạch. Ô "Kính gửi" GỐC của mẫu (F3) dùng theme 1 — trả về đúng thế.
     //
     // PHẢI NHÂN BẢN CẢ STYLE, KHÔNG GÁN THẲNG `o.font`/`o.alignment`: ExcelJS gộp các style giống
     // nhau thành MỘT đối tượng dùng chung cho nhiều ô, nên gán thẳng là sửa luôn mọi ô khác đang
@@ -652,15 +654,18 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       const st = JSON.parse(JSON.stringify(o.style || {}));
       st.font = { ...(st.font || {}), color: { theme: 1 } };
       // Canh GIỮA khi mẫu khai `toBlockCenter` (chỉ Colorfull): sau khi bỏ ô logo khách hàng, khối
-      // này phủ cả C3:I3 nên căn trái/phải đều lệch — giữa mới cân với tiêu đề ở hàng trên.
+      // này phủ cả B3:I3 (từ cột STT tới hết bảng) nên căn trái/phải đều lệch — giữa TOÀN dải mới
+      // cân với tiêu đề B2:I2 ở hàng trên.
       if (c.toBlockCenter) st.alignment = { ...(st.alignment || {}), horizontal: "center", vertical: "middle", wrapText: true };
       o.style = st;
       // PHẢI ĐẶT CHO CẢ Ô PHỤ CỦA VÙNG GỘP, không chỉ ô chủ.
-      // `headerMerges` gộp C3:I3 TRƯỚC khúc này, mà `mergeCells` của ExcelJS LÀM PHẲNG style ra
-      // toàn dải — tức màu đỏ của chữ mồi "logo cty khách hàng" đã kịp nhân ra D3..I3. Sửa mỗi ô
-      // chủ thì Excel hiển thị đúng (nó vẽ theo ô chủ) nhưng chữ đỏ vẫn NẰM TRONG TỆP: ai bỏ gộp
-      // trong Excel là nó hiện lại, và mọi công cụ đọc ô phụ vẫn thấy đỏ. Đo trên tệp do máy chủ
-      // dev xuất ra: C3 đã theme1 mà D3/E3/F3/G3/H3/I3 vẫn FFFF0000.
+      // `headerMerges` gộp B3:I3 TRƯỚC khúc này, mà `mergeCells` của ExcelJS LÀM PHẲNG style ra
+      // toàn dải: mọi ô phụ chép y style ô chủ tại lúc gộp. Bản gộp C3:I3 cũ nhân chữ đỏ của ô mồi
+      // "logo cty khách hàng" ra D3..I3; sửa mỗi ô chủ thì Excel hiển thị đúng (nó vẽ theo ô chủ)
+      // nhưng chữ đỏ vẫn NẰM TRONG TỆP: ai bỏ gộp trong Excel là nó hiện lại, và mọi công cụ đọc ô
+      // phụ vẫn thấy đỏ. Đo trên tệp do máy chủ dev xuất ra: C3 đã theme1 mà D3/E3/F3/G3/H3/I3 vẫn
+      // FFFF0000. Ô chủ nay là B3 nhưng bài toán không đổi: style của khối (đã đặt lại màu +
+      // canh giữa) phải được trải ra TOÀN dải, để B3..I3 là một mảng cùng kiểu, không ô nào lẻ.
       const vungKG = ((ws.model?.merges || []) as string[]).find((v) => v.startsWith(`${c.toBlockCell}:`));
       const mKG = vungKG && /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(vungKG);
       if (mKG) {
@@ -860,7 +865,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // ── CỘT ẢNH LÀ CỘT CUỐI MỚI CỦA BẢNG → MỌI DẢI KÉO NGANG CẢ BẢNG PHẢI NỐI DÀI SANG NÓ ──────
     // Người dùng báo 2026-09-23 (ảnh chụp tệp Colorfull): dải tiêu đề "BẢNG BÁO GIÁ" và dải "Thông
     // tin chương trình" dừng ở cột Ghi Chú, cột HÌNH ẢNH bên cạnh trắng trơn — "chưa kéo màu hoàn
-    // chỉnh". Đo trên tệp xuất: CLF gộp F1:I1 · B2:I2 · C3:I3 · B5:I5, GN gộp B6:I6 · B7:I7 · B8:I8,
+    // chỉnh". Đo trên tệp xuất: CLF gộp F1:I1 · B2:I2 · B3:I3 · B5:I5, GN gộp B6:I6 · B7:I7 · B8:I8,
     // tất cả dừng ở cột cuối CŨ. Luật chung (không liệt kê theo mẫu): vùng gộp nào kết thúc đúng ở
     // cột cuối cũ và nằm TRÊN hàng tiêu đề cột (hoặc là dải thông tin chương trình) → gỡ gộp, chép
     // style ô cuối (nền, viền phải/dưới) sang cột ảnh, gộp lại tới cột ảnh. Chữ canh giữa tự về giữa
@@ -903,7 +908,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     const mergedNameWidth = itemsCfg.removeDetail && letter === cols.name && cols.detail
       ? (colWidthOf(cols.name) || 12) + (colWidthOf(cols.detail) || 12)
       : null;
-    // `beRongEp` dùng cho Ô GỘP NGANG ngoài bảng hạng mục (khối "Kính gửi" C3:I3, dải thông tin
+    // `beRongEp` dùng cho Ô GỘP NGANG ngoài bảng hạng mục (khối "Kính gửi" B3:I3, dải thông tin
     // chương trình B5:I5, ô "* Ghi chú" C:D): bề rộng thật của chúng là TỔNG bề rộng các cột bị
     // phủ, không phải bề rộng một cột.
     const cw = beRongEp || mergedNameWidth || colWidthOf(letter) || 12;
@@ -950,7 +955,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
 
   // ── CHIỀU CAO CÁC HÀNG GỘP NGANG NGOÀI BẢNG HẠNG MỤC ──────────────────────────────────────
   // Vòng ngay trên chỉ đo HÀNG HẠNG MỤC. Hai hàng đầu trang của Colorfull giữ nguyên chiều cao
-  // nướng sẵn trong tệp mẫu, và nó KHÔNG đủ: đo trên tệp xuất thật, khối "Kính gửi" (C3:I3) cao
+  // nướng sẵn trong tệp mẫu, và nó KHÔNG đủ: đo trên tệp xuất thật, khối "Kính gửi" (khi đó C3:I3) cao
   // 67pt trong khi `toBlockFormat` sinh 5 dòng cỡ 12pt ⇒ cần ≈75pt, nên DÒNG EMAIL BỊ CẮT ngay cả
   // khi mọi trường đều ngắn. Cùng đúng lớp lỗi "xuống hàng bị che" đã chữa cho hàng hạng mục.
   // GN không khai `toBlockCell`/`infoBannerCell` nên không đi qua đây.

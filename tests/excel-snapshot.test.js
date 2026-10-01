@@ -189,6 +189,18 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // (bản 2026-09-25 dòng mã nghiêng bằng richText, bản chốt dùng chuỗi thường) cho CÙNG hash
       // 0976a4a54d624299: bản chụp đọc chữ của richText, không đọc font từng đoạn.
       // Bảy fixture GN giữ nguyên hash: GN không đổi.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-30 (khối "Kính gửi" gộp từ cột STT) ─────────────────────
+      // Vẫn CHỈ fixture `clf`: 0976a4a54d624299 → 1dd6e7a77ecf29c5. Chủ repo thấy tệp Colorfull xuất
+      // ra có khối "Kính gửi" gộp C3:I3 trong khi dải tiêu đề B2:I2 và dải thông tin B5:I5 gộp từ cột
+      // STT, nên B3 ở lại thành một ô trống lẻ bên trái khối. Nay khối gộp B3:I3 (ô chủ B3).
+      // ĐÃ ĐỐI CHIẾU TỪNG Ô (78 ô ở bản 19eab96, 79 ô ở bản mới): khác ĐÚNG MỘT ô —
+      //     Sheet 1!B3  (trống)  →  "Kính gửi: Công ty Kiểm Thử\nAnh Test\n…\n(Số://GN26SNAP)"
+      // vì bản chụp đọc ô phụ của vùng gộp ra chuỗi của ô chủ: C3..I3 đã đọc ra chuỗi ấy từ trước,
+      // nay B3 cũng thế (đúng phần "B3:I3 thay cho C3:I3"). Giá trị, số, chữ đậm, nền của mọi ô khác
+      // KHÔNG đổi; vùng gộp / căn lề / chiều cao hàng không có trong bản chụp — chốt ở
+      // tests/cf-clf-khoi-kinh-gui-gop-tu-stt.test.js. Bảy fixture GN giữ nguyên hash (đã so từng
+      // phần XML của cả ba mẫu GN với bản 19eab96: giống hệt từng byte).
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

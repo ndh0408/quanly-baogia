@@ -1,7 +1,7 @@
 // Ô chữ CỠ 12 ngoài bảng hạng mục bị hụt chiều cao dòng cuối — soát toàn diện đợt 3 1b.
 //
 // ── LỖI ─────────────────────────────────────────────────────────────────────
-// `caoTheoChu` (src/excel.ts) nới hàng của khối "Kính gửi" (C3:I3) và dải "* Thông tin chương
+// `caoTheoChu` (src/excel.ts) nới hàng của khối "Kính gửi" (khi đó C3:I3, nay B3:I3) và dải "* Thông tin chương
 // trình" (B5:I5) của Colorfull theo số dòng, nhưng tính mỗi dòng 15pt — số của chữ cỡ 11. Hai ô
 // này là Times New Roman CỠ 12, Excel cần 15,75pt mỗi dòng. Đo bằng Excel COM (chép chữ sang ô tạm
 // rộng đúng vùng gộp rồi AutoFit): khối "Kính gửi" đủ 5 dòng (công ty · người liên hệ · ĐT · Đ/c ·
@@ -47,8 +47,8 @@ describe("chữ cỡ 12: mỗi dòng 15,75pt như Excel", () => {
     // giá "(Số://…)" cùng cỡ 12 ⇒ 6 dòng · 94,5pt — thiếu là chính dòng mã bị xén.
     it(`${code} · khối "Kính gửi" 5 dòng + dòng mã cao ≥ 94,5pt (15,75pt/dòng — số đo Excel)`, async () => {
       const ws = await xuat(code);
-      const o = ws.getCell("C3");
-      expect(o.font?.size, "bài này giả định ô C3 cỡ 12 như tệp mẫu").toBe(12);
+      const o = ws.getCell("B3");
+      expect(o.font?.size, "bài này giả định ô B3 (ô chủ khối Kính gửi) cỡ 12 như tệp mẫu").toBe(12);
       expect(typeof o.value, "khối Kính gửi phải là chuỗi thường").toBe("string");
       const dong = o.value.split("\n");
       expect(dong).toHaveLength(6);
