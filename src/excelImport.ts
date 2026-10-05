@@ -466,6 +466,12 @@ function findHeaderRow(ws: ExcelJS.Worksheet): HeaderHit | null {
       if (role && !taken.has(role)) { roles.set(c, role); taken.add(role); }
       if (FILL_HEADER.has(fillOf(cell))) filled++;
     }
+    // Mẫu Colorful cũ đặt tên cột duy nhất chứa hạng mục là "Chi Tiết". Chỉ dùng nó làm tên
+    // khi bảng có đủ cột số, để không nhận nhầm bảng ghi chú hay mất Chi Tiết của mẫu hai cột chữ.
+    if (!taken.has("name") && taken.has("detail") && taken.has("unit") && taken.has("quantity") && taken.has("unitPrice")) {
+      for (const [c, role] of roles) if (role === "detail") { roles.set(c, "name"); break; }
+      taken.delete("detail"); taken.add("name");
+    }
     // Bảng báo giá tối thiểu phải có cột TÊN + (SỐ LƯỢNG hoặc ĐƠN GIÁ hoặc THÀNH TIỀN).
     if (!taken.has("name") || !(taken.has("quantity") || taken.has("unitPrice") || taken.has("_amount"))) continue;
     const score = roles.size + (taken.has("_stt") ? 2 : 0) + (filled >= 3 ? 2 : 0);
@@ -582,8 +588,12 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     blankRun = 0;
     // Hết bảng khi gặp dòng TỔNG CỘNG / VAT / THÀNH TIỀN / chân trang. Dòng có ĐVT + Số Lượng thì
     // vẫn là hạng mục thật (tên hạng mục có thể chứa chữ "Tổng …").
-    const looksItem = !isBlank(cellAt(r, "unit")) && !isBlank(cellAt(r, "quantity"));
-    const labelCells = [stt, textAt(r, "quantity"), textAt(r, "unitPrice"), textAt(r, "days")];
+    const unitText = textAt(r, "unit"), qtyText = textAt(r, "quantity");
+    // Vigo gộp D:F cho nhãn Tổng Cộng: ô chủ nằm ở ĐVT, không ở STT/Hạng Mục.
+    // Nhãn chữ ở ô SL/ĐVT không phải dữ liệu hạng mục (kể cả khi nhãn không gộp).
+    const isFooterLabel = (t: string) => RE_TOTALS.test(normHdr(t)) || RE_FOOTER.test(normHdr(t));
+    const looksItem = !!unitText && !!qtyText && !isFooterLabel(unitText) && !isFooterLabel(qtyText);
+    const labelCells = [stt, unitText, qtyText, textAt(r, "unitPrice"), textAt(r, "days")];
     const hitTotals = labelCells.some((t) => t && (RE_TOTALS.test(normHdr(t)) || RE_FOOTER.test(normHdr(t))));
     if (hitTotals && !looksItem) { stopRow = r; break; }
     if (name && (RE_FOOTER.test(normHdr(name)) || RE_TOTALS.test(normHdr(name))) && !looksItem && isBlank(cellAt(r, "unitPrice"))) { stopRow = r; break; }
@@ -1074,6 +1084,14 @@ function guessTemplate(ws: ExcelJS.Worksheet, s: ImportedSheet, markerCode?: str
   }
   let best: { code: string | null; name: string | null; why: string; score: number } = { code: null, name: null, why: "", score: -99 };
   const sheetName = normHdr(ws.name);
+  // Tệp Colorful cũ chưa có cột Chi Tiết riêng, nên cấu trúc giống GN. Tên pháp nhân trong
+  // lời chào là bằng chứng mạnh hơn vị trí cột; tên bên nhận hoặc tên hạng mục không quyết định mẫu.
+  let colorfullHeader = false;
+  for (let r = 1; r < (s.headerRow || 1) && !colorfullHeader; r++) {
+    for (let c = 1; c <= Math.min(ws.columnCount || 0, MAX_SCAN_COLS); c++) {
+      if (/\bDICH VU CUA (?:CONG TY|COMPANY)\s+(?:(?:TNHH|LIMITED|LTD)\s+)?(?:COLORFULL?|CLOFULL)\b/.test(normHdr(cellText(ws.getCell(r, c).value)))) { colorfullHeader = true; break; }
+    }
+  }
   const nameCol = s.columns?.name ? colIndex(s.columns.name) : 0;
   const sectionFills = new Set<string>();
   if (nameCol) for (const it of s.items) if (it.kind === "section") sectionFills.add(fillOf(ws.getCell(it.row, nameCol)));
@@ -1082,6 +1100,7 @@ function guessTemplate(ws: ExcelJS.Worksheet, s: ImportedSheet, markerCode?: str
     const cols: Record<string, string> = cfg.items?.columns || {};
     const why: string[] = [];
     let score = 0;
+    if (colorfullHeader) { score += code.startsWith("clofull") ? 15 : -15; why.push("tên công ty Colorfull ở đầu trang"); }
     if (!!cols.days === s.hasDays) { score += 3; why.push(s.hasDays ? "có cột Số Ngày" : "không có cột Số Ngày"); } else score -= 8;
     if (!!cfg.items?.numberSubsections === s.numberSubs) { score += 2; if (s.numberSubs) why.push("nhóm con đánh số"); } else score -= 3;
     // CỘT CHI TIẾT — dấu hiệu DUY NHẤT tách nhóm mẫu Colorfull khỏi nhóm mẫu Gia Nguyễn.

@@ -36,6 +36,60 @@ async function roundTrip(code, items = FULL_ITEMS, over = {}) {
 }
 
 describe("parseQuoteWorkbook — vòng tròn xuất → nhập lại", () => {
+  const vigoFile = async ({ detailOnly = false, company = "Colorful", mergedTotal = true } = {}) => {
+    const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("Decal");
+    ws.getCell("B7").value = `Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của công ty ${company}:`;
+    ["STT", detailOnly ? "Chi Tiết" : "HẠNG MỤC", "ĐVT", "SỐ LƯỢNG", "ĐƠN GIÁ (VNĐ)", "THÀNH TIỀN (VNĐ)", "GHI CHÚ"]
+      .forEach((v, i) => { ws.getCell(10, 2 + i).value = v; });
+    const put = (r, vs) => vs.forEach((v, i) => { ws.getCell(r, 2 + i).value = v; });
+    put(11, [1, "Vách 1", "m2", { formula: "6.7*2.6", result: 17.42 }, 120000, { formula: "F11*E11", result: 2090400 }, ""]);
+    put(12, [2, "Vách 5", "m2", { formula: "5.9*2.75", result: 16.225 }, 120000, { formula: "F12*E12", result: 1947000 }, ""]);
+    if (mergedTotal) ws.mergeCells("D13:F13");
+    ws.getCell("D13").value = "Tổng Cộng";
+    ws.getCell("G13").value = { formula: "SUM(G11:G12)", result: 4037400 };
+    ws.getCell("B14").value = "* Notes:";
+    ws.getCell("B15").value = "+ Báo giá trên chưa bao gồm 8% thuế VAT";
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  };
+
+  it.each([true, false])("Vigo: nhãn tổng ở ĐVT (gộp ngang=%s) kết thúc bảng và đọc được tổng", async (mergedTotal) => {
+    const sheet = (await parseQuoteWorkbook(await vigoFile({ mergedTotal }))).sheets[0];
+    expect(sheet.items.map((it) => it.name)).toEqual(["Vách 1", "Vách 5"]);
+    expect(sheet.totals.subtotal).toBe(4037400);
+    expect(sheet.lastRow).toBe(12);
+  });
+
+  it("Vigo: bảng chỉ có cột Chi Tiết dùng cột đó làm tên hạng mục", async () => {
+    const sheet = (await parseQuoteWorkbook(await vigoFile({ detailOnly: true }))).sheets[0];
+    expect(sheet.skipped).toBeUndefined();
+    expect(sheet.columns.name).toBe("C");
+    expect(sheet.columns.detail).toBeUndefined();
+    expect(sheet.items.map((it) => it.name)).toEqual(["Vách 1", "Vách 5"]);
+    expect(computeSubtotal(sheet)).toBe(4037400);
+  });
+
+  it.each(["Colorful", "Colorfull", "Clofull"])("Vigo: công ty %s ở lời chào nhận mẫu CLF dù không có cột Chi Tiết", async (company) => {
+    const sheet = (await parseQuoteWorkbook(await vigoFile({ company }))).sheets[0];
+    expect(sheet.templateCode).toBe("clofull_decor");
+  });
+
+  it("khách hàng tên Colorfull không làm đổi mẫu GN của bên gửi", async () => {
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await vigoFile({ company: "Gia Nguyễn" }));
+    wb.worksheets[0].getCell("C1").value = "Công ty TNHH Colorfull";
+    const sheet = (await parseQuoteWorkbook(Buffer.from(await wb.xlsx.writeBuffer()))).sheets[0];
+    expect(sheet.templateCode).toBe("marico_decor");
+  });
+
+  it("Vigo: 17,42 và 16,225 giữ nguyên qua đọc file → lưới → xuất → nhập lại", async () => {
+    const sheet = (await parseQuoteWorkbook(await vigoFile())).sheets[0];
+    const grid = toGridItems(sheet.items, { usesDays: false, addrDetail: true, showDetail: true });
+    expect(grid.items.map((it) => it.quantityExact)).toEqual([true, true]);
+    expect(computeSubtotal({ ...sheet, items: grid.items })).toBe(4037400);
+    const again = (await parseQuoteWorkbook(await buildQuoteBuffer(baseQuote("clofull_decor", grid.items)))).sheets.find((s) => !s.skipped);
+    expect(again.items.map((it) => it.quantityExact)).toEqual([true, true]);
+    expect(again.totals.subtotal).toBe(4037400);
+  });
+
   it.each(["marico_decor", "clofull_decor", "unibenfood", "gn_banner"])(
     "giữ nguyên nhóm / nhóm con / hàng con / dòng thông tin (%s)", async (code) => {
       const { sheet } = await roundTrip(code);
