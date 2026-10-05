@@ -3548,6 +3548,39 @@ textarea[aria-invalid="true"] {
   margin-bottom: 0;
 }
 
+/* ── Ô "Hiện Thành Tiền nhóm" BỊ KHOÁ Ở TRẠNG THÁI BẬT (GridTable: còn nhóm SL > 1 thì ô tự bật rồi khoá) ─────────
+   Ô tích `disabled` + `checked` mà để trình duyệt vẽ thì mờ gần như tàng hình ở giao diện sáng (xám nhạt với dấu tích
+   trắng) — nhìn không ra "ĐÃ TÍCH + khoá" khác gì "tắt". Vẽ riêng: ô ĐẶC màu mực, dấu tích tương phản, không giảm độ
+   đục. Ô TẮT không khoá không dính luật này (luật chỉ bắt `:checked:disabled` trong nhãn `.gf-group-sub-khoa`), nên
+   trắng viền xám vẫn là "tắt", mực đặc là "bật + khoá", và ô bật MỞ khoá vẫn theo kiểu mặc định của trình duyệt.
+   Sáng: nền #1e293b (14,6:1 trên #fff) + tích trắng. Tối: nền #e2e8f0 (14:1 trên #141821) + tích #0f172a — tích nằm
+   trong ảnh SVG nên màu tích ghi thẳng ở đây, theo từng chế độ (bài kiểm styles.oKhoaNhom.test.ts đọc lại các giá trị này). */
+.gf-group-sub-khoa input[type="checkbox"]:checked:disabled {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid #1e293b;
+  border-color: #1e293b;   /* ghi riêng để luật giao diện tối chỉ cần đè đúng màu */
+  border-radius: 4px;
+  background-color: #1e293b;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
+  opacity: 1;
+  cursor: not-allowed;
+}
+:root[data-theme="dark"] .gf-group-sub-khoa input[type="checkbox"]:checked:disabled {
+  border-color: #e2e8f0;
+  background-color: #e2e8f0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%230f172a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
 /* ── Lưới báo giá: chiều rộng cột do <colgroup> của GridTable quyết định (mảng COLS) ──────────
    Phải có table-layout:fixed thì trình duyệt mới TÔN TRỌNG width đã khai. Để mặc định (auto),
    width chỉ là gợi ý: header dài ("SỐ LƯỢNG", "(không xuất Excel)") và 2 nút ↳ ✕ ép các cột số

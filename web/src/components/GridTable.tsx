@@ -11,7 +11,7 @@ import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, createImagePool, undoRedoKey } from "../lib/gridUndo";
 import { doanBoCot } from "../lib/doanBoCot";
-import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM } from "../lib/khoaThanhTienNhom";
+import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM, TB_TU_TAT_NHOM } from "../lib/khoaThanhTienNhom";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
@@ -585,6 +585,9 @@ function GridTableInner(props: GridTableProps) {
   // Tự bật "Thành Tiền nhóm" mà người dùng KHÔNG trực tiếp gõ/dán Số Lượng nhóm (Ctrl+Z / Ctrl+Y, công thức tham
   // chiếu): ô tích tự đổi + khoá và tổng nhảy ×N, nên phải nói vì sao. Gõ/dán thẳng vào ô SL nhóm thì im.
   const tuBatNhomGianTiep = () => { onGroupSubtotal?.(true); toast(TB_TU_BAT_NHOM, "info"); };
+  // …và chiều ngược lại: Ctrl+Z / Ctrl+Y / Esc TRẢ ô về TẮT (mốc là báo giá cũ "tắt + nhóm SL > 1" mà người dùng đã bật
+  // giữa chừng). Ô tự bỏ tích + mở khoá, tổng rớt về số không nhân hệ số nhóm — phải nói, không thì đó là cú đổi tổng im lặng.
+  const tuTatNhomGianTiep = () => { onGroupSubtotal?.(false); toast(TB_TU_TAT_NHOM, "info"); };
   // `khongTuBat`: lượt tính lại lúc MỞ lưới (khôi phục Số Ngày) — mở báo giá cũ không bao giờ được tự bật ô.
   const recomputeAll = (oDangGo?: string, khongTuBat = false) => {
     if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
@@ -1320,7 +1323,12 @@ function GridTableInner(props: GridTableProps) {
   const applySug = (s: Sug, k: number) => {
     const en = s.items[k]; if (!en) return;
     pushUndo();
+    // Hàng NHÓM cũng gõ tên được và mở gợi ý (gõ ≥ 2 ký tự hoặc Alt+↓): gợi ý điền cả Số Lượng, nên phải đi cùng luật tự
+    // bật như gõ / dán vào ô SL — không thì nhóm thành SL > 1 mà ô "Thành Tiền nhóm" đang tắt và không khoá (tổng sai im
+    // lặng). Chụp hệ số nhóm TRƯỚC khi điền để báo giá cũ "tắt + SL 3" mà gợi ý không đổi SL không bị bật hộ.
+    const nhomTruoc = chupNhom(s.i, s.i);
     fillItemFromEntry(items[s.i] as Record<string, unknown>, en);
+    autoEnableGroupSub(s.i, s.i, nhomTruoc);
     // Ô Hạng Mục đang focus nên effect đồng-bộ-ô sẽ BỎ QUA nó → tự set giá trị hiển thị ngay.
     s.el.value = (items[s.i].name as string) || ""; autoGrow(s.el);
     closeSug(); onChange(); focusCell(s.i, "unitPrice");
@@ -1413,7 +1421,7 @@ function GridTableInner(props: GridTableProps) {
     if (coNhomNhanHeSo(items)) {
       const batLucChup = json.charAt(0) === "1";
       if (batLucChup && !groupSubtotal) tuBatNhomGianTiep();
-      else if (!batLucChup && groupSubtotal) onGroupSubtotal?.(false);
+      else if (!batLucChup && groupSubtotal) tuTatNhomGianTiep();
     }
     const last = Math.max(0, items.length - 1);
     const sel = selRef.current;
@@ -2184,7 +2192,7 @@ function GridTableInner(props: GridTableProps) {
             // Phiên gõ SL nhóm đã tự BẬT ô (báo giá cũ "tắt + SL 3": gõ '5' → bật) thì huỷ phiên phải trả luôn cờ về
             // như mốc của nó — không thì SL về 3 mà ô kẹt bật + khoá. Chỉ khi nhóm SL > 1 vẫn còn (SL ≤ 1 thì cờ
             // không đổi tổng, giữ như cũ).
-            if (moc !== undefined && moc.charAt(0) === "0" && groupSubtotal && coNhomNhanHeSo(items)) onGroupSubtotal?.(false);
+            if (moc !== undefined && moc.charAt(0) === "0" && groupSubtotal && coNhomNhanHeSo(items)) tuTatNhomGianTiep();
           }
         }
         lockCell(esc);

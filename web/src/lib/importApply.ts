@@ -6,6 +6,7 @@
 // Field nào mẫu đích không có (vd Số Ngày) → BỎ công thức, giữ con số (không tạo ref chết).
 
 import * as M from "./quoteMath";
+import { coNhomNhanHeSo, coSauNhapExcel } from "./khoaThanhTienNhom";
 import type { EditorTemplate, ImportedItem, ImportedSheet } from "./api";
 
 export const NEW_IMPORT_SHEET = -1;
@@ -404,3 +405,51 @@ export const diffCounts = (rows: DiffRow[]) => ({
   added: rows.filter((r) => r.kind === "added").length,
   removed: rows.filter((r) => r.kind === "removed").length,
 });
+
+/**
+ * Cờ "Hiện Thành Tiền nhóm" và ĐỐI CHIẾU TIỀN của MỘT sheet trong file SAU KHI nạp — MỘT chỗ tính cho bảng xem trước của hộp
+ * "Nhập từ Excel" và cho hộp xác nhận lúc nạp: hai nơi phải nói cùng một điều, không thì đối chiếu tiền nói một đằng, nạp thật
+ * một nẻo.
+ *
+ * Luật cờ là của `coSauNhapExcel` (lib/khoaThanhTienNhom); ở đây chỉ nối nó với đường nạp của hộp: `target` rỗng = sheet MỚI,
+ * `mode` "append" = Nối vào cuối, còn lại = Thay toàn bộ. `mode` "skip" chỉ để xem, không nạp → không có gì được bật, và mọi
+ * tổng tính theo cờ của chính file như trước (tính theo cờ "sẽ bật" thì sheet bỏ qua lại hiện "Tổng tiền chưa khớp" oan).
+ *
+ *  · `hangSauNap`: TOÀN BỘ hàng của bảng sau khi nạp (Nối: cả hàng cũ + hàng mới); `hangNap`: riêng các hàng lấy từ file.
+ *  · `co`: cờ HIỆU LỰC sau nạp; `tuBat`: cờ vừa được bật vì nhập; `nguonNhom`: nhóm SL > 1 đến từ file hay chỉ có sẵn ở sheet
+ *    đích (Nối vào sheet cũ "tắt + nhóm SL > 1" bằng file không có nhóm nào).
+ *  · `nhanSauNap`: tổng của bảng đích sau nạp có nhân Số Lượng nhóm không = cờ hiệu lực — TRỪ bảng mà tổng KHÔNG BAO GIỜ nhân
+ *    hệ số nhóm (`tongKhongNhanNhom`: bảng Hà Nội, tổng là `extraTableSum` chỉ cộng hạng mục; cờ ở đó chỉ quyết định ô Thành
+ *    Tiền của dòng nhóm hiện số đã nhân hay để trống). Mọi tổng trong hộp đi theo nó, để hộp nói đúng con số màn gọi sẽ hiện.
+ *  · `importedTotal`: tổng phần lấy từ file theo `nhanSauNap` — thứ mà bảng sẽ ghi; `fileTotal`: tổng ghi trong file (nếu có).
+ *  · `moneyMismatch`: hai tổng đó lệch quá ngưỡng. `lechDoHeSoNhom`: phần lệch sinh ra CHỈ vì hai bên hiểu Số Lượng nhóm khác
+ *    nhau — tính theo cờ của chính FILE (cách file tự cộng tổng của nó) thì vẫn khớp tổng ghi trong file. Gặp khi sheet sau nạp
+ *    nhân hệ số mà file không (ô vừa TỰ BẬT, hoặc sheet đích đang bật và Thay / Nối không tắt nó), hoặc ngược lại (bảng Hà Nội
+ *    không nhân mà file nhân). Đó là chủ ý: chỉ cảnh báo, không đưa vào hộp xác nhận. Lệch mà tổng theo cờ trong file CŨNG không
+ *    khớp là lệch THẬT (đọc thiếu dòng, sai cột…) nên vẫn là rủi ro như trước, kể cả khi ô có tự bật.
+ */
+export function doiChieuNhapExcel(o: {
+  fs: Pick<ImportedSheet, "groupSubtotal" | "totals">;
+  mode: "replace" | "append" | "skip";
+  target: { groupSubtotal?: boolean } | null | undefined;
+  hangSauNap: M.Item[];
+  hangNap: M.Item[];
+  usesDays: boolean;
+  thayGiuCoCuaDich?: boolean;
+  tongKhongNhanNhom?: boolean;
+}) {
+  const coFile = !!o.fs.groupSubtotal;
+  const cheDo = !o.target ? "moi" : o.mode === "append" ? "noi" : "thay";
+  const coHieuLuc = coSauNhapExcel({ cheDo, coCuaDich: o.target?.groupSubtotal, coTheoFile: coFile, thayGiuCoCuaDich: o.thayGiuCoCuaDich }, o.hangSauNap);
+  const boQua = o.mode === "skip";
+  const co = boQua ? coFile : coHieuLuc.co;
+  const tuBat = !boQua && coHieuLuc.tuBat;
+  const nhanSauNap = boQua ? coFile : co && !o.tongKhongNhanNhom;
+  const importedTotal = M.sheetSubtotalGrouped(o.hangNap, o.usesDays, nhanSauNap);
+  const fileTotal = o.fs.totals?.subtotal ?? null;
+  const lech = (tong: number) => fileTotal != null && Math.abs(tong - fileTotal) > Math.max(2, Math.abs(fileTotal) * 0.005);
+  const moneyMismatch = lech(importedTotal);
+  const lechDoHeSoNhom = moneyMismatch && !lech(M.sheetSubtotalGrouped(o.hangNap, o.usesDays, coFile));
+  const nguonNhom: "file" | "sheet đích" = coNhomNhanHeSo(o.hangNap) ? "file" : "sheet đích";
+  return { co, tuBat, nhanSauNap, importedTotal, fileTotal, moneyMismatch, lechDoHeSoNhom, nguonNhom };
+}
