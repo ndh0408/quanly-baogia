@@ -239,3 +239,168 @@ biến**.
 2. Migration đụng dữ liệu thì diễn tập bằng `scripts/db/migration-rehearsal.sh`.
 3. Production dùng `prisma migrate deploy`. **`db push` bị chặn cứng** trong
    `package.json` — nó không có lịch sử, không soát được, và xoá được cột.
+
+## Truy vấn kiểm dữ liệu (chỉ đọc)
+
+Mục này chỉ chứa câu `SELECT`. **Không câu nào ở đây được phép sửa dữ liệu**, và không
+nên chạy chúng trên CSDL thật khi chưa có lý do: chạy trên bản khôi phục hoặc CSDL dev
+trước (quy trình repo: dev trước, production sau). Cần chạy trên production thì bọc trong
+giao dịch chỉ-đọc, để lỡ tay gõ nhầm cũng không ghi được:
+
+```sql
+BEGIN READ ONLY;
+-- câu SELECT ở đây
+ROLLBACK;
+```
+
+### Kiểm báo giá cũ tắt Thành Tiền nhóm mà có nhóm SL > 1
+
+**Vì sao cần.** `sheetSubtotalGrouped` (web) và `src/money.ts` (máy chủ) chỉ nhân Số
+Lượng nhóm vào tiền các mục con khi `QuoteSheet.groupSubtotal` BẬT. Báo giá lưu trước khi
+có luật "tự bật + khoá" (2026-09-30) có thể ở trạng thái "tắt + nhóm SL > 1": tổng đã lưu
+KHÔNG nhân hệ số nhóm. Lưới mới không tự tạo ra trạng thái này nữa (gõ · dán · điền · gợi ý
+danh mục · nhập Excel đều tự bật ô), nhưng dữ liệu cũ vẫn còn, và **mở ra không tự bật** —
+nên phải tìm bằng SQL. Câu (1) liệt kê đúng những nhóm đó để người phụ trách xem từng báo giá.
+
+**"SL > 1" là theo SỐ ĐANG HIỆN, không theo số thô** — đúng `M.groupMult` (định nghĩa ở
+`shared/quote-math.ts`, web dùng qua `web/src/lib/quoteMath.ts`):
+`groupMult(it) = Math.max(1, qtyForAmount(it) || 1)`, tức nhóm nhân thật ⇔ `qtyForAmount(it) > 1`.
+`qtyForAmount` rẽ HAI nhánh theo cờ `quantityExact` của chính dòng nhóm:
+
+| Dòng nhóm | `qtyForAmount` (= số đang hiện) | Nhóm nhân thật (> 1) khi |
+|---|---|---|
+| `quantityExact = false` | `qtyRound`: làm tròn nửa-lên **1 số lẻ** | SL ≥ **1,05** (1,04 hiện "1" → ×1; 1,05 hiện "1,1" → ×1,1) |
+| `quantityExact = true` | `qtyExact`: làm tròn nửa-lên **4 số lẻ** | SL ≥ 1,00005 — cột `Decimal(18,4)` nên là SL **> 1** (1,0001 đã nhân thật) |
+
+`src/money.ts` làm tròn y như vậy (Decimal `ROUND_HALF_UP`, 4 hoặc 1 số lẻ theo `quantityExact`).
+Mỗi câu dưới tính cột `slHien` bằng CHÍNH công thức đó rồi lọc `slHien > 1`. Đừng làm tròn 1 số
+lẻ cho MỌI dòng: dòng `quantityExact` có SL từ 1,0001 đến 1,0499 làm tròn 1 số lẻ ra "1", nhưng
+vẫn nhân thật — sẽ bị bỏ sót.
+
+```sql
+-- (1) Trang chính: QuoteSheet + QuoteItem (hai bảng thật). Cột quantity là Decimal(18,4), nên round()
+--     của Postgres (nửa xa số 0) ra đúng số của qtyRound / qtyExact và của ROUND_HALF_UP ở src/money.ts.
+WITH nhom AS (
+  SELECT q.id AS "quoteId", q."quoteNumber", q.status,
+         s.id AS "sheetId", s."order" AS "thuTuSheet", s.name AS "tenSheet",
+         g.id AS "itemId", g."order" AS "thuTuDong", g.kind, g.label, g.name AS "tenNhom",
+         g.quantity AS "slLuu", g."quantityExact",
+         CASE WHEN g."quantityExact" THEN round(g.quantity, 4) ELSE round(g.quantity, 1) END AS "slHien"   -- = qtyForAmount
+  FROM "QuoteSheet" s
+  JOIN "Quote" q     ON q.id = s."quoteId" AND q."deletedAt" IS NULL      -- bỏ báo giá đã xoá mềm
+  JOIN "QuoteItem" g ON g."sheetId" = s.id
+  WHERE s."groupSubtotal" = false
+    AND g.kind IN ('section', 'subsection')
+)
+SELECT * FROM nhom
+WHERE "slHien" > 1                                                         -- = groupMult(it) > 1
+ORDER BY "quoteId", "thuTuSheet", "thuTuDong";
+```
+
+**Bảng nội bộ (2) và (3) chỉ để biết, không sai tiền.** Chi phí HCM · Phí khách hàng
+(`QuoteSheet.extraTables`) và Hà Nội (`Quote.hnTables`) nằm trong JSON, mỗi bảng có cờ
+`groupSubtotal` riêng. Nhưng tổng của chúng (`extraTableSum` ở `web/src/components/ExtraTables.tsx`
+và `src/quoteUtils.ts`) KHÔNG bao giờ nhân hệ số nhóm dù cờ bật hay tắt: cờ chỉ quyết định ô
+Thành Tiền của dòng nhóm (và công thức tham chiếu tới ô đó) có hiện số hay để trống. Nên "tắt +
+nhóm SL > 1" ở đó không làm sai con số nào đã lưu — hai câu dưới chỉ cho biết còn bao nhiêu bảng
+ở trạng thái đó, không cần xử lý gì.
+
+Số lượng trong JSON là số JS chưa ép về 4 số lẻ, nên `slHien` của (2) và (3) chép NGUYÊN công
+thức `qtyRound` / `qtyExact`, kể cả số khử nhiễu `+1e-6` / `+1e-8` (`floor(x + 0,5)` là
+`Math.round` với số không âm): ngưỡng thật là 1,0499999 và 1,000049999999, không phải 1,05 và
+1,00005. Chỉ một số nằm ĐÚNG ranh giới tới sai số dấu phẩy động (vd đúng 1,0499999) là JS và SQL có
+thể nói khác nhau. Cột jsonb là cột TỰ DO (có thể là `null`, object, chuỗi; `items` có thể không
+phải mảng; phần tử có thể không phải object) nên mọi `jsonb_array_elements` đều có rào
+`jsonb_typeof` — cùng lối với `bangNoiBoTheoSheet` ở `src/services/quoteService.ts`; một dòng dữ
+liệu lạ không làm cả câu lỗi. Cờ thiếu / `null` coi như tắt; `quantity` không phải số thì bỏ qua
+(máy chủ luôn lưu số — `sanitizeExtraTables` — nên chỉ gặp ở dữ liệu rất cũ).
+
+```sql
+-- (2) Bảng nội bộ của trang (QuoteSheet.extraTables) — mỗi phần tử: { category, name, groupSubtotal, items[] }
+WITH bang_tat AS (
+  SELECT q."quoteNumber", s.id AS "sheetId", b.tbl
+  FROM "QuoteSheet" s
+  JOIN "Quote" q ON q.id = s."quoteId" AND q."deletedAt" IS NULL
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(s."extraTables") = 'array' THEN s."extraTables" ELSE '[]'::jsonb END) AS b(tbl)
+  WHERE jsonb_typeof(b.tbl) = 'object'
+    AND b.tbl->>'category' IS DISTINCT FROM 'hanoi'             -- bản cũ của bảng Hà Nội còn nằm lại trong trang: app bỏ qua, bản thật ở Quote.hnTables
+    AND (b.tbl->'groupSubtotal') IS DISTINCT FROM 'true'::jsonb  -- cờ tắt / thiếu / null
+), dong AS (
+  SELECT t."quoteNumber", t."sheetId", 'extraTables:' || COALESCE(t.tbl->>'category', '?') AS "nguon",
+         t.tbl->>'name' AS "tenBang", it.item->>'kind' AS kind, it.item->>'name' AS "tenNhom",
+         CASE WHEN jsonb_typeof(it.item->'quantity') = 'number' THEN (it.item->>'quantity')::numeric END AS sl,
+         COALESCE(it.item->'quantityExact' = 'true'::jsonb, false) AS chinh_xac
+  FROM bang_tat t
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(t.tbl->'items') = 'array' THEN t.tbl->'items' ELSE '[]'::jsonb END) AS it(item)
+  WHERE jsonb_typeof(it.item) = 'object'
+), hien AS (
+  SELECT d.*, sign(sl) * CASE WHEN chinh_xac THEN floor(abs(sl) * 10000 + 0.00000001 + 0.5) / 10000   -- = qtyExact
+                              ELSE floor(abs(sl) * 10 + 0.000001 + 0.5) / 10 END AS "slHien"         -- = qtyRound
+  FROM dong d
+)
+SELECT * FROM hien
+WHERE kind IN ('section', 'subsection')
+  AND "slHien" > 1                                                         -- = groupMult(it) > 1
+ORDER BY "quoteNumber", "sheetId";
+
+-- (3) Bảng Hà Nội ở cấp báo giá (Quote.hnTables) — cùng khuôn, không có sheet
+WITH bang_tat AS (
+  SELECT q."quoteNumber", b.tbl
+  FROM "Quote" q
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(q."hnTables") = 'array' THEN q."hnTables" ELSE '[]'::jsonb END) AS b(tbl)
+  WHERE q."deletedAt" IS NULL
+    AND jsonb_typeof(b.tbl) = 'object'
+    AND (b.tbl->'groupSubtotal') IS DISTINCT FROM 'true'::jsonb  -- cờ tắt / thiếu / null
+), dong AS (
+  SELECT t."quoteNumber", 'hnTables' AS "nguon", t.tbl->>'name' AS "tenBang",
+         it.item->>'kind' AS kind, it.item->>'name' AS "tenNhom",
+         CASE WHEN jsonb_typeof(it.item->'quantity') = 'number' THEN (it.item->>'quantity')::numeric END AS sl,
+         COALESCE(it.item->'quantityExact' = 'true'::jsonb, false) AS chinh_xac
+  FROM bang_tat t
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(t.tbl->'items') = 'array' THEN t.tbl->'items' ELSE '[]'::jsonb END) AS it(item)
+  WHERE jsonb_typeof(it.item) = 'object'
+), hien AS (
+  SELECT d.*, sign(sl) * CASE WHEN chinh_xac THEN floor(abs(sl) * 10000 + 0.00000001 + 0.5) / 10000   -- = qtyExact
+                              ELSE floor(abs(sl) * 10 + 0.000001 + 0.5) / 10 END AS "slHien"         -- = qtyRound
+  FROM dong d
+)
+SELECT * FROM hien
+WHERE kind IN ('section', 'subsection')
+  AND "slHien" > 1                                                         -- = groupMult(it) > 1
+ORDER BY "quoteNumber";
+```
+
+> **Đã thử ở đâu.** 2026-10-06: ba câu trên chạy trên PGlite (Postgres nhúng, trong bộ nhớ) với
+> bảng và dữ liệu GIẢ dựng theo `prisma/schema.prisma`, và từng dòng trả về được so với CHÍNH
+> `groupMult` (chép nguyên từ `shared/quote-math.ts`) — khớp ở mọi ca biên: SL 1,04 (hiện "1") ·
+> 1,05 (hiện "1,1") · không-exact 1,0001 (hiện "1") · `quantityExact` 1,0001 / 1,00005 /
+> 1,0000499999995 (nhân) và 1,0000499999 (không) · trong JSON 1,04999991 (nhân) và 1,04999989
+> (không) · SL âm / 0 · báo giá xoá mềm · cờ đã bật · bảng JSON thiếu cờ hoặc cờ `null` ·
+> `quantity` không phải số · cột jsonb là `null` / object / chuỗi · `items` không phải mảng ·
+> phần tử không phải object · bản cũ `category = 'hanoi'`; cả ba chạy được trong `BEGIN READ ONLY`.
+> **Chưa chạy trên CSDL nào thật.** Chạy ở dev trước, rồi so vài dòng bằng mắt với trình soạn báo
+> giá (ô "Hiện Thành Tiền nhóm" và Số Lượng của nhóm) trước khi tin con số đếm.
+
+### ⛔ KHÔNG chạy hàng loạt sửa cờ
+
+Đừng "chữa" kết quả bằng `UPDATE "QuoteSheet" SET "groupSubtotal" = true …` (hay sửa JSON
+tương đương). Bật cờ là **đổi tổng** của báo giá đã lưu — có thể đã gửi khách, đã chốt, đã
+xuất hoá đơn — và đổi theo hướng TĂNG đúng bằng hệ số nhóm. Ba lý do cụ thể:
+
+1. `QuoteSheet.subtotal` và `Quote.subtotal` / `total` là số **đã vật chất hoá lúc Lưu** (xem
+   chú thích ở schema). Sửa cờ bằng SQL thì máy chủ tính ra tổng mới nhưng các cột đã lưu vẫn là
+   số cũ: trang Quản lý dự án, danh sách và hoá đơn lệch nhau ngay lập tức.
+2. `QuoteVersion.payload` là snapshot JSON của từng lần lưu; sửa cờ ở bảng sống làm phiên bản
+   cũ và bản hiện tại nói hai tổng khác nhau mà không có dấu vết nào giải thích.
+3. SQL thẳng không đi qua đường ghi `AuditEvent`, nên một lần đổi tiền như vậy không để lại
+   nhật ký — trong khi khách có thể đã nhìn thấy con số cũ.
+
+Cách đúng là **từng báo giá, do người phụ trách quyết**: mở ra trong trình soạn (mở ra
+không tự bật), tích ô "Hiện Thành Tiền nhóm" hoặc nhập / dán lại Số Lượng nhóm — lưới bật
+và khoá ô, bấm Lưu để máy chủ tính lại và ghi phiên bản mới. Nếu chủ repo quyết định sửa
+hàng loạt thì đó là một việc RIÊNG: `pg_dump -Fc` trước, danh sách duyệt tay từng báo giá,
+đi qua đường lưu của ứng dụng (không SQL thẳng), diễn tập ở dev.

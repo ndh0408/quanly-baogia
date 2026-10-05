@@ -77,10 +77,67 @@ Có Ctrl+Z / Ctrl+Y và fill-down (Ctrl+D); hoàn tác vẫn đúng sau khi dán
 
 | Loại dòng | Cộng vào nhóm chính | Cộng vào Tổng cộng | Ghi chú |
 |---|---|---|---|
-| **Nhóm** (A, B, C…) | — | ✅ | có Thành Tiền nhóm, nhân Số Lượng nếu bật. Nhập Số Lượng nhóm > 1 thì ô "Hiện Thành Tiền nhóm" **tự bật và bị khoá bật** (bỏ tích lúc đó là mất hệ số ×N, tổng sai im lặng); khoá tự nhả khi không còn nhóm nào Số Lượng > 1 và giữ nguyên trạng thái đang có. Ctrl+Z / Ctrl+Y hoặc công thức (SL nhóm `=D2`) đưa nhóm SL > 1 trở lại khi ô đang tắt cũng tự bật lại, kèm lời báo. Ô "Hiện Thành Tiền nhóm" nằm trong mốc hoàn tác: lùi / tiến trả nó về đúng trạng thái lúc chụp mốc khi mốc có nhóm SL > 1 (Esc huỷ phiên gõ SL nhóm cũng trả cờ). Báo giá cũ đã lưu "tắt + nhóm SL > 1" không bị tự bật lúc mở, và chỉ đi ngang / sửa ô khác của nó (đổi tên nhóm, dán / điền / Ctrl+D một cột chữ như ĐVT, Ghi chú, Tên qua hàng nhóm, xoá nhóm rồi Ctrl+Z) cũng không bật — chỉ gõ/dán/điền vào chính ô Số Lượng nhóm mới bật. Nhập Excel giữ nguyên cờ Thành Tiền nhóm của file (để tổng khớp với tổng trong file), không tự bật |
+| **Nhóm** (A, B, C…) | — | ✅ | có Thành Tiền nhóm, nhân Số Lượng nếu bật. Nhóm có Số Lượng > 1 thì ô "Hiện Thành Tiền nhóm" **tự bật và bị khoá bật** (bỏ tích lúc đó là mất hệ số ×N, tổng sai im lặng) — luật đầy đủ ở mục **Ô "Hiện Thành Tiền nhóm"** ngay dưới bảng |
 | **Nhóm con** | ❌ | ✅ | thụt lề + dấu `↳`; **không chiếm chữ A/B/C** |
 | **Hàng con** (`↳`) | ✅ | ✅ | chi tiết trong một hạng mục. **Nút "↳ thêm hàng con" trên lưới đã bỏ (2026-09-23, chủ repo: "không còn cần sử dụng")** — hàng con có sẵn trong báo giá cũ vẫn hiển thị, tính tiền và xuất Excel như trước |
 | **Dòng thông tin** | ❌ | ❌ | ghi chú thuần, không tính tiền |
+
+**Ô "Hiện Thành Tiền nhóm".** Tắt thì tổng sheet KHÔNG nhân Số Lượng nhóm vào tiền các mục con
+(`sheetSubtotalGrouped` ép hệ số về 1): nhóm "SL 3" ra tổng nhỏ hơn thật đúng 3 lần, và file Excel
+xuất ra cũng sai tiền. Nên — chủ repo, 2026-09-30: "nếu có số lượng thì Thành Tiền nhóm tự động bật
+và lock nút đó lại" — lưới giữ ba luật:
+
+- **Khoá.** Ô đang bật mà còn nhóm / nhóm con có Số Lượng > 1 — tính theo SỐ ĐANG HIỆN, nên 1,04
+  (hiện "1") không tính — thì ô bị khoá bật, vì bỏ tích lúc đó là mất hệ số ×N. Ô khoá vẽ đặc (nền
+  đậm, dấu tích rõ, có cả giao diện tối) kèm dòng lý do bên dưới, không lẫn được với ô đang tắt.
+  Khoá tự nhả khi không còn nhóm nào SL > 1 và giữ nguyên trạng thái đang có.
+- **Tự bật — chỉ khi người dùng ĐƯA nhóm SL > 1 vào**, qua các đường:
+  - **gõ / dán / điền** (Ctrl+D, Ctrl+R, kéo ô điền) vào ô Số Lượng của hàng nhóm hoặc nhóm con;
+  - **cắt / dán** hàng nhóm mang SL > 1 vào bảng;
+  - **chọn gợi ý danh mục** điền Số Lượng cho hàng nhóm (Alt+↓, hoặc gõ tên rồi chọn);
+  - **Ctrl+Z / Ctrl+Y** trả nhóm SL > 1 về khi ô đang tắt, và **công thức** tham chiếu (SL nhóm `=D2`)
+    đẩy nhóm lên > 1 — hai đường này người dùng không trực tiếp gõ SL nhóm nên có lời báo (toast);
+  - **nhập Excel** — xem bên dưới.
+- **KHÔNG bật.** Mở báo giá cũ đã lưu "tắt + nhóm SL > 1": không tự bật, không khoá (bật là đổi
+  tổng đã lưu). Đi ngang ô SL rồi Enter, hay sửa ô KHÔNG liên quan (đổi tên nhóm; dán / điền /
+  Ctrl+D một cột chữ như ĐVT, Ghi chú, Tên qua hàng nhóm; xoá nhóm rồi Ctrl+Z) cũng không bật.
+  Nhóm SL ≤ 1 không đổi tổng nên không bật. Bảng phụ (Chi phí HCM / Phí khách hàng) dùng chung
+  luật của lưới nhưng không có đường nhập Excel riêng.
+
+Ô "Hiện Thành Tiền nhóm" nằm trong mốc hoàn tác: lùi / tiến trả nó về đúng trạng thái lúc chụp mốc
+khi mốc có nhóm SL > 1 (Esc huỷ phiên gõ SL nhóm cũng trả cờ). Ô đổi trạng thái vì hoàn tác thì có
+toast báo — cả chiều bật lại lẫn chiều tắt lại (mốc là báo giá cũ "tắt + nhóm SL > 1" mà người dùng
+đã bật giữa chừng).
+
+**Nhập Excel** (hộp "Nhập từ Excel", cả ở phần Hà Nội) cũng là một đường tự bật. Bộ đọc file
+(`src/excelImport.ts`) chỉ coi cờ là BẬT khi dòng nhóm trong file có ghi Thành Tiền, nên file mang
+Số Lượng nhóm > 1 mà không ghi Thành Tiền nhóm ra cờ TẮT — giữ cờ đó thì nhập xong tổng không nhân
+hệ số, xuất Excel ra sai tiền. Vì vậy nạp xong mà bảng kết quả còn nhóm SL > 1 thì cờ bật, ở cả ba
+đường (kèm toast nói đã tự bật ở bao nhiêu sheet):
+
+- **sheet mới** (thêm sheet / thêm bảng): cờ theo file, rồi tự bật;
+- **Nối vào cuối**: cờ của sheet đích, rồi tự bật — kể cả khi nhóm SL > 1 là của hàng cũ trong sheet
+  đích chứ không phải của file;
+- **Thay toàn bộ**: cờ theo file nhưng KHÔNG làm mất cờ bật của sheet đang bật, rồi tự bật (ở phần Hà
+  Nội, Thay giữ nguyên cờ của bảng đích, rồi tự bật).
+
+Hộp nhập tính tổng dự kiến và đối chiếu tiền theo cờ đã bật, và **cảnh báo, không chặn** khi tổng đã
+nhân hệ số nhóm khác tổng ghi trong file: "Đã bật Thành Tiền nhóm vì file có nhóm Số Lượng > 1 nên
+tổng đã nhân hệ số nhóm và khác tổng ghi trong file". Sheet đích ĐANG bật (Thay / Nối không tắt nó)
+mà file không nhân hệ số cũng lệch y như thế, và cũng chỉ cảnh báo ("Sheet đích đang bật Thành Tiền
+nhóm…"). Lệch THẬT — tổng theo cờ trong file cũng không khớp — vẫn đi qua hộp xác nhận như trước.
+Sheet chọn **Bỏ qua** chỉ để xem: không bật gì, tổng tính theo cờ của file. Máy chủ, Excel, PDF không
+đổi: tổng vẫn tính theo cờ đã lưu.
+
+Phần **Hà Nội** (và bảng phụ Chi phí HCM / Phí khách hàng) khác ở tiền: tổng bảng là `extraTableSum`
+— chỉ cộng hạng mục, **không bao giờ nhân** Số Lượng nhóm dù cờ bật, và các bảng nội bộ này không xuất
+Excel; cờ ở đó chỉ quyết định ô Thành Tiền của dòng nhóm hiện số đã nhân hay để trống. Nhập Excel vào
+bảng Hà Nội vẫn tự bật + khoá ô (cùng luật lưới), còn hộp nhập tính tổng của bảng KHÔNG nhân hệ số và
+nói đúng như vậy — không nói "tổng đã nhân hệ số nhóm".
+
+Báo giá cũ đã lưu "tắt + nhóm SL > 1" tìm bằng truy vấn chỉ-đọc ở
+[`docs/development/DATABASE.md`](../development/DATABASE.md) (mục "Truy vấn kiểm dữ liệu") — và
+**không sửa hàng loạt**, xem cảnh báo ở đó.
 
 Giảm giá = nhập **đơn giá âm**. Khi xuất Excel, nhóm con hiển thị **giống hệt trên
 màn hình** (dấu `↳`, nền nhạt hơn, thứ tự chữ nhóm không lệch).
