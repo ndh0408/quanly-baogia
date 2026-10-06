@@ -6,6 +6,7 @@ import { type ItemK, nextK } from "../lib/gridShared";
 import { extraTableSum } from "../components/ExtraTables";
 import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
+import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap } from "../lib/localDraft";
 import { useTrangAnToan } from "../lib/phienBan";
 
@@ -208,11 +209,15 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     // app#15: đang Lưu, hoặc Lưu xong `load()` đã thay qRef → `hnTables` của closure này là mảng CŨ,
     // nạp vào đó là mất im lặng.
     if (savingRef.current || qRef.current !== q) { toast("Phần Hà Nội đang lưu / vừa lưu — mở lại hộp Nhập từ Excel rồi nạp lại", "info"); return; }
-    let nAdd = 0, nBang = 0, nMoi = 0;
+    let nAdd = 0, nBang = 0, nMoi = 0, nBatNhom = 0;
     for (const p of payload.plans) {
       const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
       if (p.targetIndex === NEW_SHEET) {
-        hnTables.push({ _k: nextK(), templateId: p.templateId ?? defTplId, name: p.file.name, groupSubtotal: !!p.file.groupSubtotal, items: stamped });
+        // Bảng MỚI: cờ theo file, và TỰ BẬT khi hàng nạp có nhóm SL > 1 — cùng luật với mọi đường nhập và với luật khoá của lưới.
+        // (Bảng HN không xuất Excel và tổng là extraTableSum, không nhân hệ số nhóm: cờ ở đây chỉ đổi ô Thành Tiền của dòng nhóm.)
+        const coMoi = coSauNhapExcel({ cheDo: "moi", coTheoFile: p.file.groupSubtotal }, stamped);
+        if (coMoi.tuBat) nBatNhom++;
+        hnTables.push({ _k: nextK(), templateId: p.templateId ?? defTplId, name: p.file.name, groupSubtotal: coMoi.co, items: stamped });
         nAdd += stamped.length; nBang++; nMoi++;
         continue;
       }
@@ -220,13 +225,17 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       if (!target) continue;
       if (p.mode === "append") target.items.push(...stamped);
       else target.items.splice(0, target.items.length, ...stamped);
+      // Cờ của bảng đích đứng nguyên ở cả Nối lẫn Thay (màn này không gán cờ theo file) — trừ khi bảng sau nạp có nhóm SL > 1
+      // mà cờ đang tắt thì tự BẬT. Thay: cờ đang bật thì giữ bật (không bao giờ bị tắt vì nhập).
+      const co = coSauNhapExcel({ cheDo: p.mode === "append" ? "noi" : "thay", coCuaDich: target.groupSubtotal, coTheoFile: p.file.groupSubtotal, thayGiuCoCuaDich: true }, target.items);
+      if (co.tuBat) { target.groupSubtotal = true; nBatNhom++; }
       if (p.templateId) target.templateId = p.templateId;
       nAdd += stamped.length; nBang++;
     }
     for (const i of [...(payload.removeTargetIndexes || [])].sort((a, b) => b - a)) hnTables.splice(i, 1);
     setImportOpen(false);
     mark(); redraw();
-    toast(`Đã nạp ${nAdd} dòng vào ${nBang} sheet${nMoi ? ` (${nMoi} sheet mới)` : ""} — nhớ bấm Lưu`, "success");
+    toast(`Đã nạp ${nAdd} dòng vào ${nBang} sheet${nMoi ? ` (${nMoi} sheet mới)` : ""}${nBatNhom ? ` · ${tbNhapTuBatNhom(nBatNhom, true)}` : ""} — nhớ bấm Lưu`, "success");
   };
 
   const save = async (thenSubmit: boolean) => {
@@ -355,6 +364,8 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
           addrDetailOf={addrDetailOf}
           newSheetTemplateId={newSheetTemplateId}
           khongCoTongTien
+          thayGiuCoNhomCuaDich   // applyImport bên trên KHÔNG gán groupSubtotal lúc Thay: cờ của bảng đích đứng nguyên
+          tongKhongNhanNhom      // tổng bảng HN là extraTableSum — không bao giờ nhân Số Lượng nhóm, dù cờ bật
           onApply={applyImport}
           onClose={() => setImportOpen(false)}
         />

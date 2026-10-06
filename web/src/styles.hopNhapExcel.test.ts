@@ -108,6 +108,15 @@ describe("L76 — hộp Nhập từ Excel neo mép trên, không nhảy khi nộ
     expect(thang([".modal"], "max-height", 700)).toBe("96vh");
   });
 
+  // Vòng 1 người soát (đo trên Chrome 375×812, CSS thật): dòng cảnh báo Nối in nguyên tên nhóm cuối sheet do người dùng gõ — tên
+  // là MỘT chuỗi liền 70 ký tự ("BANNER_KHO_TONG_HOP_XXXX…") làm li rộng 601px trong khung 268px, thân hộp cuộn ngang. Danh sách
+  // cảnh báo phải được bẻ giữa chữ khi hết chỗ (jsdom không dàn trang — chốt ở giá trị CSS thắng cuối, như các bài trên).
+  it("danh sách cảnh báo (.import-warn) bẻ được chuỗi liền dài — không đẩy thân hộp cuộn ngang ở màn hẹp", () => {
+    for (const w of [undefined, 375, 760]) {
+      expect(thang([".import-warn"], "overflow-wrap", w), `cửa sổ ${w ?? "mặc định"}`).toBe("anywhere");
+    }
+  });
+
   // [rộng, cao] — màn máy tính, cửa sổ thấp, điện thoại/máy tính bảng dọc và XOAY NGANG.
   const CUA_SO = [[1920, 1080], [1366, 768], [1280, 950], [800, 600], [1024, 500], [1024, 400], [760, 1100], [740, 360], [667, 375], [400, 780], [375, 667], [360, 640]];
   for (const [w, h] of CUA_SO) {

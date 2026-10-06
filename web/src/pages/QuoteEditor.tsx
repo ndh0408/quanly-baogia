@@ -10,6 +10,7 @@ import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
 import { sapXepTheoFile } from "../lib/importApply";
+import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuyenBanNhapCu } from "../lib/localDraft";
 import { useTrangAnToan } from "../lib/phienBan";
@@ -1091,16 +1092,20 @@ Lý do (không bắt buộc):`,
     // app#15: hộp nạp có thể chờ hộp xác nhận rủi ro (async) và giữ hàm này của lượt vẽ CŨ — nạp vào
     // mảng cũ sau khi Lưu đã thay qRef là mất im lặng.
     if (dangLuuHoacDaDoi()) { toast("Báo giá đang lưu / vừa lưu — mở lại hộp Nhập từ Excel rồi nạp lại", "info"); return; }
-    let nAdd = 0, nSheet = 0, nNew = 0, nRemoved = 0;
+    let nAdd = 0, nSheet = 0, nNew = 0, nRemoved = 0, nBatNhom = 0;
     // Các sheet ĐẾN TỪ FILE, giữ ĐÚNG thứ tự trong file — dùng để sắp lại chỗ ở cuối hàm.
     const theoFile: Sheet[] = [];
     for (const p of payload.plans) {
       const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
       // File có nhiều sheet hơn báo giá → TẠO THÊM sheet, đặt tên đúng tên tab trong file.
       if (p.targetIndex === NEW_SHEET) {
+        // Cờ "Hiện Thành Tiền nhóm": theo file, và TỰ BẬT khi hàng nạp có nhóm SL > 1 — nhập Số Lượng nhóm mà tổng không
+        // nhân hệ số là xuất Excel ra sai tiền (lib/khoaThanhTienNhom.coSauNhapExcel; hộp nhập tính đúng như vậy).
+        const coMoi = coSauNhapExcel({ cheDo: "moi", coTheoFile: p.file.groupSubtotal }, stamped);
+        if (coMoi.tuBat) nBatNhom++;
         const moi = {
           _k: nextK(), templateId: p.templateId ?? activeSheet.templateId,
-          name: p.file.name, groupSubtotal: !!p.file.groupSubtotal,
+          name: p.file.name, groupSubtotal: coMoi.co,
           discount: p.discount ?? 0,
           items: stamped, extraTables: [],
         } as Sheet;
@@ -1110,15 +1115,23 @@ Lý do (không bắt buộc):`,
       }
       const target = sheets[p.targetIndex];
       if (!target) continue;
-      if (p.mode === "append") target.items.push(...stamped);
-      else {
+      if (p.mode === "append") {
+        target.items.push(...stamped);
+        // Nối: cờ của sheet đích đứng nguyên — trừ khi bảng sau khi nối có nhóm SL > 1 mà cờ đang tắt thì tự bật.
+        const co = coSauNhapExcel({ cheDo: "noi", coCuaDich: target.groupSubtotal }, target.items);
+        if (co.tuBat) { target.groupSubtotal = true; nBatNhom++; }
+      } else {
+        const coCu = !!target.groupSubtotal;
         target.items.splice(0, target.items.length, ...stamped);
         // Chế độ THAY = "sheet này CHÍNH LÀ sheet kia trong file" → lấy luôn TÊN theo file.
         // Không lấy thì sheet trắng của báo giá mới (tên rỗng) nuốt nội dung của một sheet trong
         // file mà vẫn hiện tên mẫu ("GN (không ngày)"), còn tên thật thì biến mất.
         if (p.file.name) target.name = p.file.name;
-        // Dòng nhóm trong file có ghi Thành Tiền ⇒ báo giá đó bật "tổng tiền theo nhóm" → theo file.
-        target.groupSubtotal = !!p.file.groupSubtotal;
+        // Dòng nhóm trong file có ghi Thành Tiền ⇒ báo giá đó bật "tổng tiền theo nhóm" → theo file. KHÔNG làm mất cờ BẬT
+        // của sheet đang bật (file tắt thì sheet giữ bật), và tự bật khi hàng nạp còn nhóm SL > 1.
+        const co = coSauNhapExcel({ cheDo: "thay", coCuaDich: coCu, coTheoFile: p.file.groupSubtotal }, target.items);
+        target.groupSubtotal = co.co;
+        if (co.tuBat) nBatNhom++;
         // Discount đọc từ khối tổng của CHÍNH sheet đó trong file (chỉ chế độ Thay — xem modal).
         if (p.discount != null) target.discount = p.discount;
       }
@@ -1143,7 +1156,7 @@ Lý do (không bắt buộc):`,
     // VAT là của CẢ báo giá; Discount đã đặt vào TỪNG sheet ở vòng lặp trên.
     if (payload.totals?.vatPercent != null) q.vatPercent = payload.totals.vatPercent;
     mark(); redraw();
-    toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet${nNew ? ` · thêm ${nNew} sheet` : ""}${nRemoved ? ` · xóa ${nRemoved} sheet` : ""} — kiểm tra lại rồi bấm Lưu`, "success");
+    toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet${nNew ? ` · thêm ${nNew} sheet` : ""}${nRemoved ? ` · xóa ${nRemoved} sheet` : ""}${nBatNhom ? ` · ${tbNhapTuBatNhom(nBatNhom)}` : ""} — kiểm tra lại rồi bấm Lưu`, "success");
   };
 
   // ── Ý KIẾN KHÁCH theo TỪNG SHEET (ghi ngay, KHÔNG đợi Lưu — giống Chốt/Không chốt) ──────────

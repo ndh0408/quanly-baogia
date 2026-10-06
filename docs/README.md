@@ -46,7 +46,7 @@ docs/
 ├── development/      làm việc trên mã nguồn
 │   ├── SETUP.md
 │   ├── CODING_GUIDELINES.md      quy ước THẬT của repo — Decimal, zod v4, ranh giới tầng, đặt tên
-│   ├── DATABASE.md               bảng chính · searchText/trgm · bẫy làm mất index
+│   ├── DATABASE.md               bảng chính · searchText/trgm · bẫy làm mất index · truy vấn kiểm dữ liệu (chỉ đọc)
 │   └── TESTING.md
 │
 ├── operations/       vận hành nó
