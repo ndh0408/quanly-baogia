@@ -139,7 +139,8 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
 
   // ===== Clofull — không ngày (new CLF.xls form) =====
   // Columns: STT | Hạng Mục | Chi Tiết | ĐVT | SỐ LƯỢNG | ĐƠN GIÁ | THÀNH TIỀN | Ghi Chú
-  // Recipient info is a single combined "Kính gửi" block at F3.
+  // Thông tin bên nhận là MỘT khối "Kính gửi" gộp từ cột STT tới hết bảng: ô chủ B3, vùng B3:I3
+  // (bản có ngày B3:J3) — xem `cells.toBlockCell` và `headerMerges`.
   clofull_decor: {
     sheetName: "CLF",
     filePath: "templates/CLF_KhongNgay.xlsx",
@@ -169,7 +170,9 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // khi báo giá CÓ logo, tức gần như mọi file gửi khách đều in nguyên dòng chữ đỏ đó.
       // Khối "Kính gửi" nay gộp B3:I3 (xem `headerMerges`) nên C3 thành ô PHỤ của vùng gộp — vùng gộp
       // tự nuốt giá trị của ô phụ, nhưng vẫn xoá tường minh ở đây để chữ mồi không phụ thuộc vào
-      // thứ tự gộp/ghi (và để ai gỡ `headerMerges` đi cũng không làm chữ đỏ sống lại).
+      // vùng gộp: ai gỡ `headerMerges`, hay vùng gộp không áp được (`safeMerge` nuốt lỗi), thì chữ đỏ
+      // cũng không sống lại. `clofull_conngay` KHAI LẠI danh sách này nên tự mang "C3" của riêng nó
+      // (tests/cf-clf-khoi-kinh-gui-gop-tu-stt.test.js gỡ vùng gộp của cả ba mẫu rồi soi tệp xuất).
       extraCellsToClear: ["J5", "J8", "G22", "C3"],
       keepImagesAboveRow: 3,
     },
@@ -481,7 +484,13 @@ TEMPLATE_CONFIGS.clofull_conngay = {
     //   · hai ô chú thích cho lập trình viên J5/J8 → K5/K8. Script dựng mẫu đã dọn sẵn chúng, giữ
     //     ở đây là lớp chắn thứ hai — VÀ để KHÔNG kế thừa "J5"/"J8" của bản không-ngày, vì ở mẫu
     //     9 cột thì J chính là cột GHI CHÚ thật của người dùng, xoá nhầm là mất ghi chú hàng 3.
-    extraCellsToClear: ["K5", "K8", "H22"],
+    // Riêng chữ mồi "logo cty khách hàng" KHÔNG dịch: nó nằm ở C3 của CẢ HAI tệp mẫu (hàng 3 ở trên
+    // bảng, cột Số Ngày chèn vào không đụng tới). Danh sách này khai lại chứ không nối thêm, nên phải
+    // tự mang "C3": thiếu nó thì chữ mồi chỉ mất nhờ vùng gộp B3:J3 nuốt ô phụ — vùng gộp không áp
+    // được là tệp có ngày in lại dòng chữ ĐỎ cạnh khối "Kính gửi", trong khi hai bản không-ngày vẫn
+    // sạch. An toàn với ô chủ B3: applyTemplateCleanup xoá TRƯỚC khi gộp, lúc C3 còn là ô thường (gán
+    // giá trị cho một Ô PHỤ thì ExcelJS ghi thẳng vào ô chủ), và khối được ghi vào B3 sau bước dọn.
+    extraCellsToClear: ["K5", "K8", "H22", "C3"],
   },
   items: {
     ...TEMPLATE_CONFIGS.clofull_decor.items,
