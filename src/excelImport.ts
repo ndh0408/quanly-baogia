@@ -925,6 +925,33 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     }
   }
 
+  // CHỮ NHÓM TRÙNG → BỎ chữ tự đặt, để app đánh lại (báo giá GN26008 sheet Lightbox, 2026-10-06). Chữ của tệp chỉ
+  // được giữ khi KHÁC chữ tự đánh, mà chữ tự đánh đếm theo vị trí: tệp ghi (trống), A, B, C, B thì nhóm đầu tự đánh
+  // "A" còn bốn nhóm sau bị đóng băng A, B, C, B → hiện A, A, B, C, B, mà ô STT nhóm không sửa được trên màn soạn.
+  // Chữ hiện ra trùng nhau thì đó không phải cách đánh khách cố ý chọn → bỏ hết chữ tự đặt của cấp đó trong sheet.
+  // Nhóm con xét trong phạm vi từng nhóm cha (STT 1, 2, 3 đánh lại từ đầu mỗi nhóm).
+  const boChuTrung = (kind: "section" | "subsection", tuDanh: (i: number) => string): string | null => {
+    const pham: Raw[][] = [[]];
+    for (const x of raws) {
+      if (kind === "subsection" && x.kind === "section") pham.push([]);
+      else if (x.kind === kind) pham[pham.length - 1].push(x);
+    }
+    let trung: string | null = null;
+    for (const nhom of pham) {
+      const hien = nhom.map((x, i) => x.it.label || tuDanh(i)).filter(Boolean);
+      const lap = hien.find((v, i) => hien.indexOf(v) !== i);
+      if (lap === undefined || !nhom.some((x) => x.it.label)) continue;
+      trung ??= lap;
+      for (const x of nhom) delete x.it.label;
+    }
+    return trung;
+  };
+  const trungNhom = boChuTrung("section", sectionLetter);
+  const trungNhomCon = boChuTrung("subsection", (i) => (effectiveNumberSubs ? String(i + 1) : ""));
+  if (trungNhom !== null || trungNhomCon !== null) {
+    base.warnings.push(`Cột STT trong file có chữ nhóm bị trùng ("${trungNhom ?? trungNhomCon}") — app đã bỏ chữ nhóm của file và tự đánh lại ${trungNhom !== null ? "A, B, C…" : "1, 2, 3…"} theo thứ tự.`);
+  }
+
   base.items = raws.map((x) => x.it);
   // (Cảnh báo cột Chi Tiết dời xuống SAU bước đoán mẫu — nó phụ thuộc mẫu nào, xem bên dưới.)
   for (const x of raws) {
