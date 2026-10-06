@@ -67,12 +67,31 @@ export function dungToastHost(): HTMLElement {
   return host;
 }
 
+/**
+ * Đặt hộp toast cách MÉP TRÊN THẬT của thanh nút đáy màn soạn 21px (sàn 84px = hành vi cũ khi thanh một hàng dính đáy).
+ * Không chỉ theo CHIỀU CAO thanh: thanh là `sticky; bottom: 0` — cuộn hết trang thì nó đứng ở chỗ tĩnh, cao hơn đáy cửa sổ ~53px,
+ * và toast đặt theo chiều cao đè lên "⋯" / "⌨️" (đo 2026-10-06 ở 1280×720, 1366×768, 1024×768). Độ cao thanh cũng không cố định:
+ * 63px một hàng, ~100px ở lớp hai hàng (641–1279px), ~81px ở dải điện thoại. Thanh nằm HẲN phía trên vùng toast (trang ngắn) thì
+ * không cần nâng — để vị trí mặc định của CSS. Chưa dàn trang được (cao 0, như trong jsdom) thì giữ sàn 84px.
+ */
+function datViTriToast(host: HTMLElement) {
+  const thanh = document.querySelector(".editor .actions");
+  if (!thanh) { host.style.bottom = ""; return; }
+  const r = thanh.getBoundingClientRect();
+  if (!(r.height > 0)) { host.style.bottom = "84px"; return; }
+  if (r.bottom < window.innerHeight - 100) { host.style.bottom = ""; return; }
+  host.style.bottom = `${Math.max(84, Math.ceil(window.innerHeight - r.top) + 21)}px`;
+}
+
 export function toast(message: string, type: "success" | "error" | "info" = "info") {
   const host = dungToastHost();
   // Đang ở trình soạn báo giá thì thanh nút dính đáy chiếm đúng góc phải-dưới: nâng toast lên TRÊN
   // thanh để nó không đè nút "⋯" (Tải Excel/PDF) — luồng "Lưu → ⋯ → Tải" mất cú bấm đầu tiên
-  // (audit 2026-09-22, GAP1-05). Đọc MỘT LẦN lúc tạo toast, không dùng selector CSS `:has()` động.
-  host.style.bottom = document.querySelector(".editor .actions") ? "84px" : "";
+  // (audit 2026-09-22, GAP1-05). Không dùng selector CSS `:has()` động.
+  datViTriToast(host);
+  // Đo LẠI sau hai khung hình: toast "Đã lưu" sinh giữa lúc lưu, khi GridTable tạm gỡ nhóm thêm hàng — thanh đang thấp hơn
+  // (93 → 79px ở lớp hai hàng), vẽ lại xong nó cao lên và toast đặt theo số đo cũ chỉ còn cách 7px (đo 2026-10-06, 1024×768).
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(() => datViTriToast(host)));
   // aria-live so screen readers announce toasts (errors = assertive). Trước đây React
   // hoàn toàn câm với screen reader — đây là sửa a11y.
   host.setAttribute("aria-live", type === "error" ? "assertive" : "polite");

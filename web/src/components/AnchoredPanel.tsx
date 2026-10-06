@@ -86,9 +86,18 @@ export function AnchoredPanel({
     // ĐÃ ĐỎ THẬT ở cổng [12] ui-smoke: Playwright tự cuộn mục vào tầm nhìn trước khi bấm, lượt cuộn
     // đó xảy ra BÊN TRONG hộp → hộp đóng → `page.click` hết giờ 30s. Tức bài kiểm giao diện bắt
     // đúng một lỗi dùng thật, không phải chuyện riêng của test.
+    // ── NÚT NEO ĐỨNG YÊN THÌ KHÔNG ĐÓNG ─────────────────────────────────────
+    // Hộp đóng khi cuộn vì nó `fixed`, không đi theo nút. Nhưng nút "⋯" nằm trong thanh đáy `sticky`: trang
+    // cuộn mà nút ĐỨNG YÊN trên màn hình, hộp vẫn đúng chỗ — đóng là sai. ĐÃ ĐỎ ở ui-smoke [U13] (2026-10-06):
+    // Playwright cuộn trang tới nút sticky trước khi bấm, lượt cuộn kéo dài qua lúc menu vừa mở (đo: trang
+    // 0 → 423 → 1093px, menu gắn ở 2367ms, bị gỡ ở 2382ms, nút đứng yên ở top 803). Người dùng thật gặp y hệt
+    // khi bấm "⋯" lúc trang còn trôi theo quán tính cuộn: menu vừa hiện đã tắt. Chỉ đóng khi nút DỊCH CHUYỂN.
+    const goc = anchorRef.current?.getBoundingClientRect();
     const onScroll = (e: Event) => {
       if (panelRef.current?.contains(e.target as Node)) return;   // cuộn TRONG hộp → kệ
-      onClose();                                                  // cuộn trang/khung ngoài → đóng
+      const r = anchorRef.current?.getBoundingClientRect();
+      if (goc && r && Math.abs(r.top - goc.top) < 1 && Math.abs(r.left - goc.left) < 1) return;   // nút đứng yên → hộp vẫn đúng chỗ
+      onClose();                                                  // nút trôi theo trang/khung → đóng
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onEsc);

@@ -3224,40 +3224,198 @@ button.qn-text:hover {
   visibility: hidden;
 }
 
-/* Màn hình THẤP (laptop 768p còn thanh bookmark + extension) hoặc HẸP: thanh dễ chiếm hai hàng.
-   Cho phép cuộn ngang trong thanh thay vì xuống hàng, giữ chiều cao một hàng.
-   Dấu phẩy = HOẶC; viết `or` trong một câu @media là cú pháp khác và im lặng không ăn. */
-/* Ngưỡng 820px chứ không phải 700px: laptop 14" phổ biến là 1920×1080 để tỉ lệ hiển thị 150%,
-   ra ĐÚNG 720px CSS — lọt qua mốc 700 cũ, nên thanh vẫn phình hai hàng (đo được 113px ở 1280×720,
-   tức 15% chiều cao màn hình). 768p ở 100% cũng lọt. 820 phủ cả hai mà không đụng tới 1440×900. */
-@media (max-height: 820px), (max-width: 860px) {
-  /* ⚠️ `overflow-y: visible` ở đây KHÔNG có tác dụng và đừng thêm lại: chuẩn CSS Overflow ép
-     `visible` thành `auto` khi trục kia không phải `visible`. Nên thanh này LÀ khung cuộn cả hai
-     trục và cắt sạch mọi thứ bung ra ngoài nó. Mọi menu/hộp bung từ thanh phải render ở <body>
-     qua AnchoredPanel — đừng dùng position:absolute trong thanh. */
+/* ─────────────────────────────────────────────────────────────────────────────
+   THANH ĐÁY KHÔNG BAO GIỜ ĐƯỢC CHỒNG NÚT — từ điện thoại tới màn 4K.
+
+   Chủ repo 2026-09-30: ở ~1366px nút "Lưu" ĐÈ LÊN nhóm "+ Thêm hàng…", và "nhiều màn hình xài lắm — FHD, 2K… css cho kĩ".
+
+   NGUYÊN NHÂN (bản trước): khối `@media (max-height: 820px), (max-width: 860px)` ép `.actions` thành nowrap, nhưng `.grid-add-bar`
+   vẫn mang `min-width: 0` (cần cho màn cao, để nhóm thêm tự xuống dòng BÊN TRONG) và KHÔNG có `overflow`. Trong một hàng nowrap nó là
+   phần tử DUY NHẤT co được: thiếu chỗ thì nó co về ~290px, còn năm nút bên trong (nowrap, không co) TRÀN ra ngoài hộp và bị Lưu /
+   Khách chốt (vẽ sau, nền đặc) che mất — ý đồ "cuộn ngang thay vì xuống hàng" chưa bao giờ xảy ra. "Màn thấp" (cao ≤ 820px) lại khớp
+   hầu hết laptop: đo (báo giá NHÁP — thanh đầy đủ nhất) đè tới 116px ở 1366×768, 58px ở 1280×720, 44px ở 1536×730 (FHD tỉ lệ
+   125%); điện thoại còn tệ hơn. Màn cao hơn 820px đi nhánh xuống hàng nên CI (ui-smoke ở 1440×900) chưa bao giờ thấy.
+
+   Quyết định của bản trước được GIỮ: thanh ở màn thấp phải là MỘT hàng (~63px), không phình hai hàng (đã đo 113px ở 1280×720 =
+   15% chiều cao màn hình; toast `bottom: 84px` và `scroll-margin-bottom: 140px` của ô nhập cũng tính theo một hàng).
+
+   BÂY GIỜ — bốn lớp, mỗi lớp đo được bằng cách nhúng trang soạn (báo giá nháp) vào iframe nhiều cỡ rồi đo getBoundingClientRect từng
+   cặp nút (bài khoá luật: web/src/styles.thanhDay.test.ts; hình học thật: bước [U13b] của scripts/ci/ui-smoke.mjs):
+   1) ≥ 1280px: MỘT hàng (nowrap). Nhóm thêm `.grid-add-bar` là khung CUỘN ngang của riêng nó nên nút bên trong không bao giờ tràn ra
+      ngoài hộp; Lưu / Khách chốt / Khách không chốt / ⋯ không co nên luôn đứng nguyên chỗ, luôn thấy. Thiếu chỗ thì chỉ nhóm thêm cuộn
+      (Tab vào nút khuất: QuoteEditor.tsx tự cuộn nó vào tầm nhìn). Đệm 4px + lề âm để vòng focus (2px + offset 2px) không bị khung cắt.
+   2) NÉN DẦN để nhóm thêm hiện ĐỦ càng lâu càng tốt. Bề rộng thanh = bề rộng cửa sổ − 371px (sidebar 240px + lề; đúng tới ~2570px,
+      sau đó trần 2200px) — trên Windows còn trừ thêm ~10px thanh cuộn của trang (Chromium headless ẩn nó). Bề rộng tự nhiên đo được
+      (cả thanh): đầy đủ 1271px · nén 1074px · nén + "Chèn từ rạp" chỉ còn biểu tượng ~1003px · thêm nhãn cắt 64px + đệm nút thêm 6px
+      ~956px · nấc 1280–1365 (nhãn 52px, đệm/khoảng cách nhỏ nữa) ~895px. Mốc 1699 / 1479 / 1419 chừa dư 58 / 35 / 46px (nhãn "Báo giá Hà
+      Nội" dài hơn "Báo giá chính" ~20px); ở 1280 nấc cuối vừa khít kể cả khi có thanh cuộn thật (dư ~4px, không hiện thanh cuộn phụ).
+      Nhãn "Khách chốt cả báo giá" / "Khách không chốt" KHÔNG rút gọn: chúng phải nói rõ phạm vi "cả báo giá" (thao tác không đảo lại được).
+   3) 641–1279.98px: một hàng không còn đủ chỗ cho nhóm thêm → thanh xuống HAI hàng, nhóm hành động dạt phải ở hàng hai (cao ~100px).
+      Bản đầu đặt mốc ở 1240: đo lại thì 1240–1279 khuất 23–43px nhóm thêm ("⌨️" mất hẳn) — không có độ phân giải laptop chuẩn nào ở
+      khoảng đó, còn 1280×720 (FHD 150%) vẫn MỘT hàng như ý của bản trước.
+   4) ≤ 640.98px (điện thoại): dải cuộn ngang MỘT hàng, các nhóm KHÔNG co, nhóm hành động đứng ĐẦU để Lưu luôn thấy ngay mà không phải vuốt.
+   Mốc ghép đôi dùng .98 (640.98/641, 1279.98/1280): bề rộng LẺ do zoom trình duyệt hay tỉ lệ màn hình Windows không lọt giữa hai lớp.
+   Các hộp bung từ thanh (menu ⋯, bảng phím tắt) render ở <body> qua AnchoredPanel — đừng dùng position:absolute trong thanh (khung cuộn
+   cắt mất). Đừng bọc nhóm hành động vào một div: ui-smoke bấm `.actions > .btn-primary`. */
+@media (max-width: 1699px) {
+  /* Chữ dẫn "Thêm vào:" bỏ trước (tên bảng mới là thứ chặn bấm nhầm), rồi thu đệm / khoảng cách / cỡ chữ của mọi nút trong thanh. */
+  .dock-nhan-dan {
+    display: none;
+  }
   .editor .actions {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .editor .actions .grid-add-bar {
+    gap: 6px;
+  }
+  .editor .actions .grid-add-bar .btn-sm {
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+  .editor .actions > .btn {
+    padding: 8px 11px;
+    font-size: 13px;
+  }
+  .editor .actions > .btn.btn-primary {
+    padding-left: 12px;
+  }
+  .editor .actions .kebab-btn {
+    padding: 6px 11px;
+  }
+}
+@media (max-width: 1479px) {
+  /* "📐 Chèn từ rạp" chỉ còn biểu tượng (~−70px). Chữ vẫn nằm trong DOM (font-size: 0, KHÔNG display:none) nên tên truy cập của nút,
+     title giải thích và mọi test theo chữ vẫn nguyên. Đặt SAU khối nén ở trên: cùng độ đặc hiệu, luật sau thắng. */
+  .editor .actions .grid-add-bar .gf-venue-pick {
+    font-size: 0;
+    padding: 5px 9px;
+  }
+  .editor .actions .grid-add-bar .gf-venue-pick::before {
+    content: "📐";
+    font-size: 13px;
+  }
+}
+@media (min-width: 1280px) and (max-width: 1419px) {
+  /* Nén thêm: nhãn bảng cắt còn 64px (đầy đủ nằm ở title) — nó cũng làm bề rộng thanh KHÔNG còn phụ thuộc tên bảng dài hay ngắn —
+     và đệm / khoảng cách nút thêm nhỏ hơn nữa. CHỈ ở lớp MỘT hàng (≥1280px): ở lớp hai hàng hàng trên còn dư 130–180px, còn ở dải
+     điện thoại (overflow-x: visible cho nhãn) cái trần 64px để chữ tràn ra ngoài hộp nhãn, chui dưới "+ Thêm hàng" (đo 2026-10-06). */
+  .editor .actions .dock-nhan {
+    max-width: 64px;
+  }
+  .editor .actions .grid-add-bar {
+    gap: 4px;
+  }
+  .editor .actions .grid-add-bar .btn-sm {
+    padding: 5px 6px;
+  }
+}
+@media (min-width: 1280px) and (max-width: 1365px) {
+  /* 1280×720 (FHD tỉ lệ 150% — laptop văn phòng rất phổ biến): nén thêm một nấc để nhóm thêm hiện ĐỦ trong một hàng. Đo bằng
+     Chromium có thanh cuộn THẬT như Chrome trên Windows (trang hẹp đi ~10px): trước nấc này 1280 khuất 67px ("📐" cụt, "⌨️" mất hẳn).
+     Khoảng cách 5px + đệm 7px: thử 6px + 8px thì còn khuất 3px — đủ để Windows vẽ một thanh cuộn ngang có mũi tên dưới nhóm thêm. */
+  .editor .actions {
+    gap: 5px;
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+  .editor .actions .dock-nhan {
+    max-width: 52px;
+  }
+  .editor .actions .grid-add-bar {
+    gap: 3px;
+  }
+  .editor .actions .grid-add-bar .btn-sm {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+  .editor .actions > .btn {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+  .editor .actions > .btn.btn-primary {
+    padding-left: 10px;
+  }
+  .editor .actions .kebab-btn {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+@media (min-width: 1280px) {
+  /* Lớp 1 (≥1280px): MỘT hàng. Thanh nowrap; `.grid-add-bar` là phần tử DUY NHẤT co được và nó là khung cuộn ngang của chính nó. */
+  .editor .actions {
+    flex-wrap: nowrap;
+  }
+  .editor .actions .grid-add-bar {
+    flex: 1 1 auto;
+    min-width: 0;
     flex-wrap: nowrap;
     overflow-x: auto;
     scrollbar-width: thin;
-  }
-  .editor .actions .grid-add-bar {
-    flex-wrap: nowrap;
+    /* Khung cuộn cắt cả vòng focus (2px + offset 2px = 4px): chừa 4px mỗi phía và bù bằng lề âm để không đổi chỗ các nút. */
+    padding: 4px;
+    margin: -4px;
   }
   .editor .actions .btn {
     flex: 0 0 auto;
     white-space: nowrap;
   }
-  /* Thanh đã là khung cuộn ngang → nhãn không được co nữa, co là chữ bị cắt giữa chừng. */
+  .editor .actions .dock-nhan,
+  .editor .actions .kebab-wrap {
+    flex: 0 0 auto;
+  }
+}
+@media (min-width: 641px) and (max-width: 1279.98px) {
+  /* Lớp 3: HAI hàng. Nếu để trình duyệt tự ngắt thì Lưu ở hàng trên còn Khách chốt / ⋯ ở hàng dưới. Phần tử giả rộng 100% ép ngắt
+     dòng ngay sau nhóm trái (nhãn + nhóm thêm); `order` đưa các nút hành động ra sau nó. Khoảng cách dòng = 0 và nút hành động tự
+     chừa lề trên 8px — phần tử giả là một dòng riêng cao 0, để row-gap thì cộng thừa 8px.
+     Mốc trên là 1279.98px (không phải 1279px): zoom trình duyệt / tỉ lệ màn hình Windows cho bề rộng LẺ (1366px ở 110% = 1241,8px) —
+     với cặp max 1279 / min 1280 thì bề rộng 1279,5 lọt GIỮA, không lớp nào áp. */
+  .editor .actions {
+    row-gap: 0;
+  }
+  .editor .actions::after {
+    content: "";
+    flex: 0 0 100%;
+    order: 1;
+    height: 0;
+  }
+  .editor .actions > .btn,
+  .editor .actions > .kebab-wrap {
+    order: 2;
+    margin-top: 8px;
+  }
+}
+@media (max-width: 640.98px) {
+  /* ⚠️ `overflow-y: visible` ở đây KHÔNG có tác dụng và đừng thêm lại: chuẩn CSS Overflow ép `visible` thành `auto` khi trục kia
+     không phải `visible`. Nên dải này LÀ khung cuộn cả hai trục và cắt sạch mọi thứ bung ra ngoài nó. Mốc 640.98px: xem lớp hai hàng. */
+  .editor .actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  /* Các nhóm KHÔNG co: `.grid-add-bar` mang `min-width: 0` (để co được ở màn rộng) nên nếu còn co thì nút bên trong tràn ra đè nhóm kế. */
+  .editor .actions .grid-add-bar {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    min-width: auto;
+  }
+  .editor .actions .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  /* Dải đã là khung cuộn ngang → nhãn không được co nữa, co là chữ bị cắt giữa chừng. */
   .editor .actions .dock-nhan {
     flex: 0 0 auto;
     overflow: visible;
   }
-}
-
-/* Màn HẸP: bỏ chữ dẫn "Đang sửa:", giữ tên bảng — tên mới là thứ chặn bấm nhầm. */
-@media (max-width: 1180px) {
-  .dock-nhan-dan {
-    display: none;
+  /* Nhóm hành động (Lưu, Khách chốt, Khách không chốt, ⋯) đứng ĐẦU dải: nút quan trọng nhất luôn thấy ngay, không phải vuốt tìm. */
+  .editor .actions > .btn,
+  .editor .actions > .kebab-wrap {
+    order: -1;
+  }
+  .editor .actions > .btn.btn-primary {
+    margin-left: 0;
   }
 }
 

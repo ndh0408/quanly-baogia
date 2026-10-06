@@ -266,6 +266,32 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     (id: string, nhan: string) => setLuoiDangLam((v) => (v.id === id && v.nhan === nhan ? v : { id, nhan })),
     [],
   );
+  // Tab vào một nút đang khuất MỘT PHẦN trong khung cuộn của thanh đáy (nhóm thêm hàng khi thiếu chỗ, dải điện thoại ≤640px): trình
+  // duyệt chỉ tự cuộn khi nút khuất HẲN — nút lấp ló thì để nguyên, nút và vòng focus bị cắt (đo 2026-10-06 ở 1280×720 và 390×844).
+  // Chỉ cuộn NGANG khung cuộn gần nhất bên trong thanh, chừa 6px cho vòng focus (2px + offset 2px).
+  // KHÔNG dùng scrollIntoView: với phần tử trong thanh `position: sticky`, Chromium cuộn cả TRANG tới vị trí TĨNH của thanh (cuối trang
+  // soạn) — bản đầu làm vậy và ui-smoke [U13] bắt được: bấm "⋯" thì trang nhảy xuống cuối, menu bám nút trượt đi rồi đóng.
+  // Listener `focusin` GỐC của DOM, không phải prop onFocus: nhóm thêm hàng là PORTAL của GridTable vào .dock-slot — sự kiện React đi
+  // theo cây component (lên GridTable), không qua .actions; chỉ sự kiện DOM mới nổi bọt qua cây DOM thật. Ref callback (React 19) tự gỡ.
+  const ganThanhDay = useCallback((thanh: HTMLDivElement | null) => {
+    if (!thanh) return;
+    const hien = (e: FocusEvent) => {
+      const el = e.target as HTMLElement;
+      if (el === thanh) return;
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const ox = getComputedStyle(p).overflowX;
+        if (ox === "auto" || ox === "scroll") {
+          const r = el.getBoundingClientRect(), k = p.getBoundingClientRect(), le = 6;
+          if (r.left < k.left + le) p.scrollLeft -= k.left + le - r.left;
+          else if (r.right > k.right - le) p.scrollLeft += r.right - (k.right - le);
+          return;
+        }
+        if (p === thanh) return;
+      }
+    };
+    thanh.addEventListener("focusin", hien);
+    return () => thanh.removeEventListener("focusin", hien);
+  }, []);
   const gridVerRef = useRef(0);
   const redraw = useCallback(() => { gridVerRef.current++; setTick((t) => t + 1); }, []);
   const redrawMeta = useCallback(() => setTick((t) => t + 1), []);
@@ -1543,7 +1569,7 @@ Lý do (không bắt buộc):`,
             </>
           } />
 
-        <div className="actions">
+        <div className="actions" ref={ganThanhDay}>
           {/* Nhãn NẰM TRONG thanh, không phải chú thích bên cạnh: nó là thứ cho biết nút "+ Thêm
               hàng" ngay kế bên sẽ rơi vào bảng nào. */}
           {/* ── CÂU CHỮ PHẢI CHO THẤY NÓ CHỈ CHI PHỐI NHÓM NÚT THÊM ──────────────────────────
