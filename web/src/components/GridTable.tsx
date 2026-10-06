@@ -211,6 +211,20 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
 /** Style cố định dùng chung — object nội tuyến mới mỗi lần vẽ cũng khiến React so lại ô. */
 const AN_O = { display: "none" } as const;
 
+/** Ảnh trong một lần dán (ClipboardEvent.clipboardData). Chrome/Edge đưa ảnh chụp màn hình và ảnh
+ *  "Sao chép hình ảnh" ở `items` (kind "file", type image/*); một số trình duyệt chỉ có ở `files`.
+ *  Cùng một ảnh thường có mặt ở CẢ HAI → lấy `items` trước, rỗng mới xét `files`, để không dán đôi. */
+export function anhTrongClipboard(dt: Pick<DataTransfer, "items" | "files"> | null | undefined): File[] {
+  if (!dt) return [];
+  const out: File[] = [];
+  for (const it of Array.from(dt.items || [])) {
+    if (it.kind !== "file" || !it.type.startsWith("image/")) continue;
+    const f = it.getAsFile(); if (f) out.push(f);
+  }
+  if (out.length) return out;
+  return Array.from(dt.files || []).filter((f) => f.type.startsWith("image/"));
+}
+
 /** Hai số chỉ khác nhau do sai số dấu phẩy động (≤ 1 phần tỉ) — coi là cùng một số. Số trong báo giá
  *  lưu tối đa 4 số lẻ, nên một thay đổi thật không bao giờ nhỏ tới mức này. */
 const chiLechDauPhayDong = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -1503,6 +1517,21 @@ function GridTableInner(props: GridTableProps) {
     // Đang đứng ở ô chọn / ô tích (không có vùng chọn): dán rơi về ô chữ nhớ lần trước (focusRef) là ghi
     // vào chỗ người dùng không nhìn — thà không làm gì, như dán vào một ô danh sách của Excel.
     if ((e.target as HTMLElement | null)?.closest?.("[data-oc]")) return;
+    // Ô HÌNH ẢNH đang giữ tiêu điểm: Ctrl+V chỉ nhận ẢNH trong clipboard và đi đúng đường chọn tệp
+    // (addImages → fileToImg nén JPEG, tối đa IMG_MAX ảnh/ô, một mốc hoàn tác). Chữ/khối ô thì KHÔNG
+    // rơi xuống nhánh dán ô bên dưới — nhánh đó dán vào ô nhớ lần trước (focusRef), tức chỗ người dùng
+    // không nhìn — mà báo cho biết ô này chỉ nhận ảnh.
+    const oAnh = (e.target as HTMLElement | null)?.closest?.("[data-o-anh]");
+    if (oAnh) {
+      e.preventDefault();
+      const tr = oAnh.closest("tr[data-row]");
+      const i = tr ? parseInt(tr.getAttribute("data-row") || "-1", 10) : -1;
+      if (i < 0 || i >= items.length) return;
+      const anh = anhTrongClipboard(e.clipboardData);
+      if (anh.length) void addImages(i, anh);
+      else toast("Ô Hình ảnh chỉ nhận ẢNH — chụp màn hình hoặc \"Sao chép hình ảnh\" rồi Ctrl+V vào đây", "info");
+      return;
+    }
     flushSoft();
     const ae = document.activeElement as HTMLElement | null;
     const f0 = (e.target as HTMLElement)?.getAttribute?.("data-f") || ae?.getAttribute?.("data-f");
@@ -1942,6 +1971,12 @@ function GridTableInner(props: GridTableProps) {
     const ae = e.target as HTMLInputElement | HTMLTextAreaElement | null;
     const oc = ae?.getAttribute?.("data-oc");
     if (oc && ae) { phimOc(e, ae, oc); return; }
+    // Đứng ở ô hình ảnh (vừa dán ảnh) → Ctrl+Z / Ctrl+Y vẫn hoàn tác / làm lại như ở mọi ô khác.
+    if (ae?.getAttribute?.("data-o-anh")) {
+      const uz = undoRedoKey(e.ctrlKey || e.metaKey, e.shiftKey, e.key);
+      if (uz) { e.preventDefault(); e.stopPropagation(); if (editable) (uz === "undo" ? doUndo : doRedo)(); }
+      return;
+    }
     const f = ae?.getAttribute?.("data-f"); const tr = ae?.closest?.("tr[data-row]");
     if (!f || !tr || !FIELDS.includes(f)) return;
     const ctrl = e.ctrlKey || e.metaKey;
@@ -2275,6 +2310,8 @@ function GridTableInner(props: GridTableProps) {
     // Vào ô chọn / ô tích (bàn phím — vaoOc — hay bấm chuột): thoát chế độ sửa của ô chữ vừa rời (blur đã
     // chốt nội dung), và bỏ vùng tô — ô này không thuộc vùng chọn, để vùng cũ lại là Ctrl+C chép chỗ khác.
     if ((e.target as HTMLElement | null)?.getAttribute?.("data-oc")) { onDangDung?.(); lockCell(null); clearSel(); return; }
+    // Vào ô hình ảnh: cũng bỏ vùng tô — Ctrl+C/Ctrl+V lúc này thuộc ô ảnh, không phải vùng ô chữ cũ.
+    if ((e.target as HTMLElement | null)?.getAttribute?.("data-o-anh")) { onDangDung?.(); lockCell(null); clearSel(); return; }
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
     if (!f || !tr) return;
     onDangDung?.();   // Tab vào một ô cũng là "đang làm ở lưới này"
@@ -2813,7 +2850,7 @@ function GridTableInner(props: GridTableProps) {
   // danh sách chụp lúc chọn tệp → ảnh rơi sang hạng mục khác, lần xong sau đè mất ảnh của lần trước,
   // và onChange của lưới đã gỡ vẫn chạy. Nay: nhận hàng theo `_k` lúc chọn, đọc ảnh HIỆN CÓ lúc ghi,
   // và chỉ ghi khi lưới còn gắn trên đúng mảng lúc chọn — không thì báo để người dùng chọn lại.
-  const addImages = async (i: number, files: FileList | null) => {
+  const addImages = async (i: number, files: FileList | File[] | null) => {
     if (!editable || !files || !files.length) return;
     const room = IMG_MAX - ((items[i].images || []) as string[]).length;
     if (room <= 0) { toast(`Tối đa ${IMG_MAX} ảnh mỗi ô`, "info"); return; }
@@ -2840,7 +2877,10 @@ function GridTableInner(props: GridTableProps) {
   const imagesCell = (i: number) => {
     const imgs = (items[i].images || []) as string[];
     return (
-      <div className="cell-images">
+      // Ô hình ảnh NHẬN TIÊU ĐIỂM được (bấm vào chỗ trống của ô, hoặc Tab) → Ctrl+V dán ảnh từ clipboard
+      // (ảnh chụp màn hình, "Copy image" từ trình duyệt/Zalo) — xem nhánh `data-o-anh` đầu onPaste.
+      <div className="cell-images" data-o-anh="1" tabIndex={editable ? 0 : undefined}
+        title={editable ? "Bấm vào đây rồi Ctrl+V để dán ảnh" : undefined} aria-label={editable ? "Ô hình ảnh — Ctrl+V để dán ảnh" : undefined}>
         {imgs.map((src, k) => (
           <span className="cell-img" key={k}>
             <img src={safeImgSrc(src)} alt="" loading="lazy" title="Bấm để xem lớn" data-k={k} data-xl="phong-anh" onClick={xuLyBam} />

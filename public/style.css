@@ -3944,3 +3944,14 @@ body.embedded .main-embed {
 body.embedded .main-embed > * {
   max-width: none;
 }
+/* Ô HÌNH ẢNH nhận tiêu điểm để Ctrl+V dán ảnh từ clipboard: phủ kín ô cho dễ bấm, viền khi đang chọn. */
+.cell-images[tabindex] {
+  min-height: 36px;
+  border-radius: 4px;
+  outline: none;
+  cursor: default;
+}
+.cell-images[tabindex]:focus-visible,
+.cell-images[tabindex]:focus {
+  box-shadow: inset 0 0 0 2px #2563eb;
+}
