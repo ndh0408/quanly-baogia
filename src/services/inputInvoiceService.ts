@@ -26,6 +26,7 @@ import { decodeDataUrl, sniffImage, sha256, MAX_PROOF_BYTES } from "../paymentPr
 import { PAYMENT_PROOF_DATA_URL_RE } from "../validators.js";
 import { bangNoiBoTheoSheet, bangHnTheoBaoGia } from "../bangNoiBoSql.js";
 import { dsMauBangNoiBo, bangNoiBoCoNgay, type MauBangNoiBo } from "../quoteUtils.js";
+import { daDuyetHangHn } from "../hnDuyetHang.js";
 import {
   khoaKhoanChi,
   hangCuaPhia,
@@ -410,8 +411,9 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
       throw loiCoMa(409, "hang-trung-ma", "Có hai dòng cùng mã nội bộ trong báo giá này — nhờ người soạn mở báo giá và bấm Lưu một lần (máy tự tách mã), rồi thử lại.");
     }
     const hang = khop[0] ?? null;
-    // Hàng thuộc TẬP TRANG: Chi phí HCM / Phí KH đã duyệt theo hàng; Hà Nội khi CẢ PHẦN đã duyệt.
-    const duDieuKien = !!hang && (side === "hn" ? q.hnStatus === "approved" : hang.it.approved === true);
+    // Hàng thuộc TẬP TRANG: đã duyệt theo hàng — Chi phí HCM / Phí KH qua `approved`; Hà Nội qua trạng thái hàng (hàng
+    // cũ chưa có trạng thái riêng suy từ CẢ PHẦN đã duyệt — src/hnDuyetHang.ts).
+    const duDieuKien = !!hang && (side === "hn" ? daDuyetHangHn(hang.it, q) : hang.it.approved === true);
     const coNgay = hang ? bangNoiBoCoNgay(hang.t, q.companyId, dsMau as MauBangNoiBo[]) : false;
 
     const [daCo] = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM "InputInvoiceEntry" WHERE "quoteId" = ${quoteId} AND side = ${side} AND rid = ${rid}`;
@@ -419,7 +421,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
     // Ghi lên hàng NGOÀI tập trang chỉ khi hàng đó đã có dữ liệu kế toán (khoản, hoặc cờ / ảnh JSON cũ): kế toán vẫn
     // phải bỏ tích / sửa ghi chú được sau khi người duyệt bỏ duyệt — nhưng không mở khoản mới cho hàng chưa duyệt.
     if (hang && !duDieuKien && !daCo && !coDauVetJsonCu(hang.it)) {
-      throw loiCoMa(409, "hang-chua-duyet", side === "hn" ? "Phần Hà Nội của báo giá này chưa được duyệt nên chưa là khoản chi." : "Dòng này chưa được duyệt nên chưa là khoản chi.");
+      throw loiCoMa(409, "hang-chua-duyet", side === "hn" ? "Dòng Hà Nội này chưa được duyệt nên chưa là khoản chi." : "Dòng này chưa được duyệt nên chưa là khoản chi.");
     }
 
     // (4) Chưa có khoản → gieo (từ cờ JSON cũ nếu có). Hai người cùng gieo: ON CONFLICT DO NOTHING, rồi xếp hàng ở (5).

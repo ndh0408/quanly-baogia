@@ -378,6 +378,10 @@ describe.runIf(dbAvailable)("Lưu báo giá không làm mất khoản chi của 
         hnTables: [bangHn([hang("h1", "Thuê xe HN", { quantity: 2, unitPrice: 1500 }), hang("h2", "Ăn trưa HN")])],
       });
       expect((await tichKhoan(q0.id, "hn", "h1", { baseVersion: 0, paid: true })).status).toBe(200);
+      // Từ 2026-10-06 hàng HN ĐÃ DUYỆT khoá tiền với mọi người (src/hnDuyetHang.ts) — bỏ duyệt h1 (như người duyệt bấm bỏ
+      // tích) để cô lập đúng chốt tiền của KHOẢN, như hàng trang ở bài dưới.
+      const hnBo = (await prisma.quote.findUnique({ where: { id: q0.id }, select: { hnTables: true } })).hnTables;
+      await prisma.quote.update({ where: { id: q0.id }, data: { hnTables: hnBo.map((t) => ({ ...t, items: t.items.map((it) => ({ ...it, trangThaiDuyet: "dang-lam", approved: false })) })) } });
       const q = await tai(q0.id);
       const doiGia = (gia) => [bangHn([hang("h1", "Thuê xe HN", { quantity: 2, unitPrice: gia }), hang("h2", "Ăn trưa HN")])];
       const truoc = await anhChup(q.id);

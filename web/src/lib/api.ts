@@ -738,7 +738,8 @@ export const api = {
   // Luồng HN (giao/duyệt phần Hà Nội cho Account HN) — increment 10 stage 5.
   hnAccounts: () => req<{ data: { id: number; displayName?: string; username?: string }[] }>("/quotes/hn/accounts"),
   hnAssign: (id: number, accountId: number) => req<unknown>(`/quotes/${id}/hn/assign`, { method: "POST", body: JSON.stringify({ accountId }) }),
-  hnReview: (id: number, decision: "approve" | "reject", note?: string) => req<unknown>(`/quotes/${id}/hn/review`, { method: "POST", body: JSON.stringify({ decision, note }) }),
+  /** Duyệt / trả / bỏ duyệt hàng Hà Nội (2026-10-06 — theo HÀNG). `rids` vắng = mọi hàng đang chờ (bỏ duyệt bắt buộc chọn). */
+  hnReview: (id: number, decision: "approve" | "reject" | "unapprove", note?: string, rids?: string[]) => req<unknown>(`/quotes/${id}/hn/review`, { method: "POST", body: JSON.stringify({ decision, note, ...(rids?.length ? { rids } : {}) }) }),
   // Bảng HN nay PHẲNG (cấp báo giá) + mốc khoá lạc quan thay cho phép suy đoán "trang đã chết".
   //
   // `baseHnRev` là mốc THẬT: chuỗi ĐỤC lấy nguyên từ GET rồi gửi trả, chỉ đổi khi BẢNG HÀ NỘI
@@ -751,5 +752,6 @@ export const api = {
       ...(baseUpdatedAt ? { baseUpdatedAt } : {}),
       ...(baseHnRev ? { baseHnRev } : {}),
     }) }),
-  submitHn: (id: number) => req<unknown>(`/quotes/${id}/hn/submit`, { method: "POST" }),
+  /** Account HN gửi duyệt — `rids` = đúng các hàng đó; vắng = mọi hàng đang làm / bị trả. */
+  submitHn: (id: number, rids?: string[]) => req<unknown>(`/quotes/${id}/hn/submit`, { method: "POST", body: JSON.stringify(rids?.length ? { rids } : {}) }),
 };

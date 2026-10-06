@@ -277,9 +277,11 @@ router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accou
 // cap nào cho số bảng / số dòng / độ dài chuỗi. Xem tests/hn-save-forgery.test.js.
 router.put("/:id/hn", validate({ params: idParam, body: HnSaveSchema }),   // account lưu phần HN (chỉ ghi bảng hanoi)
   asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(await trinhBay(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
-router.post("/:id/hn/submit", validate({ params: idParam }),
+// Gửi / duyệt / trả / bỏ duyệt THEO HÀNG (2026-10-06, src/hnDuyetHang.ts): `rids` chọn hàng, vắng = thao tác hàng loạt.
+const HnRidsSchema = z.array(z.string().trim().min(1).max(64)).max(2000).optional();
+router.post("/:id/hn/submit", validate({ params: idParam, body: z.object({ rids: HnRidsSchema }) }),
   asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(await trinhBay(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
-router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(500).optional() }) }),
+router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decision: z.enum(["approve", "reject", "unapprove"]), note: z.string().max(500).optional(), rids: HnRidsSchema }) }),
   asyncHandler(async (req: Request, res: Response) => { const q = await reviewHn(req); res.json(await trinhBay(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 
 // MARK CONVERTED — chốt deal (won).

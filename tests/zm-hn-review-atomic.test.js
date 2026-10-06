@@ -41,7 +41,9 @@ describe.runIf(dbAvailable)("reviewHn — hai lượt duyệt/trả đồng th�
   beforeAll(async () => {
     const { createApp } = await import("../src/app.js");
     app = createApp();
-    mgrU = await prisma.user.create({ data: { username: `${TAG}-mgr`, displayName: `${TAG} mgr`, role: "manager", passwordHash: await bcrypt.hash(PWD, 4) } });
+    // 2026-10-06: duyệt hàng HN cần quyền duyệt dòng bảng nội bộ (quote:internal:approve — mặc định admin), như Chi phí
+    // HCM; và Account HN được giao KHÔNG tự duyệt — nên người duyệt ở đây là admin, phần HN không giao cho chính họ.
+    mgrU = await prisma.user.create({ data: { username: `${TAG}-mgr`, displayName: `${TAG} mgr`, role: "admin", passwordHash: await bcrypt.hash(PWD, 4) } });
     mgr = agentWithCsrf(app);
     expect((await mgr.post("/api/auth/login").send({ username: mgrU.username, password: PWD })).status).toBe(200);
     const co = await prisma.company.create({ data: { code: `${TAG}CO`, name: "Cty thử", address: "1 Thử", quotePrefix: `H${TAG.slice(-5)}` } });
@@ -59,7 +61,7 @@ describe.runIf(dbAvailable)("reviewHn — hai lượt duyệt/trả đồng th�
       quoteNumber: `${TAG}-${soHieu}`, title: `${TAG} bg`, searchText: TAG, toCompany: "Khách",
       companyId: coId, fromContact: "x", fromAddress: "x", city: "TP. Hồ Chí Minh",
       quoteDate: new Date(), createdById: mgrU.id, status: "draft", subtotal: 0, total: 0,
-      hnStatus: "submitted", hnAssigneeId: mgrU.id, hnSubmittedAt: new Date(),
+      hnStatus: "submitted", hnAssigneeId: null, hnSubmittedAt: new Date(),
     } });
     return q.id;
   };

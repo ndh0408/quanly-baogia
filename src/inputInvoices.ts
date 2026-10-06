@@ -6,9 +6,10 @@
 //   · Chi phí HCM / Phí khách hàng (`QuoteSheet.extraTables`): duyệt THEO HÀNG — `item.approved`, do người có
 //     quote:internal:approve đặt và server giữ theo `rid` (reconcileExtraApprovals). Hàng chưa duyệt không cộng
 //     vào tổng (`extraTableSum`), nên cũng không đòi hoá đơn.
-//   · Báo giá Hà Nội (`Quote.hnTables`): duyệt ở MỨC BÁO GIÁ — `Quote.hnStatus = "approved"`. Cờ `approved*` của
-//     từng hàng HN KHÔNG phải nguồn sự thật (reconcileHnApprovals chỉ bịt việc người điền tự đóng dấu), nên
-//     khi báo giá đã duyệt phần HN thì MỌI hàng HN vào, bất kể cờ từng hàng.
+//   · Báo giá Hà Nội (`Quote.hnTables`): từ 2026-10-06 cũng duyệt THEO HÀNG — `it.trangThaiDuyet = "da-duyet"` (src/
+//     hnDuyetHang.ts), vào NGAY khi hàng được duyệt, không chờ cả phần. Hàng CŨ chưa có trạng thái riêng suy từ cả phần
+//     (`Quote.hnStatus = "approved"` → đã duyệt, ngày / người duyệt theo `hnReviewedAt` / `hnReviewerId`) — báo giá đã
+//     duyệt cả phần trước bản này (có thể đã có khoản ĐÃ CHI) giữ nguyên mọi dòng, không cần migration dữ liệu.
 //
 // ── PHẦN KẾ TOÁN (2026-10-06) ─────────────────────────────────────────────────────────────────────
 // Mỗi dòng mang thêm dữ liệu kế toán của khoản (bảng InputInvoiceEntry — src/khoanChi.ts): đã chi + ảnh, ngày HĐ,
@@ -23,6 +24,7 @@
 // thứ hai ở đây là cách có hai con số cho cùng một khoản chi. Không bao giờ mang `paidProof` (ảnh ủy nhiệm chi).
 import { extraTableSum, bangNoiBoCoNgay, type MauBangNoiBo } from "./quoteUtils.js";
 import { codeLabel, sheetCode, soMa } from "./quoteCode.js";
+import { daDuyetHangHn, dauDuyetHangHn } from "./hnDuyetHang.js";
 import {
   hangCuaPhia,
   khoaKhoanChi,
@@ -66,7 +68,7 @@ export type BaoGiaDauVao = {
   id: number; companyId: number | null; status: string;
   projectCode?: string | null; projectVersion?: number | null; quoteNumber?: string | null;
   title: string; shortTitle?: string | null;
-  hnStatus?: string | null; hnReviewedAt?: Date | string | null; hnReviewerId?: number | null;
+  hnStatus?: string | null; hnReviewedAt?: Date | string | null; hnReviewerId?: number | null; hnRejectNote?: string | null;
   customer?: { code?: string | null; name?: string | null } | null;
   company?: { shortName?: string | null; name?: string | null } | null;
   createdBy?: { displayName?: string | null } | null;
@@ -224,12 +226,13 @@ export function hangHoaDonDauVao(p: {
     );
   }
 
-  // 2) Báo giá Hà Nội — duyệt ở MỨC BÁO GIÁ. Chưa duyệt (assigned/submitted/rejected/null) thì chưa là khoản chi —
-  //    trừ hàng đã có dữ liệu kế toán (nhóm "Cần chú ý").
-  const dongHn = q.hnStatus === "approved"
-    ? { at: iso(q.hnReviewedAt), by: q.hnReviewerId != null ? tenNguoi.get(q.hnReviewerId) ?? null : null }
-    : null;
-  duyet(Array.isArray(bangHn) ? bangHn : [], "hn", () => "hanoi", null, () => dongHn);
+  // 2) Báo giá Hà Nội — duyệt THEO HÀNG (hàng cũ suy từ cả phần). Hàng chưa duyệt chưa là khoản chi — trừ hàng đã có
+  //    dữ liệu kế toán (nhóm "Cần chú ý").
+  duyet(Array.isArray(bangHn) ? bangHn : [], "hn", () => "hanoi", null, (it) => {
+    if (!daDuyetHangHn(it, q)) return null;
+    const d = dauDuyetHangHn(it, q);
+    return { at: d.approvedAt, by: d.approvedBy != null ? tenNguoi.get(d.approvedBy) ?? null : null };
+  });
 
   // 3) Khoản mà hàng của nó KHÔNG CÒN trong báo giá (xoá hàng chỉ có ghi chú, hoặc dữ liệu ghi từ bản app cũ).
   for (const e of khoan.values()) {

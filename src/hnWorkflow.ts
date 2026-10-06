@@ -1,14 +1,22 @@
 // Luồng GIÁ HÀ NỘI (role account_hn) — TÁCH khỏi quoteService cho gọn.
 // Quản lý GIAO account điền bảng nội bộ loại "hanoi"; account CHỈ thấy/sửa phần đó
-// (presentQuoteForAccountHn lược hết phần khác) rồi GỬI DUYỆT; quản lý DUYỆT/TRẢ.
+// (presentQuoteForAccountHn lược hết phần khác) rồi GỬI DUYỆT; người có quyền duyệt DUYỆT/TRẢ.
 // Tiền HN là NỘI BỘ — nằm trong extraTables nên KHÔNG bao giờ vào Excel.
+//
+// TỪ 2026-10-06 GỬI / DUYỆT / TRẢ / BỎ DUYỆT THEO TỪNG HÀNG (luật thuần: src/hnDuyetHang.ts). `Quote.hnStatus` chỉ còn
+// là TÓM TẮT; hàng đã duyệt khoá với mọi người; hàng cũ (trước bản này) suy trạng thái từ cả phần lúc đọc. Thao tác
+// trạng thái hàng ghi bằng SQL thô dưới khoá Quote: KHÔNG bump `Quote.updatedAt` (mốc khoá lạc quan của màn soạn —
+// bấm Duyệt một hàng không được đá văng lần Lưu của người đang soạn; đường Lưu vẫn lấy lại trạng thái hàng từ CSDL)
+// và không đổi `hnRev` (vân tay HN không tính trạng thái) — rồi tự phát SSE sau khi commit.
 import type { Request } from "express";
 import { prisma } from "./db.js";
 import { notify } from "./notifications.js";
 import { audit } from "./audit.js";
-import { canOnQuote, can, laAccountPhu, PERMISSIONS as P } from "./permissions.js";
-import { QUOTE_INCLUDE, sanitizeHnTables, hnRevCua } from "./quoteUtils.js";
-import { reconcileExtraPayments, reconcileHnApprovals } from "./services/quoteService.js";
+import { canOnQuote, can, laAccountPhu, quoteScopesFor, PERMISSIONS as P } from "./permissions.js";
+import { QUOTE_INCLUDE, sanitizeHnTables, hnRevCua, dsMauBangNoiBo, bangNoiBoCoNgay } from "./quoteUtils.js";
+import { reconcileExtraPayments } from "./services/quoteService.js";
+import { emitChange } from "./sse.js";
+import { reconcileTrangThaiHn, vatChatHoaHn, apThaoTacHangHn, tomTatHn, hangTienHn, type ThaoTacHangHn } from "./hnDuyetHang.js";
 import { docKhoanChiTrongTx } from "./services/inputInvoiceService.js";
 import { tachRidTrung, tapDaChi, hangDaChiBiMat, loiHangDaChi, chuanHoaRidTrung, hangVetThieuRid, loiVetThieuRid } from "./khoanChi.js";
 
@@ -32,23 +40,32 @@ export async function assignHn(req: Request) {
   if (laAccountPhu(req.session, existing)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này, việc giao phần Hà Nội thuộc về người tạo báo giá");
   const acc = await prisma.user.findFirst({ where: { id: accountId, active: true, ...hnFillWhere }, select: { id: true } });
   if (!acc) throw httpError(400, "Tài khoản Account Hà Nội không hợp lệ");
-  const quote = await prisma.quote.update({
-    where: { id },
-    data: {
-      hnAssigneeId: acc.id, hnStatus: "assigned",
-      hnSubmittedAt: null, hnReviewedAt: null, hnReviewerId: null, hnRejectNote: null,
-      // UPSERT chứ không create: `connect` của m2m ngầm vốn idempotent, `create` của model
-      // tường minh thì KHÔNG — giao lại phần HN cho cùng một account sẽ ném P2002. Nhánh
-      // `update` để RỖNG: nếu người này đã là account phụ với phạm vi rộng hơn thì giữ nguyên.
-      members: {
-        upsert: {
-          where: { quoteId_userId: { quoteId: Number(id), userId: acc.id } },
-          create: { userId: acc.id, scopes: ["hanoi"], addedById: req.session.userId },
-          update: {},
+  const quote = await prisma.$transaction(async (tx) => {
+    // Đổi `hnStatus` mà hàng cũ còn suy trạng thái từ nó → VẬT CHẤT HOÁ trước (dưới khoá Quote): giao lại phần HN không
+    // được "mở khoá" hàng đã duyệt như bản cả phần cũ (approved → assigned là mở cả phần). Hàng đã duyệt giữ nguyên.
+    await tx.$queryRaw`SELECT id FROM "Quote" WHERE id = ${Number(id)} FOR UPDATE`;
+    const tuoi = await tx.quote.findFirst({ where: { id: Number(id) }, select: { hnTables: true, hnStatus: true, hnReviewedAt: true, hnReviewerId: true, hnRejectNote: true } });
+    const bang: any[] = Array.isArray(tuoi?.hnTables) ? (tuoi!.hnTables as any[]) : [];
+    vatChatHoaHn(bang, tuoi);
+    return tx.quote.update({
+      where: { id: Number(id) },
+      data: {
+        hnAssigneeId: acc.id, hnStatus: tomTatHn(bang, true, "assigned"),
+        ...(bang.length ? { hnTables: bang } : {}),
+        hnSubmittedAt: null, hnReviewedAt: null, hnReviewerId: null, hnRejectNote: null,
+        // UPSERT chứ không create: `connect` của m2m ngầm vốn idempotent, `create` của model
+        // tường minh thì KHÔNG — giao lại phần HN cho cùng một account sẽ ném P2002. Nhánh
+        // `update` để RỖNG: nếu người này đã là account phụ với phạm vi rộng hơn thì giữ nguyên.
+        members: {
+          upsert: {
+            where: { quoteId_userId: { quoteId: Number(id), userId: acc.id } },
+            create: { userId: acc.id, scopes: ["hanoi"], addedById: req.session.userId },
+            update: {},
+          },
         },
       },
-    },
-    include: QUOTE_INCLUDE,
+      include: QUOTE_INCLUDE,
+    });
   });
   await notify(acc.id, { title: `Bạn được giao phần Hà Nội: ${quote.quoteNumber}`, body: `${quote.title} — mở để điền giá HN rồi gửi duyệt.`, link: `/#/quotes/${id}`, resource: "quote", resourceId: id, important: true });
   await audit(req, "quote.hn.assign", { resource: "quote", resourceId: id, accountId: acc.id });
@@ -81,11 +98,12 @@ function assertConLaThanhVien(req: Request, q: { createdById: number; members: {
  */
 export async function saveHn(req: Request) {
   const id = Number((req.params as any).id);
-  const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, hnStatus: true, hnAssigneeId: true, updatedAt: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
+  const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, hnStatus: true, hnAssigneeId: true, updatedAt: true, createdById: true, companyId: true, members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!can(req.session, P.QUOTE_HN_FILL) || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Chỉ Account Hà Nội được giao mới điền được phần này");
   assertConLaThanhVien(req, existing);
-  if (["submitted", "approved"].includes(existing.hnStatus ?? "")) throw httpError(400, "Phần HN đã gửi duyệt/đã duyệt — không sửa được");
+  // Không còn chặn CẢ PHẦN khi "đã gửi / đã duyệt" (2026-10-06): khoá theo TỪNG HÀNG — hàng đã gửi / đã duyệt không
+  // sửa / xoá được (reconcileTrangThaiHn, 409), hàng đang làm / bị trả và hàng MỚI thì vẫn làm tiếp được.
   // Tab chạy bundle CŨ gửi `hnSheets` (hình dạng theo trang, đã bỏ). Không được hiểu thành "xoá
   // hết bảng": nói thẳng để họ tải lại, và nhắc chép phần vừa gõ trước khi tải.
   if (!Array.isArray(req.body?.hnTables)) {
@@ -104,7 +122,8 @@ export async function saveHn(req: Request) {
   // đã-chi cũ ĐÓNG BĂNG cho mọi người (kế toán ghi ở bảng InputInvoiceEntry — src/khoanChi.ts).
   const userId = req.session.userId!;
   const mienChotTien = can(req.session, P.INVOICE_INPUT_PAY);
-  const canApprove = can(req.session, P.QUOTE_INTERNAL_APPROVE);
+  const dsMau = await dsMauBangNoiBo();   // luật cột Số Ngày theo mẫu — để so tiền hàng đã khoá đúng như máy tính tiền
+  const coNgay = (t: Record<string, any>) => bangNoiBoCoNgay(t, existing.companyId, dsMau);
 
   await prisma.$transaction(async (tx) => {
     // KHOÁ RỒI MỚI ĐỌC. Cột jsonb vẫn là read-modify-write nguyên khối, nên bỏ khoá QuoteSheet mà
@@ -115,10 +134,10 @@ export async function saveHn(req: Request) {
     // Dùng $queryRaw chứ không `tx.quote.updateMany`: extension realtime ở src/db.ts coi updateMany
     // là WRITE nên bắn thêm một sự kiện SSE, mà SSE đã bắn thì rollback không rút lại được.
     await tx.$queryRaw`SELECT id FROM "Quote" WHERE id = ${id} FOR UPDATE`;
-    const tuoi = await tx.quote.findFirst({ where: { id }, select: { hnTables: true, hnStatus: true, hnAssigneeId: true, updatedAt: true } });
+    const tuoi = await tx.quote.findFirst({ where: { id }, select: { hnTables: true, hnStatus: true, hnAssigneeId: true, updatedAt: true, hnReviewedAt: true, hnReviewerId: true, hnRejectNote: true } });
     if (!tuoi) throw httpError(404, "Không tìm thấy báo giá");
-    // Kiểm LẠI sau khi đã giữ khoá: giữa lần đọc đầu và đây, quản lý có thể vừa duyệt/giao lại.
-    if (["submitted", "approved"].includes(tuoi.hnStatus ?? "")) throw httpError(400, "Phần HN vừa được gửi duyệt/duyệt — không sửa được nữa");
+    // Kiểm LẠI sau khi đã giữ khoá: giữa lần đọc đầu và đây, quản lý có thể vừa giao lại. (Duyệt chen giữa thì
+    // reconcileTrangThaiHn bên dưới thấy trạng thái hàng TƯƠI — đọc sau khoá.)
     if (tuoi.hnAssigneeId !== userId) throw httpError(403, "Phần Hà Nội vừa được giao cho người khác");
     // ── 409 PHẢI DỰA TRÊN BẢNG HÀ NỘI, KHÔNG DỰA TRÊN `Quote.updatedAt` ────────────────────
     // `updatedAt` đổi khi CHỦ báo giá lưu BẤT CỨ thứ gì: đổi tên khách, sửa một dòng ở trang 3,
@@ -129,7 +148,7 @@ export async function saveHn(req: Request) {
     //
     // `hnRev` chỉ đổi khi bảng HN đổi thật. Nó KHÔNG tính `paid*`/`approved*`/`paidProof`/`rid`
     // (xem quoteUtils.vanTayHn) — mấy trường đó do server sở hữu và đã được
-    // reconcileExtraPayments/reconcileHnApprovals giữ nguyên bên dưới, nên người khác tích thanh
+    // reconcileExtraPayments/reconcileTrangThaiHn giữ nguyên bên dưới, nên người khác tích thanh
     // toán KHÔNG được phép hất phần người này đang gõ.
     //
     // Tab mở TRƯỚC lần deploy này chỉ gửi `baseUpdatedAt`; vẫn tôn trọng nó để họ không mất việc,
@@ -158,17 +177,22 @@ export async function saveHn(req: Request) {
     const boc = [{ extraTables: payload }];
     const bocDb = [{ extraTables: hnDb }];
     reconcileExtraPayments(boc, bocDb, { daChi, mienChotTien });
-    reconcileHnApprovals(boc, bocDb, canApprove);
     // KT-4: hàng ĐÃ CHI không được biến mất qua đường Lưu (400 nêu tên hàng — màn account HN chỉ toast, giữ phần gõ).
+    // Báo trước chốt duyệt bên dưới (cùng thứ tự với đường Lưu báo giá).
     const mat = hangDaChiBiMat("hn", hnDb, payload, daChi);
     if (mat.length) throw loiHangDaChi(mat);
+    // Trạng thái duyệt từng hàng do server sở hữu: lấy lại theo rid; hàng đã gửi / đã duyệt mà bị sửa / xoá → 409.
+    reconcileTrangThaiHn(boc[0].extraTables, hnDb, tuoi, { khoaChoDuyet: true, coNgayDb: coNgay });
 
+    const moi = sanitizeHnTables(boc[0].extraTables);
+    // `hnStatus` = TÓM TẮT các hàng (mọi hàng vừa mang trạng thái riêng). Hàng bị trả vẫn "bị trả" tới khi gửi lại.
+    const tomTat = tomTatHn(moi, true, "assigned");
     await tx.quote.update({
       where: { id },
       data: {
-        hnTables: sanitizeHnTables(boc[0].extraTables) as any,
-        // Bị trả lại rồi sửa tiếp → quay về "đang làm" (giữ đúng hành vi cũ).
-        ...(tuoi.hnStatus === "rejected" ? { hnStatus: "assigned", hnRejectNote: null } : {}),
+        hnTables: moi as any,
+        hnStatus: tomTat,
+        ...(tomTat !== "rejected" ? { hnRejectNote: null } : {}),
       },
     });
   });
@@ -177,59 +201,175 @@ export async function saveHn(req: Request) {
   return prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
 }
 
-/** Account_hn GỬI DUYỆT phần HN → thông báo quản lý (người tạo báo giá). */
+/** `rids` client gửi (tuỳ chọn): mảng chuỗi rid, tối đa 2000, bỏ rỗng / trùng. Vắng hoặc rỗng = thao tác hàng loạt. */
+function docRids(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const ds = [...new Set(v.filter((x) => typeof x === "string").map((x) => x.trim()).filter((x) => x && x.length <= 64))].slice(0, 2000);
+  return ds.length ? ds : null;
+}
+
+const nhanHang = (ds: string[]) => ds.slice(0, 4).map((t) => `"${String(t).slice(0, 60)}"`).join(", ") + (ds.length > 4 ? ` và ${ds.length - 4} hàng khác` : "");
+
+/**
+ * ĐỔI TRẠNG THÁI HÀNG dưới khoá Quote — lõi chung của gửi / duyệt / trả / bỏ duyệt.
+ *
+ * Khoá CHỈ hàng Quote (cùng thứ tự với saveHn; mọi đường khác lấy QuoteSheet → Quote nên không ngược chiều). Đọc bảng
+ * TƯƠI sau khoá, vật chất hoá trạng thái hàng cũ (hnStatus sắp đổi), áp thao tác, ghi bằng SQL THÔ: không bump
+ * `updatedAt`, không qua extension realtime (SSE phát SAU commit, rollback không rút lại được). `kiem` chạy trên bản
+ * tươi để kiểm lại điều kiện phụ thuộc trạng thái (vd phần HN vừa được giao cho người khác).
+ *
+ * Phần CHƯA CÓ hàng nào (dữ liệu cũ, hoặc chỉ toàn dòng nhóm): không có gì để đổi theo hàng → `rong` quyết trạng thái
+ * cả phần như luồng cũ (giữ tương thích cho báo giá cũ gửi duyệt khi bảng còn trống).
+ */
+async function doiTrangThaiHang(id: number, p: {
+  loai: ThaoTacHangHn; rids: string[] | null; nguoi: number; lyDo?: string | null;
+  kiem?: (tuoi: { hnStatus: string | null; hnAssigneeId: number | null }) => void;
+  /** Trạng thái cả phần mới khi phần không có hàng nào (hoặc ném lỗi). */
+  rong: (hnStatus: string | null) => string;
+  /** Câu báo khi có hàng nhưng không hàng nào hợp lệ cho thao tác. */
+  khongCoHang: string;
+  them: { hnSubmittedAt?: boolean; hnReviewed?: boolean; hnRejectNote?: string | null };
+}) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Quote" WHERE id = ${id} FOR UPDATE`;
+    const tuoi = await tx.quote.findFirst({ where: { id }, select: { hnTables: true, hnStatus: true, hnAssigneeId: true, hnReviewedAt: true, hnReviewerId: true, hnRejectNote: true } });
+    if (!tuoi) throw httpError(404, "Không tìm thấy báo giá");
+    p.kiem?.(tuoi);
+    const bang: any[] = Array.isArray(tuoi.hnTables) ? (tuoi.hnTables as any[]) : [];
+    const coHang = [...hangTienHn(bang)].length > 0;
+    let ten: string[] = [];
+    let hnStatus: string | null;
+    if (!coHang) {
+      hnStatus = p.rong(tuoi.hnStatus);
+    } else {
+      vatChatHoaHn(bang, tuoi);
+      const kq = apThaoTacHangHn(bang, p.loai, { rids: p.rids, nguoi: p.nguoi, luc: new Date().toISOString(), lyDo: p.lyDo });
+      if (!kq.ten.length) throw httpError(400, p.khongCoHang);
+      ten = kq.ten;
+      hnStatus = tomTatHn(bang, tuoi.hnAssigneeId != null, tuoi.hnStatus);
+    }
+    const t = p.them;
+    const doiGhiChu = t.hnRejectNote !== undefined;
+    await tx.$executeRaw`
+      UPDATE "Quote" SET
+        "hnTables" = CASE WHEN ${coHang} THEN ${JSON.stringify(bang)}::jsonb ELSE "hnTables" END,
+        "hnStatus" = ${hnStatus},
+        "hnSubmittedAt" = CASE WHEN ${!!t.hnSubmittedAt} THEN now() ELSE "hnSubmittedAt" END,
+        "hnReviewedAt" = CASE WHEN ${!!t.hnReviewed} THEN now() ELSE "hnReviewedAt" END,
+        "hnReviewerId" = CASE WHEN ${!!t.hnReviewed} THEN ${p.nguoi}::int ELSE "hnReviewerId" END,
+        "hnRejectNote" = CASE WHEN ${doiGhiChu} THEN ${t.hnRejectNote ?? null}::text ELSE "hnRejectNote" END
+      WHERE id = ${id}`;
+    return { ten, hnStatus, assigneeId: tuoi.hnAssigneeId };
+  });
+}
+
+/** Báo cho mọi màn đang mở (danh sách, trình soạn, Hóa đơn đầu vào) — SQL thô không qua extension realtime. */
+function phatThayDoi(id: number) {
+  emitChange("quote", "update", id);
+  emitChange("inputInvoice", "update");
+}
+
+/**
+ * Account HN GỬI DUYỆT — `POST /:id/hn/submit`, body `{ rids? }`. Có `rids` = gửi đúng các hàng đó; vắng = gửi mọi
+ * hàng đang làm / bị trả (nút "Gửi duyệt" cũ, nay là thao tác hàng loạt). MỘT thông báo cho chủ báo giá mỗi lần gửi.
+ * Hàng phải ĐÃ LƯU (có rid trên máy chủ) — màn Account HN lưu trước rồi mới gửi.
+ */
 export async function submitHn(req: Request) {
-  const id = (req.params as any).id;
+  const id = Number((req.params as any).id);
+  const rids = docRids(req.body?.rids);
   const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, quoteNumber: true, title: true, hnAssigneeId: true, hnStatus: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
-  if (!can(req.session, P.QUOTE_HN_FILL) || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Không có quyền gửi duyệt phần này");
+  const me = req.session.userId!;
+  if (!can(req.session, P.QUOTE_HN_FILL) || existing.hnAssigneeId !== me) throw httpError(403, "Không có quyền gửi duyệt phần này");
   assertConLaThanhVien(req, existing);
-  if (!["assigned", "rejected"].includes(existing.hnStatus ?? "")) throw httpError(400, "Phần HN không ở trạng thái có thể gửi duyệt");
-  const quote = await prisma.quote.update({ where: { id }, data: { hnStatus: "submitted", hnSubmittedAt: new Date(), hnRejectNote: null }, include: QUOTE_INCLUDE });
-  await notify(existing.createdById, { title: `Phần Hà Nội chờ duyệt: ${quote.quoteNumber}`, body: `${quote.title} — Account đã gửi giá HN, mở để duyệt/trả.`, link: `/#/quotes/${id}`, resource: "quote", resourceId: id, important: true });
-  await audit(req, "quote.hn.submit", { resource: "quote", resourceId: id });
+  const kq = await doiTrangThaiHang(id, {
+    loai: "gui", rids, nguoi: me,
+    kiem: (t) => { if (t.hnAssigneeId !== me) throw httpError(403, "Phần Hà Nội vừa được giao cho người khác"); },
+    rong: (st) => {
+      if (!["assigned", "rejected"].includes(st ?? "")) throw httpError(400, "Phần HN không ở trạng thái có thể gửi duyệt");
+      return "submitted";
+    },
+    khongCoHang: rids
+      ? "Các hàng đã chọn không gửi duyệt được — đã gửi / đã duyệt rồi, hoặc chưa Lưu."
+      : "Không còn hàng nào để gửi duyệt — mọi hàng đã gửi hoặc đã duyệt (hàng mới phải Lưu trước).",
+    them: { hnSubmittedAt: true, hnRejectNote: null },
+  });
+  phatThayDoi(id);
+  const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+  if (!quote) throw httpError(404, "Không tìm thấy báo giá");
+  const so = kq.ten.length;
+  await notify(existing.createdById, {
+    title: so ? `Hà Nội chờ duyệt ${so} hàng: ${quote.quoteNumber}` : `Phần Hà Nội chờ duyệt: ${quote.quoteNumber}`,
+    body: so ? `${quote.title} — ${nhanHang(kq.ten)}. Mở để duyệt / trả từng hàng.` : `${quote.title} — Account đã gửi giá HN, mở để duyệt/trả.`,
+    link: `/#/quotes/${id}`, resource: "quote", resourceId: id, important: true,
+  });
+  await audit(req, "quote.hn.submit", { resource: "quote", resourceId: id, after: { soHang: so, hang: kq.ten.slice(0, 50) } });
   return quote;
 }
 
 /**
- * Manager DUYỆT / TRẢ phần HN → thông báo account.
+ * DUYỆT / TRẢ / BỎ DUYỆT hàng Hà Nội — `POST /:id/hn/review`, body `{ decision: approve|reject|unapprove, note?, rids? }`.
  *
- * NGUYÊN TỬ hoá bằng `updateMany` + kiểm `count` — ultracode audit 2026-09-09 (finding M-CONC).
- * Bản trước là check-then-update: đọc `hnStatus` rồi `update` KHÔNG kèm lại điều kiện đó, nên hai
- * lượt duyệt/trả gần như đồng thời (2 quản lý HN cùng bấm) đều đọc thấy "submitted" và đều ghi đè
- * — người thắng cuối cùng quyết định kết quả, mà audit log + thông báo cho account lại ghi CẢ HAI
- * quyết định như thể đều hợp lệ. `markConverted`/`markLost` (quoteService.ts) đã tự vá đúng khuôn
- * này cho một chuyển trạng thái terminal tương tự; `reviewHn` xử lý cùng LOẠI chuyển trạng thái
- * (submitted → approved/rejected) nhưng chưa áp dụng khuôn đó. Xem tests/zm-hn-review-atomic.test.js.
+ * QUYỀN = quyền duyệt dòng bảng nội bộ như Chi phí HCM (`quote:internal:approve`) + sửa được báo giá + được giao vùng
+ * "Giá Hà Nội". Thêm hai chốt riêng của phần HN: account phụ không duyệt (giữ luật cũ của reviewHn — duyệt là mở /
+ * đóng khoá giá đã chốt, việc của chủ), và ACCOUNT HN ĐƯỢC GIAO KHÔNG TỰ DUYỆT hàng mình điền (kể cả khi được cấp
+ * riêng quyền duyệt).
+ *
+ * `rids` vắng: duyệt / trả MỌI hàng đang chờ (nút cả phần cũ, nay là thao tác hàng loạt). Có: đúng các hàng đó — duyệt
+ * thẳng được cả hàng chưa gửi (người duyệt tự điền), trả được cả hàng đã duyệt; bỏ duyệt BẮT BUỘC chọn hàng. MỘT
+ * thông báo cho Account HN mỗi lần bấm, dù bao nhiêu hàng.
+ *
+ * Đồng thời: kiểm-rồi-ghi dưới khoá Quote (FOR UPDATE) trên bản TƯƠI, nên hai người cùng bấm thì người sau thấy hàng
+ * đã đổi trạng thái → 400 thay vì ghi đè (finding M-CONC của bản cả phần, tests/zm-hn-review-atomic). Phần chưa có
+ * hàng nào giữ hành vi cả phần cũ: chỉ từ "submitted", lượt bị chen giữa → 409.
  */
 export async function reviewHn(req: Request) {
-  const id = (req.params as any).id;
-  const decision = req.body?.decision;   // "approve" | "reject"
-  const note = req.body?.note ? String(req.body.note).slice(0, 500) : null;
+  const id = Number((req.params as any).id);
+  const decision = req.body?.decision;   // "approve" | "reject" | "unapprove"
+  const note = req.body?.note ? String(req.body.note).trim().slice(0, 500) || null : null;
+  const rids = docRids(req.body?.rids);
   const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
-  if (!can(req.session, P.QUOTE_HN_MANAGE) || !canOnQuote(req.session, "update", existing)) throw httpError(403, "Bạn không có quyền duyệt phần Hà Nội");
+  const me = req.session.userId!;
+  if (!can(req.session, P.QUOTE_INTERNAL_APPROVE) || !canOnQuote(req.session, "update", existing)) throw httpError(403, "Bạn không có quyền duyệt hàng Hà Nội");
+  if (!(quoteScopesFor(req.session, existing) ?? []).includes("hanoi")) throw httpError(403, 'Bạn không được giao phần "Giá Hà Nội" của báo giá này');
   // Như assignHn: duyệt/trả phần HN mở lại quyền ghi lên giá đã chốt, không phải việc của phụ.
   if (laAccountPhu(req.session, existing)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này, việc duyệt phần Hà Nội thuộc về người tạo báo giá");
-  if (existing.hnStatus !== "submitted") throw httpError(400, "Phần HN chưa được gửi duyệt");
-  if (!["approve", "reject"].includes(decision)) throw httpError(400, "Quyết định không hợp lệ");
-  const approved = decision === "approve";
-  // Optimistic guard: chỉ ghi nếu hnStatus VẪN LÀ "submitted" tại thời điểm ghi, không phải lúc đọc
-  // ở trên — chặn đúng cửa sổ đua giữa findFirst và update.
-  const upd = await prisma.quote.updateMany({
-    where: { id, hnStatus: "submitted" },
-    data: { hnStatus: approved ? "approved" : "rejected", hnReviewedAt: new Date(), hnReviewerId: req.session.userId, hnRejectNote: approved ? null : note },
+  const tuDuyet = "Account Hà Nội không tự duyệt hàng mình điền — nhờ người tạo báo giá duyệt";
+  if (existing.hnAssigneeId === me) throw httpError(403, tuDuyet);
+  if (!["approve", "reject", "unapprove"].includes(decision)) throw httpError(400, "Quyết định không hợp lệ");
+  if (decision === "unapprove" && !rids) throw httpError(400, "Chọn hàng cần bỏ duyệt");
+  const loai: ThaoTacHangHn = decision === "approve" ? "duyet" : decision === "reject" ? "tra" : "bo-duyet";
+  const daThayCho = existing.hnStatus === "submitted";
+  const kq = await doiTrangThaiHang(id, {
+    loai, rids, nguoi: me, lyDo: note,
+    kiem: (t) => { if (t.hnAssigneeId === me) throw httpError(403, tuDuyet); },
+    rong: (st) => {
+      if (decision === "unapprove") throw httpError(400, "Phần Hà Nội chưa có hàng nào");
+      if (st !== "submitted") {
+        if (daThayCho) throw httpError(409, "Phần Hà Nội vừa được xử lý bởi người khác — vui lòng tải lại");
+        throw httpError(400, "Phần HN chưa được gửi duyệt");
+      }
+      return decision === "approve" ? "approved" : "rejected";
+    },
+    khongCoHang: decision === "unapprove" ? "Các hàng đã chọn không ở trạng thái đã duyệt."
+      : rids ? (decision === "approve" ? "Các hàng đã chọn đã được duyệt rồi (hoặc chưa Lưu)." : "Các hàng đã chọn không ở trạng thái chờ duyệt / đã duyệt.")
+      : "Không có hàng nào đang chờ duyệt — phần HN chưa được gửi duyệt, hoặc vừa được người khác xử lý.",
+    them: { hnReviewed: true, ...(decision === "reject" ? { hnRejectNote: note } : {}) },
   });
-  if (!upd.count) {
-    throw httpError(409, "Phần Hà Nội vừa được xử lý bởi người khác — vui lòng tải lại");
-  }
+  phatThayDoi(id);
   const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
-  if (existing.hnAssigneeId) {
-    await notify(existing.hnAssigneeId, approved
-      ? { title: `Phần Hà Nội ĐÃ DUYỆT: ${quote.quoteNumber}`, body: quote.title, link: `/#/quotes/${id}`, resource: "quote", resourceId: id }
-      : { title: `Phần Hà Nội bị TRẢ LẠI: ${quote.quoteNumber}`, body: note || "Vui lòng chỉnh sửa rồi gửi lại.", link: `/#/quotes/${id}`, resource: "quote", resourceId: id, important: true });
+  if (kq.assigneeId && kq.assigneeId !== me) {
+    const so = kq.ten.length;
+    const cacHang = so ? `${so} hàng — ${nhanHang(kq.ten)}` : "cả phần";
+    const chung = { link: `/#/quotes/${id}`, resource: "quote", resourceId: id };
+    await notify(kq.assigneeId, decision === "approve"
+      ? { ...chung, title: `Hà Nội ĐÃ DUYỆT ${so ? `${so} hàng` : "cả phần"}: ${quote.quoteNumber}`, body: `${quote.title} — ${cacHang}` }
+      : decision === "reject"
+        ? { ...chung, title: `Hà Nội bị TRẢ LẠI ${so ? `${so} hàng` : "cả phần"}: ${quote.quoteNumber}`, body: `${note || "Vui lòng chỉnh sửa rồi gửi lại."} (${cacHang})`, important: true }
+        : { ...chung, title: `Hà Nội BỎ DUYỆT ${so} hàng: ${quote.quoteNumber}`, body: `${quote.title} — ${cacHang}. Hàng mở lại để sửa.` });
   }
-  await audit(req, "quote.hn.review", { resource: "quote", resourceId: id, decision });
+  await audit(req, "quote.hn.review", { resource: "quote", resourceId: id, decision, after: { soHang: kq.ten.length, hang: kq.ten.slice(0, 50), note } });
   return quote;
 }

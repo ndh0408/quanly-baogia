@@ -209,17 +209,19 @@ describe.runIf(dbAvailable)("Bảng nội bộ: NS · CHỨNG TỪ · LƯU KHO �
   const hnTrongDb = async () => (await prisma.quote.findUnique({ where: { id: quoteId }, select: { hnTables: true } })).hnTables;
 
   it("phần HN ĐÃ GỬI DUYỆT: account Hà Nội sửa ba trường qua PUT /:id/hn bị chặn, CSDL giữ nguyên", async () => {
-    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "submitted" } });
+    // Gửi duyệt THẬT (từng hàng — 2026-10-06): hàng đã gửi khoá với Account HN.
     const hn = await dangNhap(hnU);
+    expect((await hn.post(`/api/quotes/${quoteId}/hn/submit`)).status).toBe(200);
     const q = (await hn.get(`/api/quotes/${quoteId}`)).body;
     const hnTables = q.hnTables.map((t) => ({ ...t, items: t.items.map((it) => ({ ...it, ns: "Sửa sau khi gửi", chungTu: "VAT", luuKho: false })) }));
     const r = await hn.put(`/api/quotes/${quoteId}/hn`).send({ baseHnRev: q.hnRev, hnTables });
-    expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(400);
+    expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(409);
     expect(ba(hangTen((await hnTrongDb())[0].items, "Nhân công HN"))).toEqual(["Tiên ứng", "HDNS", true]);
   }, 60_000);
 
   it("phần HN ĐÃ DUYỆT: account phụ sửa CHỈ một trong ba trường qua PUT /api/quotes/:id → 409 (không bỏ im lặng), CSDL giữ nguyên", async () => {
-    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "approved" } });
+    // Chủ (admin — có quyền duyệt dòng nội bộ) DUYỆT các hàng đang chờ.
+    expect((await (await dangNhap(chuU)).post(`/api/quotes/${quoteId}/hn/review`).send({ decision: "approve" })).status).toBe(200);
     await prisma.quoteMember.create({ data: { quoteId, userId: phuU.id, scopes: ["hanoi"], addedById: chuU.id } });
     const phu = await dangNhap(phuU);
     const q = nhuClient((await phu.get(`/api/quotes/${quoteId}`)).body);

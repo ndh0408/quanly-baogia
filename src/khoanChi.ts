@@ -225,7 +225,7 @@ export function sapTheoThuTu<T extends { order?: number | null; id?: number | nu
  * CHUẨN HOÁ RID TRÙNG CÓ SẴN TRONG CSDL trước mọi lần reconcile của một đường Lưu (KT-2, KT-4, KT-6).
  *
  * Dữ liệu cũ có thể mang hai hàng cùng `rid` trong một phía (nhân bản trang / chép hàng ở bản cũ). Mọi luật kế thừa
- * (reconcileExtraApprovals / reconcileExtraPayments / reconcileHnApprovals) khoá theo rid, nên với hai bản trùng thì cờ
+ * (reconcileExtraApprovals / reconcileExtraPayments / reconcileTrangThaiHn) khoá theo rid, nên với hai bản trùng thì cờ
  * duyệt / đã trả / ảnh của bản này rơi sang bản kia, hoặc mất hẳn — và chốt "hàng đã chi không được biến mất" (so tập
  * rid) không thấy vì rid vẫn còn. Đã tái hiện được (soát 2026-10-06, ATDL-1).
  *

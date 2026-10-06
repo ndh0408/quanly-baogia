@@ -66,7 +66,8 @@ import { khoaBanNhap, ghiBanNhap, docBanNhap } from "../lib/localDraft";
 import * as ui from "../lib/ui";
 import shellSrc from "../components/Shell.tsx?raw";
 
-const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all"] };
+// quote:internal:approve: duyệt hàng HN (2026-10-06) cần quyền duyệt dòng bảng nội bộ như Chi phí HCM.
+const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:internal:approve", "quote:read:all"] };
 
 let root: Root | null = null;
 let hop: HTMLDivElement | null = null;

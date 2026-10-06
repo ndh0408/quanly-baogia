@@ -54,7 +54,10 @@ describe.runIf(dbAvailable)("RBAC-07 — phụ không sửa giá HN đã duyệt
     expect(gieo.status, JSON.stringify(gieo.body).slice(0, 300)).toBe(200);
     const m = await chu.put(`/api/quotes/${quoteId}/members`).send({ members: [{ userId: phuU.id, scopes: ["hanoi"] }], memberIds: [phuU.id] });
     expect(m.status, JSON.stringify(m.body)).toBe(200);
-    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "approved" } });
+    // Mô phỏng dữ liệu CŨ duyệt CẢ PHẦN (trước 2026-10-06): hàng chưa mang trạng thái duyệt riêng, hnStatus = approved
+    // → mọi hàng được coi là đã duyệt (src/hnDuyetHang.ts). Lần Lưu ở trên đã ghi trạng thái riêng "dang-lam" nên gỡ đi.
+    const hnCu = (await prisma.quote.findUnique({ where: { id: quoteId }, select: { hnTables: true } })).hnTables;
+    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "approved", hnTables: hnCu.map((t) => ({ ...t, items: t.items.map(({ trangThaiDuyet: _t, lyDoTra: _l, ...it }) => it) })) } });
   }, 60_000);
 
   afterAll(async () => {
@@ -78,11 +81,16 @@ describe.runIf(dbAvailable)("RBAC-07 — phụ không sửa giá HN đã duyệt
     expect(Number(sau.hnTables[0].items[0].unitPrice)).toBe(700);
   });
 
-  it("vế đối trọng: CHỦ báo giá (có hn:manage) vẫn sửa được", async () => {
+  // 2026-10-06 (chủ repo: "cái nào đã duyệt thì không cho sửa"): khoá THEO HÀNG áp cho CẢ chủ báo giá — trước đây chủ
+  // (có quote:hn:manage) sửa thẳng được giá đã duyệt. Muốn sửa: người có quyền duyệt BỎ DUYỆT hàng đó trước.
+  it("CHỦ báo giá cũng KHÔNG sửa được hàng HN đã duyệt → 409 'hang-hn-da-khoa'", async () => {
     const truoc = (await chu.get(`/api/quotes/${quoteId}`)).body;
     const hn = JSON.parse(JSON.stringify(truoc.hnTables));
     hn[0].items[0].unitPrice = 800;
     const r = await chu.put(`/api/quotes/${quoteId}`).send({ ...truoc, sheets: boNull(truoc.sheets), hnTables: hn, baseUpdatedAt: truoc.updatedAt });
-    expect(r.status, JSON.stringify(r.body).slice(0, 200)).toBe(200);
+    expect(r.status, JSON.stringify(r.body).slice(0, 200)).toBe(409);
+    expect(r.body.code).toBe("hang-hn-da-khoa");
+    const sau = await prisma.quote.findUnique({ where: { id: quoteId }, select: { hnTables: true } });
+    expect(Number(sau.hnTables[0].items[0].unitPrice)).toBe(700);
   });
 });

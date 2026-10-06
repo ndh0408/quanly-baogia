@@ -341,7 +341,11 @@ describe.runIf(dbAvailable)("Phần Hà Nội ở cấp báo giá — không l�
     expect((await hn.post(`/api/quotes/${quoteId}/hn/submit`)).status).toBe(200);
 
     const qHn = await docHn();
-    expect((await hn.put(`/api/quotes/${quoteId}/hn`).send({ baseUpdatedAt: qHn.updatedAt, hnTables: [] })).status).toBe(400);
+    // 2026-10-06: khoá THEO HÀNG — xoá hàng đã gửi duyệt là 409 'hang-hn-da-khoa' (cùng mã với chốt ở đường Lưu báo
+    // giá; màn Account HN giữ phần đang gõ rồi tải lại).
+    const xoaHet = await hn.put(`/api/quotes/${quoteId}/hn`).send({ baseUpdatedAt: qHn.updatedAt, hnTables: [] });
+    expect(xoaHet.status, JSON.stringify(xoaHet.body)).toBe(409);
+    expect(xoaHet.body.code).toBe("hang-hn-da-khoa");
 
     // Chủ là admin (có quote:hn:manage) nên VẪN sửa được — đó là người duyệt. Lấy một tài khoản
     // không có quyền đó thì mới là ca bị chặn; ca đó đã được chốt ở tests/quote-member-scopes.

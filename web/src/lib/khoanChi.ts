@@ -55,7 +55,7 @@ export const laNgayHoaDon = (s: unknown): s is string => laNgayThuan(s) && Numbe
 export const NHAN_TRANG_THAI_HANG: Record<TrangThaiHangDauVao, string> = {
   "binh-thuong": "Đã duyệt",
   "chua-duyet": "Hàng chưa duyệt / đã bị bỏ duyệt",
-  "hn-chua-duyet": "Phần Hà Nội chưa duyệt",
+  "hn-chua-duyet": "Hàng Hà Nội chưa duyệt",
   "khong-con-hang": "Không còn trong báo giá",
   "bao-gia-da-xoa": "Báo giá đã xoá",
 };
@@ -69,7 +69,7 @@ export function lyDoKhongTich(r: Pick<InputInvoiceRow, "paid" | "trangThaiHang">
   if (r.paid || r.trangThaiHang === "binh-thuong") return null;
   switch (r.trangThaiHang) {
     case "chua-duyet": return "Dòng này chưa được duyệt (hoặc vừa bị bỏ duyệt) — chưa đánh dấu đã chi được.";
-    case "hn-chua-duyet": return "Phần Hà Nội của báo giá này chưa được duyệt — chưa đánh dấu đã chi được.";
+    case "hn-chua-duyet": return "Dòng Hà Nội này chưa được duyệt (hoặc vừa bị bỏ duyệt / trả lại) — chưa đánh dấu đã chi được.";
     case "khong-con-hang": return "Dòng này không còn trong báo giá — không đánh dấu đã chi được nữa.";
     default: return "Báo giá đã xoá — chỉ xem.";
   }

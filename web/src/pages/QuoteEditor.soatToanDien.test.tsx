@@ -82,7 +82,7 @@ import * as ui from "../lib/ui";
 import { khoaBanNhap, ghiBanNhap, docBanNhap } from "../lib/localDraft";
 import { setPendingNewQuote } from "../lib/pendingQuote";
 
-const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all", "quote:internal:pay"] };
+const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all", "quote:internal:pay", "quote:internal:approve"] };   // internal:approve: duyệt / trả hàng HN (2026-10-06)
 type WinDirty = Window & { __editorDirty?: boolean };
 
 let root: Root | null = null;
@@ -487,7 +487,10 @@ describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () =>
     expect(p.sheets[0].extraTables.map((t) => t.items[0].days), "Lưu xoá số Ngày mà lưới đang hiện và nhân").toEqual([3, 3]);
   });
 
-  it("phần HN đã chốt mà người mở KHÔNG quản phần HN → Lưu gửi bảng HN NGUYÊN VĂN (máy chủ so với CSDL — dọn days là 409 cả lần Lưu)", async () => {
+  // 2026-10-06: không còn khoá CẢ PHẦN so nguyên văn (chotHnTables đã gỡ). Khoá theo HÀNG ở máy chủ so Số Ngày THEO MẪU
+  // (reconcileTrangThaiHn coNgay) — mẫu không ngày thì days không phải tiền, dọn về null không làm 409. Nên Lưu dọn
+  // days như mọi bảng HN khác, kể cả khi hàng đang chờ duyệt.
+  it("hàng HN đang chờ duyệt, người mở KHÔNG quản phần HN → Lưu vẫn dọn days của mẫu không ngày (máy chủ so theo mẫu, không 409)", async () => {
     h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "submitted", hnTables: [{ name: "HN không ngày", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Khung", unit: "bộ", quantity: 2, days: 3, unitPrice: 1000, rid: "h1" }] }] }));
     hop = document.createElement("div"); document.body.appendChild(hop);
     root = createRoot(hop);
@@ -497,7 +500,7 @@ describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () =>
     go(oTenKhach(), "Khách MỚI");
     await bam(nut("Lưu"));
     const p = h.updateQuote.mock.calls.at(-1)![1] as { hnTables: { items: { days: unknown }[] }[] };
-    expect(p.hnTables[0].items[0].days).toBe(3);
+    expect(p.hnTables[0].items[0].days).toBe(null);
   });
 });
 
