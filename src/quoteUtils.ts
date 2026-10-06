@@ -567,6 +567,9 @@ export const SHEET_CARRY_FIELDS = [
   // Số thứ tự mã sản xuất — ĐÓNG BĂNG. Lưu = xoá sheet rồi tạo lại, không bê sang là mỗi lần bấm
   // Lưu lại cấp số mới và mã trên hoá đơn trỏ sang sheet khác.
   "codeNo",
+  // Phép chia sheet thành hóa đơn của kế toán (src/invoiceSplit.ts) — không bê sang là mỗi lần sale bấm Lưu, mọi
+  // sheet về "chưa chia" và hóa đơn gom nhiều sheet tan ra thành từng sheet.
+  "invoiceGroup", "invoiceHold",
 ] as const;
 
 /**

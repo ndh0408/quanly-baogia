@@ -45,6 +45,7 @@ import {
 } from "../services/quoteService.js";
 import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
 import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay, daChiCuaBaoGia, docChungTuNoiBo } from "../services/inputInvoiceService.js";
+import { setInvoiceSplit } from "../services/invoiceSplitService.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -199,6 +200,24 @@ router.put(
   // quyền SỬA vs THANH TOÁN check theo field trong service (invoice:edit / invoice:pay).
   requireAnyPermission(P.INVOICE_READ, P.INVOICE_PAGE),
   asyncHandler(async (req: Request, res: Response) => res.json(await updateSheetInvoice(req)))
+);
+
+// CHIA SHEET THÀNH HÓA ĐƠN (trang Hóa đơn đầu ra, kế toán): gán từng sheet vào Hóa đơn 1, 2… / Để sau / Không xuất.
+// Vào bằng invoice:page; service đòi thêm invoice:edit. Luật + khoá "hóa đơn đã xuất đứng yên": src/services/invoiceSplitService.ts.
+router.put(
+  "/:id/invoice-split",
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive() }),
+    body: z.object({
+      sheets: z.array(z.object({
+        sheetId: z.number().int().positive(),
+        group: z.number().int().min(1).max(99).nullable(),
+        hold: z.enum(["later", "skip"]).nullable(),
+      }).strict()).min(1).max(200),
+    }).strict(),
+  }),
+  requireAnyPermission(P.INVOICE_PAGE),
+  asyncHandler(async (req: Request, res: Response) => res.json(await setInvoiceSplit(req)))
 );
 
 // (Bốn route thanh toán cũ theo hàng — POST /:id/extra/:sheetId/:rid/pay, GET …/proof, POST /:id/hn/:rid/pay,

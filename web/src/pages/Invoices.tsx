@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
-import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, sheetCode, soMa, dash, Stat, trangKhachTuChoi } from "../lib/format";
+import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, dash, Stat } from "../lib/format";
 import { smartTextMatch } from "../lib/filterText";
+import { nhomHoaDon, tienCoVat } from "../lib/hoaDonChia";
+import { HopChiaHoaDon } from "../components/HopChiaHoaDon";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
 // (QuoteSheet): kế toán NHẬP ở đây → trang Dự án THAM CHIẾU (read-only). Mỗi sheet đã chốt = 1 dòng.
@@ -15,6 +17,9 @@ import { smartTextMatch } from "../lib/filterText";
 //   (đặt ở trang Mã khách hàng); khách chưa đặt thì dùng ngưỡng mặc định chỉnh được ở toolbar),
 //   Ký chứng từ (tham chiếu từ trang Quản lý dự án — hiện AI ký + ngày ký).
 // - Mọi ô nhập tay CHƯA điền tô HỒNG; có dữ liệu thì tự trở lại nền trắng.
+// - CHIA HÓA ĐƠN (2026-10-06, lib/hoaDonChia + components/HopChiaHoaDon): kế toán gom sheet thành Hóa đơn 1, 2… (mã
+//   _01/_02), Để sau, Không xuất. Chưa chia = mỗi sheet một dòng như trước. Hóa đơn gom nhiều sheet là MỘT dòng; ô nhập
+//   ghi qua sheet đầu và máy chủ chép đồng loạt sang các sheet còn lại của hóa đơn.
 
 const HEADERS = ["Khách hàng", "Mã KH", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Số tiền", "Công nợ", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thanh toán", "Chứng từ gửi đi", "Chứng từ trả về", "Ký chứng từ", "Năm", "Note"];
 const COMPANIES = ["GN", "SM", "CLF"];
@@ -43,6 +48,7 @@ type MissingFilter = "" | "any" | "invoiceDesc" | "poNumber" | "invoiceNo" | "in
 
 type Row = {
   key: string; q: ProjectQuote; code: string; sheetId: number | null; amount: number;
+  sheetNames: string[];   // tên các sheet của hóa đơn — "Hạng mục" gợi ý khi kế toán chưa gõ
   invoiceDesc: string | null; poNumber: string | null; invoiceCompany: string | null;
   invoiceNo: string | null; invoiceDate: string | null; paymentMethod: string | null;
   orderClosedAt: string | null; invoiceLink: string | null; paidAt: string | null;
@@ -54,23 +60,41 @@ export function buildRows(quotes: ProjectQuote[]): Row[] {
   const out: Row[] = [];
   for (const q of quotes) {
     if (q.status !== "converted") continue;   // hóa đơn chỉ theo dự án ĐÃ CHỐT
-    const sheets = q.sheets && q.sheets.length ? q.sheets : [];
-    sheets.forEach((sh, i) => {
-      if (trangKhachTuChoi(q, sh)) return;   // FE-09 — giữ `i` gốc để mã sản xuất các trang còn lại không trượt
-      const baoGia = Number(sh.subtotal) || 0;
-      const vat = Math.round((baoGia * (Number(q.vatPercent) || 0)) / 100);
+    // FE-09: trang khách không duyệt bị loại trong nhomHoaDon — mã sản xuất các trang còn lại vẫn theo `i` gốc.
+    const { chia, hoaDon } = nhomHoaDon(q);
+    hoaDon.forEach((hd) => {
+      // Trường hóa đơn đọc từ sheet ĐẦU của hóa đơn — máy chủ giữ mọi sheet cùng hóa đơn mang cùng giá trị.
+      const { sh, i } = hd.sheets[0];
+      // Ký chứng từ vẫn theo sheet (trang Quản lý dự án): hóa đơn gom nhiều sheet chỉ "đã ký" khi MỌI sheet đã ký.
+      const kyHet = hd.sheets.every((x) => !!x.sh.signedAt);
       out.push({
-        key: `${q.id}-${i}`, q, code: sheetCode(q, soMa(sh, i), sheets.length), sheetId: sh.id || null,
-        amount: baoGia + vat,
+        key: chia ? `${q.id}-hd${hd.so}` : `${q.id}-${i}`, q, code: hd.code, sheetId: sh.id || null,
+        amount: hd.amount, sheetNames: hd.sheets.map((x) => x.sh.name || `Sheet ${x.i + 1}`),
         invoiceDesc: sh.invoiceDesc || null, poNumber: sh.poNumber || null,
         invoiceCompany: sh.invoiceCompany || null, invoiceNo: sh.invoiceNo || null,
         invoiceDate: sh.invoiceDate || null, paymentMethod: sh.paymentMethod || null,
         orderClosedAt: sh.orderClosedAt || null, invoiceLink: sh.invoiceLink || null,
         paidAt: sh.paidAt || null, docSentAt: sh.docSentAt || null, docReturnedAt: sh.docReturnedAt || null,
         invoiceYear: sh.invoiceYear ?? null, invoiceNote: sh.invoiceNote || null,
-        signedAt: sh.signedAt || null, signedByName: sh.signedByName || null,
+        signedAt: kyHet ? sh.signedAt || null : null, signedByName: kyHet ? sh.signedByName || null : null,
       });
     });
+  }
+  return out;
+}
+
+/** Sheet Để sau / Không xuất của các báo giá đã chốt — nhóm riêng dưới bảng hóa đơn để kế toán biết còn phải xuất. */
+export type HeldRow = { key: string; q: ProjectQuote; code: string; name: string; amount: number; hold: "later" | "skip" };
+export function buildHeld(quotes: ProjectQuote[]): HeldRow[] {
+  const out: HeldRow[] = [];
+  for (const q of quotes) {
+    if (q.status !== "converted") continue;
+    const { deSau, khongXuat } = nhomHoaDon(q);
+    const day = (ds: typeof deSau, hold: "later" | "skip") => ds.forEach((x) => out.push({
+      key: `${q.id}-${hold}-${x.i}`, q, code: x.code, name: x.sh.name || `Sheet ${x.i + 1}`,
+      amount: tienCoVat(Number(x.sh.subtotal) || 0, q.vatPercent), hold,
+    }));
+    day(deSau, "later"); day(khongXuat, "skip");
   }
   return out;
 }
@@ -143,6 +167,9 @@ export function InvoicesPage({ me }: { me: Me }) {
     setRows(built);
   }, [data]);
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const held = useMemo(() => buildHeld(data?.data || []), [data]);
+  const [hienKhongXuat, setHienKhongXuat] = useState(false);
+  const [chiaQ, setChiaQ] = useState<ProjectQuote | null>(null);   // báo giá đang mở hộp Chia hóa đơn
   const load = () => { qc.invalidateQueries({ queryKey: ["quoteProjects"] }); };
 
   const years = useMemo(() => [...new Set(rows.map((r) => r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : null)).filter(Boolean))].sort() as number[], [rows]);
@@ -285,10 +312,44 @@ export function InvoicesPage({ me }: { me: Me }) {
     </select></td>;
   };
 
+  // Nhóm SHEET ĐỂ SAU (chưa xuất — kế toán còn phải xuất) / KHÔNG XUẤT (mờ, bật bằng ô tích). Chỉ áp ô tìm kiếm + CTy:
+  // các bộ lọc còn lại (số HĐ, ngày HĐ, thu tiền) là của hóa đơn, sheet chưa xuất không có.
+  const heldTable = (hold: "later" | "skip") => {
+    const ds = held.filter((h) => h.hold === hold
+      && (!cty || defaultCty(h.q) === cty)
+      && smartTextMatch(q, [h.q.customerName, h.q.customerCode, h.q.title, h.code, h.name, h.amount, fmtMoney(h.amount)]));
+    if (!ds.length) return null;
+    const tieuDe = hold === "later" ? "Sheet để sau — chưa xuất hóa đơn" : "Sheet không xuất hóa đơn";
+    return (
+      <section className={`inv-chia-nhom${hold === "skip" ? " inv-chia-khong" : ""}`} aria-label={tieuDe}>
+        <h2>{tieuDe} <span className="muted">({ds.length} sheet · {fmtMoney(ds.reduce((s, h) => s + h.amount, 0))})</span></h2>
+        <div className="tbl-scroll">
+          <table className="list-table">
+            <thead><tr><th scope="col">Khách hàng</th><th scope="col">Mã sản xuất</th><th scope="col">Sheet</th><th scope="col" className="num">Số tiền</th><th scope="col">Acc</th>{canEdit && <th scope="col" aria-label="Thao tác" />}</tr></thead>
+            <tbody>
+              {ds.map((h) => (
+                <tr key={h.key} className="qrow" tabIndex={0} title="Bấm để mở báo giá"
+                    onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; location.hash = "#/quotes/" + h.q.id; }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + h.q.id; }}>
+                  <td><strong>{h.q.customerName || h.q.customerCode || tieuDeHienThi(h.q)}</strong></td>
+                  <td>{h.code}</td>
+                  <td>{h.name}</td>
+                  <td className="num">{fmtMoney(h.amount)}</td>
+                  <td>{h.q.createdBy?.displayName || dash}</td>
+                  {canEdit && <td><button type="button" className="btn btn-xs" onClick={() => setChiaQ(h.q)} aria-label={`Xếp vào hóa đơn — ${h.name}`}>Xếp vào hóa đơn</button></td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  };
+
   return (
     <div>
       <h1>Hóa đơn đầu ra</h1>
-      <p className="muted">Hóa đơn <b>xuất cho khách</b> — theo dõi theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). Hóa đơn nhận từ nhà cung cấp xem ở <a href="#/invoices-in">Hóa đơn đầu vào</a>. <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
+      <p className="muted">Hóa đơn <b>xuất cho khách</b> — theo dõi theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng; <b>Chia HĐ</b> để gom nhiều sheet thành một hóa đơn _01/_02, để sau hoặc không xuất). Hóa đơn nhận từ nhà cung cấp xem ở <a href="#/invoices-in">Hóa đơn đầu vào</a>. <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
 
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">
@@ -379,8 +440,19 @@ export function InvoicesPage({ me }: { me: Me }) {
                             onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + r.q.id; }}>
                           <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || tieuDeHienThi(r.q)}</strong></td>
                           <td>{r.q.customerCode || dash}</td>
-                          <td><strong>{r.code}</strong></td>
-                          {textCell(r, "invoiceDesc", 210)}
+                          <td className="nowrap">
+                            <strong>{r.code}</strong>
+                            {canEdit && (r.q.sheets?.length || 0) > 1 && (
+                              <button type="button" className="btn btn-xs btn-ghost inv-chia-nut" title="Gom / tách sheet thành hóa đơn, Để sau, Không xuất"
+                                      aria-label={`Chia hóa đơn — ${r.code}`} onClick={() => setChiaQ(r.q)}>Chia HĐ</button>
+                            )}
+                            {r.sheetNames.length > 1 && <div className="muted inv-chia-sheets">{r.sheetNames.length} sheet</div>}
+                          </td>
+                          {r.invoiceDesc || editKey === ck(r, "invoiceDesc")
+                            ? textCell(r, "invoiceDesc", 210)
+                            : editable(r, "invoiceDesc")
+                              ? viewTd(r, "invoiceDesc", <span className="muted" title="Chưa gõ Hạng mục — gợi ý theo tên sheet">{r.sheetNames.join(", ") || dash}</span>)
+                              : <td className="cell-miss"><span className="muted">{r.sheetNames.join(", ") || dash}</span></td>}
                           <td>{done ? <span className="status approved">Hoàn tất</span> : <span className="status pending">Chưa đủ</span>}</td>
                           {textCell(r, "poNumber", 90)}
                           {selectCell(r, "invoiceCompany", COMPANIES, defaultCty(r.q))}
@@ -424,8 +496,17 @@ export function InvoicesPage({ me }: { me: Me }) {
               <div className="list-foot"><span className="muted">Hiển thị {sorted.length} / {rows.length} hóa đơn{activeFilterCount ? ` · ${activeFilterCount} bộ lọc đang dùng` : ""}</span></div>
             </>
           )}
+          {heldTable("later")}
+          {held.some((h) => h.hold === "skip") && (
+            <label className="inv-chia-toggle">
+              <input type="checkbox" name="hienKhongXuat" checked={hienKhongXuat} onChange={(e) => setHienKhongXuat(e.target.checked)} />
+              {" "}Hiện sheet Không xuất ({held.filter((h) => h.hold === "skip").length})
+            </label>
+          )}
+          {hienKhongXuat && heldTable("skip")}
         </>
       )}
+      {chiaQ && <HopChiaHoaDon q={chiaQ} onClose={() => setChiaQ(null)} onSaved={load} />}
     </div>
   );
 }

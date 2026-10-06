@@ -834,6 +834,12 @@ model QuoteSheet {
   invoiceCompany String? // CTy XUẤT hóa đơn: GN | SM | CLF (nhãn pháp nhân, không phải FK)
   invoiceDesc    String? // "Hạng mục" trên trang Hóa đơn (kế toán nhập mô tả)
   invoiceNote    String? // Note (kế toán nhập)
+  // ===== CHIA SHEET THÀNH HÓA ĐƠN (trang Hóa đơn đầu ra, kế toán — 2026-10-06). Cả hai NULL ở MỌI sheet của báo giá
+  // = "chưa chia": mỗi sheet một hóa đơn như trước (mã = mã sản xuất của sheet). Đã chia: invoiceGroup = số hóa đơn
+  // (1, 2…; mã = mã báo giá + "_01"/"_02"), invoiceHold = "later" (Để sau) | "skip" (Không xuất). Sheet cùng hóa đơn
+  // mang CÙNG giá trị các cột hóa đơn ở trên (máy chủ ghi đồng loạt) — xem src/invoiceSplit.ts.
+  invoiceGroup   Int?
+  invoiceHold    String?
 
   @@index([quoteId, order])
   @@index([signedById])
