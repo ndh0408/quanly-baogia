@@ -42,14 +42,14 @@ export function ChonNhieu({ nhan, tuyChon, chon, onChange, tenCu = {}, ngung = 7
       {mo && (
         <BangNoi neo={nut} onDong={dong} nhan={nhan} rong={280}>
           {dsDayDu.length >= ngung && (
-            <input type="search" className="cn-tim" autoFocus placeholder={`Tìm ${nhan.toLowerCase()}…`} aria-label={`Tìm ${nhan.toLowerCase()}`} value={tim} onChange={(e) => setTim(e.target.value)} />
+            <input name="tim" type="search" className="cn-tim" autoFocus placeholder={`Tìm ${nhan.toLowerCase()}…`} aria-label={`Tìm ${nhan.toLowerCase()}`} value={tim} onChange={(e) => setTim(e.target.value)} />
           )}
           {dsDayDu.length === 0 ? <p className="muted cn-trong">{trong}</p> : hien.length === 0 ? <p className="muted cn-trong">Không có “{tim}”.</p> : (
             <ul className="cn-ds" role="group" aria-label={nhan}>
               {hien.map((t) => (
                 <li key={t.value}>
                   <label className="cn-dong">
-                    <input type="checkbox" checked={chon.includes(t.value)} onChange={() => bat(t.value)} />
+                    <input name="chon" type="checkbox" checked={chon.includes(t.value)} onChange={() => bat(t.value)} />
                     <span className="cn-ten">{t.nhan}</span>
                     {t.dem !== undefined && <span className="cn-dem" aria-label={`${t.dem} báo giá`}>{t.dem}</span>}
                   </label>

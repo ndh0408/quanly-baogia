@@ -1244,38 +1244,38 @@ Lý do (không bắt buộc):`,
                 {suaMain && <button type="button" className="btn btn-sm" disabled={saving} onClick={() => setKhOpen(true)}>{q.customerId ? "Đổi khách hàng" : "Chọn khách hàng"}</button>}
               </div>
             </div>
-            <label>Tên khách hàng<input key={`tc${khKey}`} defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
-            <label>Người liên hệ<input key={`tl${khKey}`} defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Email<input key={`te${khKey}`} type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input key={`tp${khKey}`} defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ<input key={`ta${khKey}`} defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
+            <label>Tên khách hàng<input name="toCompany" key={`tc${khKey}`} defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
+            <label>Người liên hệ<input name="toContact" key={`tl${khKey}`} defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Email<input name="toEmail" key={`te${khKey}`} type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input name="toPhone" key={`tp${khKey}`} defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ<input name="toAddress" key={`ta${khKey}`} defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
           </fieldset>
           <fieldset className="meta-col">
             <legend>Bên gửi · Công ty báo giá</legend>
             <label>Công ty <span className="muted" style={{ fontSize: 11 }}>(đã chọn lúc tạo)</span>
-              <select value={q.companyId} disabled title="Công ty đã chọn khi tạo báo giá — không đổi ở đây">{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            <label>Người gửi<input defaultValue={q.fromContact || ""} placeholder="Người phụ trách" disabled={!suaMain || saving} onInput={(e) => setQ("fromContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Chức danh<input defaultValue={q.fromTitle || ""} placeholder="VD: Trưởng phòng KD" disabled={!suaMain || saving} onInput={(e) => setQ("fromTitle", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input defaultValue={q.fromPhone || ""} placeholder="SĐT người gửi" disabled={!suaMain || saving} onInput={(e) => setQ("fromPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ <span className="muted" style={{ fontSize: 11 }}>(tự theo công ty)</span><input value={q.fromAddress || ""} readOnly title="Tự lấy theo Công ty bên gửi" disabled={!suaMain || saving} /></label>
+              <select name="companyId" value={q.companyId} disabled title="Công ty đã chọn khi tạo báo giá — không đổi ở đây">{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            <label>Người gửi<input name="fromContact" defaultValue={q.fromContact || ""} placeholder="Người phụ trách" disabled={!suaMain || saving} onInput={(e) => setQ("fromContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Chức danh<input name="fromTitle" defaultValue={q.fromTitle || ""} placeholder="VD: Trưởng phòng KD" disabled={!suaMain || saving} onInput={(e) => setQ("fromTitle", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input name="fromPhone" defaultValue={q.fromPhone || ""} placeholder="SĐT người gửi" disabled={!suaMain || saving} onInput={(e) => setQ("fromPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ <span className="muted" style={{ fontSize: 11 }}>(tự theo công ty)</span><input name="fromAddress" value={q.fromAddress || ""} readOnly title="Tự lấy theo Công ty bên gửi" disabled={!suaMain || saving} /></label>
           </fieldset>
         </div>
 
         <div className="meta-row">
-          <label>Số xuất Excel <span className="muted" style={{ fontSize: 11 }}>(GN…)</span><input value={q.quoteNumber || ""} placeholder={isNew ? "Tự động cấp khi lưu" : ""} readOnly disabled={!suaMain || saving} /></label>
-          <label>Ngày báo giá<input type="date" defaultValue={ngayChoO(q.quoteDate)} disabled={!suaMain || saving} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
-          <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={ngayChoO(q.executionDate)} disabled={!suaMain || saving} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
-          <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!suaMain || saving} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
+          <label>Số xuất Excel <span className="muted" style={{ fontSize: 11 }}>(GN…)</span><input name="quoteNumber" value={q.quoteNumber || ""} placeholder={isNew ? "Tự động cấp khi lưu" : ""} readOnly disabled={!suaMain || saving} /></label>
+          <label>Ngày báo giá<input name="quoteDate" type="date" defaultValue={ngayChoO(q.quoteDate)} disabled={!suaMain || saving} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
+          <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input name="executionDate" type="date" defaultValue={ngayChoO(q.executionDate)} disabled={!suaMain || saving} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
+          <label>VAT (%)<input name="vatPercent" type="number" step="0.1" defaultValue={q.vatPercent} disabled={!suaMain || saving} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
           {/* Giảm giá KHÔNG còn ở đây: nay là "Discount" RIÊNG của từng sheet, nằm ngay dưới lưới
               cạnh khối tổng của sheet đó — xem khối "Tổng sheet" bên dưới. */}
         </div>
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
-        <input className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!suaMain || saving} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
+        <input name="title" className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!suaMain || saving} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
         {/* Tiêu đề RÚT GỌN — chỉ dùng đặt tên file tải về, KHÔNG in vào Excel/PDF gửi khách. */}
         <div className="short-title-row">
           <span className="muted">Tiêu đề rút gọn</span>
-          <input className="short-title-input" maxLength={120} defaultValue={(q.shortTitle as string) || ""} placeholder={q.title || "để trống → dùng tiêu đề chính"}
+          <input name="shortTitle" className="short-title-input" maxLength={120} defaultValue={(q.shortTitle as string) || ""} placeholder={q.title || "để trống → dùng tiêu đề chính"}
             disabled={!suaMain || saving} title="Dùng đặt tên file tải về: MãKH_TiêuĐềRútGọn_MMDD.xlsx"
             onInput={(e) => setQ("shortTitle", (e.target as HTMLInputElement).value)} />
         </div>
@@ -1286,7 +1286,7 @@ Lý do (không bắt buộc):`,
             Số GN thì giữ (mờ): nó là khoá tra cứu thật của hệ thống (phân quyền tải file, webhook,
             nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
         {q.quoteNumber && <div className="quote-no-gn">{q.quoteNumber}</div>}
-        <textarea className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!suaMain || saving} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
+        <textarea name="greeting" className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!suaMain || saving} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
 
         {/* sheet tabs */}
         <div className="sheet-tabs">
@@ -1349,8 +1349,8 @@ Lý do (không bắt buộc):`,
         </div>
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!suaMain || saving} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
-          <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!suaMain || saving} onChange={(e) => {
+          <label style={{ fontSize: 13 }}>Tên sheet: <input name="sheetName" value={activeSheet.name || ""} disabled={!suaMain || saving} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
+          <label style={{ fontSize: 13 }}>Template: <select name="templateId" value={activeSheet.templateId} disabled={!suaMain || saving} onChange={(e) => {
             // L64: KHÔNG null hoá `days` ở đây. Chọn nhầm mẫu không ngày rồi chọn lại là mất sạch số Ngày
             // (lưới gắn lại theo mẫu nên Ctrl+Z không cứu). Mẫu không ngày thì tiền vốn không nhân ngày
             // (lineAmount/sheetTotals theo `usesDays`) và save() đã tự gửi `days: null`.
@@ -1427,7 +1427,7 @@ Lý do (không bắt buộc):`,
                 {suaMain
                   // L54: `_k` nay được đóng cho MỌI sheet (stampKeys, addSheet); trước đó sheet nạp từ
                   // máy chủ không có nên key rơi về `ai` và ô giữ số của sheet vừa xoá.
-                  ? <input key={`disc-${activeSheet._k}`} type="text" inputMode="numeric" className="sheet-discount-input" disabled={saving}
+                  ? <input name="discount" key={`disc-${activeSheet._k}`} type="text" inputMode="numeric" className="sheet-discount-input" disabled={saving}
                       aria-label="Discount trừ vào sheet này (VNĐ)" title="Trừ THẲNG vào sheet này, TRƯỚC khi tính VAT"
                       defaultValue={M.fmtMoney(Number(activeSheet.discount) || 0)}
                       onInput={(e) => {
@@ -1462,7 +1462,7 @@ Lý do (không bắt buộc):`,
             đang bay là ghi vào qRef CŨ, rồi bản máy chủ thay vào, cờ bẩn tắt, ô vẫn hiện chữ mới. */}
         {suaMain && (
           <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "16px 0 6px", fontSize: 13.5, cursor: "pointer" }}>
-            <input type="checkbox" defaultChecked={q.showTotals !== false} disabled={saving} onChange={(e) => { setQ("showTotals", e.target.checked); redraw(); }} />
+            <input name="showTotals" type="checkbox" defaultChecked={q.showTotals !== false} disabled={saving} onChange={(e) => { setQ("showTotals", e.target.checked); redraw(); }} />
             <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả màn hình lẫn Excel/PDF)</span>
           </label>
         )}
@@ -1470,14 +1470,14 @@ Lý do (không bắt buộc):`,
           <>
             <div className="muted" style={{ margin: "4px 0 6px", fontSize: 12.5 }}>Mẹo: <strong>Discount</strong> ở khối tổng ngay trên là của <strong>riêng sheet đang mở</strong> — trừ trước khi tính VAT, và in ra đúng như vậy trong Excel/PDF. Muốn giảm giá cho <strong>một hạng mục</strong> thì vẫn thêm hàng với <strong>số tiền âm</strong> ở Đơn giá.</div>
             <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "8px 0 4px", fontSize: 13.5, cursor: "pointer" }}>
-              <input type="checkbox" defaultChecked={!!q.notes} disabled={saving} onChange={(e) => {
+              <input name="coGhiChu" type="checkbox" defaultChecked={!!q.notes} disabled={saving} onChange={(e) => {
                 if (e.target.checked) { if (!(q.notes || "").trim()) { setQ("notes", DEFAULT_NOTE); if (noteInputRef.current) noteInputRef.current.value = DEFAULT_NOTE; } if (noteWrapRef.current) noteWrapRef.current.style.display = ""; noteInputRef.current?.focus(); }
                 else { setQ("notes", ""); if (noteInputRef.current) noteInputRef.current.value = ""; if (noteWrapRef.current) noteWrapRef.current.style.display = "none"; }
               }} />
               <span>Thêm <strong>Ghi chú</strong> cuối báo giá (in vào file Excel/PDF)</span>
             </label>
             <div ref={noteWrapRef} style={{ display: q.notes ? "" : "none", margin: "0 0 10px" }}>
-              <textarea ref={noteInputRef} rows={2} defaultValue={q.notes || ""} disabled={saving} placeholder="VD: Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ" style={{ width: "100%", boxSizing: "border-box", padding: 8, border: "1px solid var(--border,#ccc)", borderRadius: 6, font: "inherit", resize: "vertical" }} onInput={(e) => setQ("notes", (e.target as HTMLTextAreaElement).value)} />
+              <textarea name="notes" ref={noteInputRef} rows={2} defaultValue={q.notes || ""} disabled={saving} placeholder="VD: Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ" style={{ width: "100%", boxSizing: "border-box", padding: 8, border: "1px solid var(--border,#ccc)", borderRadius: 6, font: "inherit", resize: "vertical" }} onInput={(e) => setQ("notes", (e.target as HTMLTextAreaElement).value)} />
             </div>
           </>
         ) : (q.notes ? <div className="muted" style={{ margin: "8px 0" }}><strong>Ghi chú:</strong> {q.notes}</div> : null)}
@@ -1653,7 +1653,7 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
       <span className="muted" style={{ fontSize: 12 }}>Giao việc:</span>
       {canAssign && (
         <>
-          <select className="extra-add-cat" value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— chọn Account HN —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.displayName || a.username}</option>)}</select>
+          <select name="accId" className="extra-add-cat" value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— chọn Account HN —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.displayName || a.username}</option>)}</select>
           <button type="button" className="btn btn-sm" onClick={assign}>{st ? "Giao lại" : "Giao cho Account HN"}</button>
         </>
       )}
@@ -1686,9 +1686,9 @@ function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versio
             <div style={{ marginTop: 14 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <strong>So sánh:</strong>
-                <select value={a} onChange={(e) => setA(Number(e.target.value))}>{sorted.map((v) => <option key={v.versionNo} value={v.versionNo}>#{v.versionNo}</option>)}</select>
+                <select name="phienBanA" value={a} onChange={(e) => setA(Number(e.target.value))}>{sorted.map((v) => <option key={v.versionNo} value={v.versionNo}>#{v.versionNo}</option>)}</select>
                 <span>→</span>
-                <select value={b} onChange={(e) => setB(Number(e.target.value))}>{sorted.map((v) => <option key={v.versionNo} value={v.versionNo}>#{v.versionNo}</option>)}</select>
+                <select name="phienBanB" value={b} onChange={(e) => setB(Number(e.target.value))}>{sorted.map((v) => <option key={v.versionNo} value={v.versionNo}>#{v.versionNo}</option>)}</select>
                 <button className="btn btn-sm btn-primary" onClick={doDiff} disabled={busy || a === b}>{busy ? "Đang xem…" : "Xem khác biệt"}</button>
               </div>
               {changes && (changes.length === 0 ? <p className="muted" style={{ marginTop: 8 }}>Hai phiên bản giống nhau.</p> : (
@@ -1762,7 +1762,7 @@ function MembersModal({ quoteId, createdById, current, onClose, onSaved }: { quo
             <div className="list-wrap">{dsVe.map((u) => { const isCreator = u.id === createdById; const tv = laTV(u.id); const khongDung = u.coTheLamPhu === false && !isCreator; return (
               <div key={u.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: isCreator || khongDung ? "default" : "pointer" }}>
-                  <input type="checkbox" checked={isCreator || tv} disabled={isCreator || khongDung} onChange={() => toggle(u.id)} />
+                  <input name="thanhVien" type="checkbox" checked={isCreator || tv} disabled={isCreator || khongDung} onChange={() => toggle(u.id)} />
                   <span>{u.displayName}<span className="muted"> · {ROLE_LABEL_FULL[u.role || ""] || u.role}{u.title ? " · " + u.title : ""}{isCreator ? " — người tạo" : ""}</span></span>
                 </label>
                 {/* Thêm tài khoản KHÔNG có quyền xem báo giá là vô tác dụng hoàn toàn im lặng (tư
@@ -1772,7 +1772,7 @@ function MembersModal({ quoteId, createdById, current, onClose, onSaved }: { quo
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, paddingLeft: 24, marginTop: 2 }}>
                     {QUOTE_SCOPES.map((c) => (
                       <label key={c} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12.5, cursor: "pointer" }}>
-                        <input type="checkbox" checked={(sel[u.id] || []).includes(c)} onChange={() => togglePhamVi(u.id, c)} />
+                        <input name="phamVi" type="checkbox" checked={(sel[u.id] || []).includes(c)} onChange={() => togglePhamVi(u.id, c)} />
                         <span>{TEN_PHAM_VI[c]}</span>
                       </label>
                     ))}

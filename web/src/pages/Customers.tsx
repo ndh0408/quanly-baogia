@@ -62,7 +62,7 @@ export function CustomersPage({ me, query }: { me: Me; query?: string }) {
       <h1>Mã khách hàng</h1>
       <p className="muted page-sub">Danh mục khách hàng. Cột <b>Công nợ</b> = hạn thanh toán riêng từng công ty — quá hạn, trang Hóa đơn đầu ra báo đỏ; để trống dùng ngưỡng mặc định.</p>
       <div className="toolbar">
-        <input type="search" className="grow" placeholder="Tìm theo mã hoặc tên công ty…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm khách hàng" />
+        <input name="q" type="search" className="grow" placeholder="Tìm theo mã hoặc tên công ty…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm khách hàng" />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Khách mới</button>}
       </div>
 
@@ -192,7 +192,7 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
           <div className="grid">
             <label className="full">
               <span>Mã khách hàng {isNew && <em className="unit">(để trống = tự cấp KH…)</em>}</span>
-              <input ref={isNew ? firstRef : undefined} value={code} disabled={readOnly || !isNew}
+              <input name="code" ref={isNew ? firstRef : undefined} value={code} disabled={readOnly || !isNew}
                 placeholder="VD: CGV, KH001…"
                 aria-invalid={fieldErrors.code ? true : undefined}
                 onChange={(e) => { dirty.current = true; setCode(e.target.value); }} />
@@ -200,14 +200,14 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
             </label>
             <label className="full">
               <span>Tên công ty <b className="req">*</b></span>
-              <input ref={!isNew ? firstRef : undefined} value={name} disabled={readOnly}
+              <input name="name" ref={!isNew ? firstRef : undefined} value={name} disabled={readOnly}
                 aria-invalid={fieldErrors.name ? true : undefined}
                 onChange={(e) => { dirty.current = true; setName(e.target.value); setFieldErrors((fe) => (fe.name ? { ...fe, name: "" } : fe)); }} />
               {fieldErrors.name && <div className="field-err">{fieldErrors.name}</div>}
             </label>
             <label className="full">
               <span>Hạn công nợ <em className="unit">(ngày — để trống = dùng mặc định trang Hóa đơn đầu ra)</em></span>
-              <input inputMode="numeric" value={debtDays} disabled={readOnly}
+              <input name="debtDays" inputMode="numeric" value={debtDays} disabled={readOnly}
                 placeholder="VD: 30"
                 aria-invalid={fieldErrors.debtDays ? true : undefined}
                 onChange={(e) => { dirty.current = true; setDebtDays(e.target.value.replace(/[^\d]/g, "")); setFieldErrors((fe) => (fe.debtDays ? { ...fe, debtDays: "" } : fe)); }} />

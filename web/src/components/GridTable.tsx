@@ -2394,19 +2394,19 @@ function GridTableInner(props: GridTableProps) {
     // KEY CỐ ĐỊNH (chỉ _k+field): KHÔNG để công thức/giá-trị lật key gây REMOUNT (mất focus khi gõ đè).
     // Hiển thị (kết quả công thức / giá trị sau dán-undo) đồng bộ qua paintCells ở effect (như SPA).
     return (<>
-      <input key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
+      <input name={f} key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
         title="Số hoặc công thức Excel: =G3*E3, =SUM(H3:H8), 8% — bấm/kéo ô để chèn tham chiếu"
         data-xl="so" onInput={xuLyO} />
       {fx && <button type="button" className="fx-peek-badge" title={"Công thức: " + fx} data-fx-cot={f} data-xl="xem-fx" onClick={xuLyBam}>ƒ</button>}
     </>);
   };
   const txtInput = (i: number, f: string, ph?: string) => (
-    <input data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
+    <input name={f} data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
       data-xl="chu" onInput={xuLyO} />
   );
   const onTxtInput = (i: number, f: string, el: HTMLInputElement) => { editingRef.current = true; markEditUndo(i, f); fitCell(el); const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); };
   const taInput = (i: number, f: string, ph?: string) => (
-    <textarea data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
+    <textarea name={f} data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
       ref={autoGrow} data-xl="ta" onInput={xuLyO} />
   );
   const onTaInput = (i: number, f: string, el: HTMLTextAreaElement) => { editingRef.current = true; markEditUndo(i, f); (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChangeSoft(); };
@@ -2772,7 +2772,7 @@ function GridTableInner(props: GridTableProps) {
         ))}
         {editable && imgs.length < IMG_MAX && (
           <label className="img-add" title="Thêm ảnh (chọn 1 hoặc nhiều)">＋
-            <input type="file" accept="image/*" multiple style={AN_O} data-xl="anh" onChange={xuLyO} />
+            <input name="anh" type="file" accept="image/*" multiple style={AN_O} data-xl="anh" onChange={xuLyO} />
           </label>
         )}
       </div>
@@ -2817,15 +2817,15 @@ function GridTableInner(props: GridTableProps) {
       {cotNoiBo && <>
         <td className="col-ns">{taInput(i, "ns")}</td>
         <td className="col-chung-tu">
-          <select value={String((items[i] as Record<string, unknown>).chungTu || "")} disabled={!editable} data-xl="chung-tu" data-oc="chungTu" onChange={xuLyO} aria-label="Chứng từ">
+          <select name="chungTu" value={String((items[i] as Record<string, unknown>).chungTu || "")} disabled={!editable} data-xl="chung-tu" data-oc="chungTu" onChange={xuLyO} aria-label="Chứng từ">
             <option value="">—</option>
             {CHUNG_TU.map(([v, nhan]) => <option key={v} value={v}>{nhan}</option>)}
           </select>
         </td>
-        <td className="col-luu-kho"><input type="checkbox" checked={!!(items[i] as Record<string, unknown>).luuKho} disabled={!editable} data-xl="luu-kho" data-oc="luuKho" onChange={xuLyO} aria-label="Lưu kho" /></td>
+        <td className="col-luu-kho"><input name="luuKho" type="checkbox" checked={!!(items[i] as Record<string, unknown>).luuKho} disabled={!editable} data-xl="luu-kho" data-oc="luuKho" onChange={xuLyO} aria-label="Lưu kho" /></td>
       </>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
-      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" data-oc="approved" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
+      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input name="approved" type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" data-oc="approved" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
       {payCol && <td className="col-pay">{canPay
         ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} data-xl="thanh-toan" onClick={xuLyBam}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
         : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
@@ -2917,7 +2917,7 @@ function GridTableInner(props: GridTableProps) {
                 return <DongNho key={it._k ?? i} sig={chuKy(i, `S|${isSub}|${letter}|${subAmt}|${M.groupMult(it)}`)} ve={() => (
                   <tr data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
                     <td className="col-stt">{String(it.label || letter)}</td>
-                    <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
+                    <td className="col-hangmuc"><textarea name="name" data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
                     {showDetail && <td className="col-detail" />}
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
                     <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
@@ -2938,7 +2938,7 @@ function GridTableInner(props: GridTableProps) {
                 return <DongNho key={it._k ?? i} sig={chuKy(i, "I")} ve={() => (
                   <tr data-row={i} className="info-row">
                     <td className="col-stt" />
-                    <td className="col-info" colSpan={infoColspan}><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
+                    <td className="col-info" colSpan={infoColspan}><textarea name="name" data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
                     {showImages && <td className="col-images">{imagesCell(i)}</td>}
                     {editable && <td className="col-action"><button className="rm-row" title="Xóa" data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
                   </tr>
@@ -2951,7 +2951,7 @@ function GridTableInner(props: GridTableProps) {
               return <DongNho key={it._k ?? i} sig={chuKy(i, `H|${span}|${stt}`)} ve={() => (
                 <tr data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
                   <td className="col-stt" rowSpan={span}>{stt}</td>
-                  <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} data-xl="ten-hang" onInput={xuLyO} /></td>
+                  <td className="col-hangmuc" rowSpan={span}><textarea name="name" data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} data-xl="ten-hang" onInput={xuLyO} /></td>
                   {dataCells(i)}
                 </tr>
               )} />;
@@ -3004,13 +3004,13 @@ function GridTableInner(props: GridTableProps) {
       )}
       {editable && onGroupSubtotal && (
         <label className="toggle-totals gf-group-sub" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px", fontSize: 13, cursor: "pointer" }}>
-          <input type="checkbox" checked={groupSubtotal} onChange={(e) => onGroupSubtotal(e.target.checked)} />
+          <input name="groupSubtotal" type="checkbox" checked={groupSubtotal} onChange={(e) => onGroupSubtotal(e.target.checked)} />
           <span>Hiện <strong>Thành Tiền nhóm</strong> (Số Lượng nhóm × tổng các mục trong nhóm)</span>
         </label>
       )}
       {editable && onShowImages && (
         <label className="toggle-totals gf-show-images" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px 16px", fontSize: 13, cursor: "pointer" }}>
-          <input type="checkbox" checked={!!showImages} onChange={(e) => onShowImages(e.target.checked)} />
+          <input name="showImages" type="checkbox" checked={!!showImages} onChange={(e) => onShowImages(e.target.checked)} />
           <span>Hiện cột <strong>Hình ảnh</strong> (chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span>
         </label>
       )}

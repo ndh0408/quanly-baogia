@@ -255,21 +255,21 @@ export function EmployeeForm({ rec, readOnly: readOnlyTheoQuyen, onClose, onSave
                 <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
                   <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}</span>
                   {f.type === "textarea" ? (
-                    <textarea
+                    <textarea name={f.key}
                       value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
                     />
                   ) : f.key === "birthYear" ? (
                     // NGÀY SINH: lịch chọn ngày (đủ dd/mm/yyyy). Dữ liệu cũ chỉ có năm → input trống + nhắc,
                     // KHÔNG ghi đè nếu không chọn lại.
                     <>
-                      <input type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
+                      <input name={f.key} type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
                         onChange={(e) => set(f.key, inputToDdmm(e.target.value))} />
                       {form[f.key] && !fullDateToInput(form[f.key]) && (
                         <em className="unit">Đang lưu: “{form[f.key]}” (chỉ năm) — chọn ngày để có đủ ngày/tháng/năm.</em>
                       )}
                     </>
                   ) : (
-                    <input
+                    <input name={f.key}
                       ref={idx === 0 ? firstRef : undefined}
                       type={f.type === "date" ? "date" : "text"}
                       placeholder={f.ph}

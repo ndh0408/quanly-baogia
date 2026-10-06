@@ -72,7 +72,7 @@ export function VenuePicker({ onInsert, onClose }: { onInsert: (list: VenueEntry
           {!cat && !err && <div className="muted">Đang tải danh mục…</div>}
           {cat && !group && (
             <>
-              <input className="vs-pick-search" autoFocus placeholder="Gõ tên rạp để tìm… (vd: aeon tan phu, lotte 7, landmark)"
+              <input name="q" className="vs-pick-search" autoFocus placeholder="Gõ tên rạp để tìm… (vd: aeon tan phu, lotte 7, landmark)"
                 value={q} onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => { if (dangGoIME(e)) return; /* GRID-12: Enter chốt cụm chữ IME */ if (e.key === "Enter" && rows.length === 1) { e.preventDefault(); openGroup(rows[0]); } }} />
               <div className="vs-pick-body">
@@ -95,7 +95,7 @@ export function VenuePicker({ onInsert, onClose }: { onInsert: (list: VenueEntry
               </div>
               {group.items.map((e, i) => (
                 <label className="vs-item-row" key={i}>
-                  <input type="checkbox" checked={picked.has(i)} onChange={() => toggle(i)} />
+                  <input name="picked" type="checkbox" checked={picked.has(i)} onChange={() => toggle(i)} />
                   <span>
                     <b>{e.name}</b>{e.cat && <span className="muted"> ({e.cat})</span>}<br />
                     <span className="vs-line2">{dimLabel(e) || "— chưa có kích thước —"}{e.note ? ` · ${e.note}` : ""}</span>

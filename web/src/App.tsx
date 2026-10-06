@@ -336,15 +336,15 @@ export function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
             {err && <div className="err" role="alert">{err}</div>}
             <form id="ob-form" onSubmit={submit}>
               {!datLai && <>
-                <label><span>Họ tên</span><input required value={form.displayName} autoFocus onChange={(e) => set("displayName", e.target.value)} /></label>
-                <label><span>Tên người gửi trên báo giá</span><input placeholder="Để trống = dùng Họ tên" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} /></label>
-                <label><span>Số điện thoại</span><input type="tel" inputMode="tel" autoComplete="tel" placeholder="09xx xxx xxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></label>
-                <label><span>Chức danh</span><input placeholder="VD: Account, Sale…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
+                <label><span>Họ tên</span><input name="displayName" required value={form.displayName} autoFocus onChange={(e) => set("displayName", e.target.value)} /></label>
+                <label><span>Tên người gửi trên báo giá</span><input name="senderName" placeholder="Để trống = dùng Họ tên" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} /></label>
+                <label><span>Số điện thoại</span><input name="phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="09xx xxx xxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></label>
+                <label><span>Chức danh</span><input name="title" placeholder="VD: Account, Sale…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
               </>}
               <label><span>Mật khẩu mới</span>
-                <span className="pw-wrap"><input type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required autoFocus={datLai} placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
+                <span className="pw-wrap"><input name="password" type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required autoFocus={datLai} placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
                   <button type="button" className="pw-toggle" aria-label="Hiện / ẩn mật khẩu" aria-pressed={showPw} onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
-              <label><span>Nhập lại mật khẩu</span><input type={showPw ? "text" : "password"} autoComplete="new-password" required value={form.password2} onChange={(e) => set("password2", e.target.value)} /></label>
+              <label><span>Nhập lại mật khẩu</span><input name="password2" type={showPw ? "text" : "password"} autoComplete="new-password" required value={form.password2} onChange={(e) => set("password2", e.target.value)} /></label>
               {/* Cùng pattern với ô MFA ở màn đăng nhập — khớp regex server, KHÔNG hẹp hơn, nếu
                   không thì trình duyệt tự chặn mã dự phòng và người dùng hết đường phục hồi. */}
               <label id="ob-mfa-field" style={{ display: mfaShown ? "" : "none" }}><span>Mã xác thực (MFA)</span>

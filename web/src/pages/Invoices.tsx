@@ -262,21 +262,21 @@ export function InvoicesPage({ me }: { me: Me }) {
     const v = (r[field] as string) || "";
     if (!editable(r, field as string)) return <td className={missCls(r[field])}>{v || dash}</td>;
     if (editKey !== ck(r, field as string)) return viewTd(r, field as string, v || dash);
-    return <td className={missCls(r[field])}><input autoFocus defaultValue={v} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
+    return <td className={missCls(r[field])}><input name={String(field)} autoFocus defaultValue={v} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
       onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, field as string, e.target.value.trim() || null); }} /></td>;
   };
   const dateCell = (r: Row, field: keyof Row) => {
     const disp = hasValue(r[field]) ? fmtDate(r[field] as string) : dash;
     if (!editable(r, field as string)) return <td className={missCls(r[field])}>{disp}</td>;
     if (editKey !== ck(r, field as string)) return viewTd(r, field as string, disp);
-    return <td className={missCls(r[field])}><input autoFocus type="date" defaultValue={toInputDate(r[field] as string)} style={{ width: 140 }} aria-label={fieldLabel(field as string, r)}
+    return <td className={missCls(r[field])}><input name={String(field)} autoFocus type="date" defaultValue={toInputDate(r[field] as string)} style={{ width: 140 }} aria-label={fieldLabel(field as string, r)}
       onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, field as string, e.target.value || null); }} /></td>;
   };
   const selectCell = (r: Row, field: keyof Row, options: string[], defVal = "") => {
     const disp = (r[field] as string) || defVal;
     if (!editable(r, field as string)) return <td>{disp || dash}</td>;
     if (editKey !== ck(r, field as string)) return viewTd(r, field as string, disp || dash);
-    return <td className={missCls(disp)}><select autoFocus defaultValue={disp} style={{ width: 74 }} aria-label={fieldLabel(field as string, r)}
+    return <td className={missCls(disp)}><select name={String(field)} autoFocus defaultValue={disp} style={{ width: 74 }} aria-label={fieldLabel(field as string, r)}
       onKeyDown={editKeyDown}
       onChange={(e) => { setEditKey(null); saveField(r, field as string, e.target.value || null); }}
       onBlur={() => setEditKey(null)}>
@@ -292,14 +292,14 @@ export function InvoicesPage({ me }: { me: Me }) {
 
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">
-          <input className="grow" type="search" placeholder="Tìm không dấu: khách, MSX, số HĐ, PO, tiền, ngày, ghi chú…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
-          <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} aria-label="Lọc tình trạng hóa đơn">
+          <input name="q" className="grow" type="search" placeholder="Tìm không dấu: khách, MSX, số HĐ, PO, tiền, ngày, ghi chú…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
+          <select name="status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} aria-label="Lọc tình trạng hóa đơn">
             <option value="">Tình trạng: Tất cả</option><option value="complete">Hoàn tất</option><option value="incomplete">Chưa đủ</option>
           </select>
-          <select value={collection} onChange={(e) => setCollection(e.target.value as CollectionFilter)} aria-label="Lọc thu tiền">
+          <select name="collection" value={collection} onChange={(e) => setCollection(e.target.value as CollectionFilter)} aria-label="Lọc thu tiền">
             <option value="">Thu tiền: Tất cả</option><option value="paid">Đã thu</option><option value="unpaid">Chưa thu</option><option value="dueSoon">Sắp đến hạn (7 ngày)</option><option value="overdue">Nợ quá hạn</option>
           </select>
-          <select value={missing} onChange={(e) => setMissing(e.target.value as MissingFilter)} aria-label="Lọc thông tin còn thiếu">
+          <select name="missing" value={missing} onChange={(e) => setMissing(e.target.value as MissingFilter)} aria-label="Lọc thông tin còn thiếu">
             <option value="">Thiếu dữ liệu: Tất cả</option><option value="any">Có ô còn thiếu</option>
             <option value="invoiceDesc">Thiếu Hạng mục</option><option value="poNumber">Thiếu PO/HĐ</option>
             <option value="invoiceNo">Thiếu Số HĐ</option><option value="invoiceDate">Thiếu Ngày HĐ</option>
@@ -310,13 +310,13 @@ export function InvoicesPage({ me }: { me: Me }) {
           </select>
         </div>
         <div className="toolbar inv-filter-row inv-filter-extra">
-          <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-          <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
-          <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Lọc theo tháng (Ngày HĐơn)" title="Theo tháng của Ngày HĐơn">
+          <select name="cty" value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+          <select name="year" value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
+          <select name="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Lọc theo tháng (Ngày HĐơn)" title="Theo tháng của Ngày HĐơn">
             <option value="">Tháng: Tất cả</option>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={String(i + 1)}>Tháng {i + 1}</option>)}
           </select>
-          <label className="inv-date-filter"><span>Từ ngày HĐ</span><input type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} /></label>
-          <label className="inv-date-filter"><span>Đến ngày HĐ</span><input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} /></label>
+          <label className="inv-date-filter"><span>Từ ngày HĐ</span><input name="dateFrom" type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} /></label>
+          <label className="inv-date-filter"><span>Đến ngày HĐ</span><input name="dateTo" type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} /></label>
           <span className="spacer" />
           <button className="btn btn-sm btn-ghost" type="button" disabled={!activeFilterCount} onClick={clearFilters}>Xóa tất cả{activeFilterCount ? <span className="inv-filter-count">{activeFilterCount}</span> : null}</button>
         </div>
@@ -396,7 +396,7 @@ export function InvoicesPage({ me }: { me: Me }) {
                           <td>{r.q.createdBy?.displayName || dash}</td>
                           {editable(r)
                             ? (editKey === ck(r, "invoiceLink")
-                              ? <td className={missCls(r.invoiceLink)}><input autoFocus defaultValue={r.invoiceLink || ""} style={{ width: 150 }} aria-label={fieldLabel("invoiceLink", r)}
+                              ? <td className={missCls(r.invoiceLink)}><input name="invoiceLink" autoFocus defaultValue={r.invoiceLink || ""} style={{ width: 150 }} aria-label={fieldLabel("invoiceLink", r)}
                                   onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, "invoiceLink", e.target.value.trim() || null); }} /></td>
                               : viewTd(r, "invoiceLink", r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>Xem HĐ ↗</a> : dash, "nowrap"))
                             : <td className={missCls(r.invoiceLink)}>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>}
@@ -410,7 +410,7 @@ export function InvoicesPage({ me }: { me: Me }) {
                           </td>
                           {editable(r)
                             ? (editKey === ck(r, "invoiceYear")
-                              ? <td className={missCls(r.invoiceYear)}><input autoFocus inputMode="numeric" defaultValue={r.invoiceYear ?? ""} style={{ width: 64 }} aria-label={fieldLabel("invoiceYear", r)}
+                              ? <td className={missCls(r.invoiceYear)}><input name="invoiceYear" autoFocus inputMode="numeric" defaultValue={r.invoiceYear ?? ""} style={{ width: 64 }} aria-label={fieldLabel("invoiceYear", r)}
                                   onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); const v = e.target.value.replace(/[^\d]/g, ""); saveField(r, "invoiceYear", v || null); }} /></td>
                               : viewTd(r, "invoiceYear", r.invoiceYear ?? dash))
                             : <td className={missCls(r.invoiceYear)}>{r.invoiceYear ?? dash}</td>}

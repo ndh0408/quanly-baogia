@@ -162,10 +162,10 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
           <div className="extra-table-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
             {/* `key` theo bảng: input uncontrolled (defaultValue) chỉ đọc giá trị lúc MOUNT, nên đổi
                 tab mà không đổi key thì ô tên vẫn hiện tên của bảng trước. */}
-            <input key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${ai + 1}`}"`} aria-label="Tên sheet Hà Nội" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onMarkDirty(); }} />
+            <input name="tenSheet" key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${ai + 1}`}"`} aria-label="Tên sheet Hà Nội" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onMarkDirty(); }} />
             {editable && (
               <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu:
-                <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>
+                <select name="templateId" value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>
                   {tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </select>
               </label>

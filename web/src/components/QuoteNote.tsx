@@ -165,7 +165,7 @@ function KhungGhiChu({ neo, nhan, chu, choSua, nguoiGhi, onDong }: {
       <div className="qn-edit-head">Ghi chú · {nhan}</div>
       {choSua ? (
         <>
-          <textarea ref={o} className="qn-area" rows={3} maxLength={GHI_CHU_TOI_DA} defaultValue={chu} placeholder="Gõ ghi chú…" aria-label={`Ghi chú của ${nhan}`}
+          <textarea name="ghiChu" ref={o} className="qn-area" rows={3} maxLength={GHI_CHU_TOI_DA} defaultValue={chu} placeholder="Gõ ghi chú…" aria-label={`Ghi chú của ${nhan}`}
             onInput={(e) => { setCon(e.currentTarget.value.length); tuCao(); }}
             onKeyDown={(e) => {
               // Enter chốt một từ của bộ gõ tiếng Việt (OpenKey/Unikey) KHÔNG phải lệnh lưu — xem dangGoIME.

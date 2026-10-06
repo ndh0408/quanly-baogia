@@ -308,7 +308,7 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
                 )}
                 {row.paid && !paid && row.hasPaidProof && <p className="inv-in-hop-lydo">Bỏ tích: ảnh hiện tại sẽ được RÚT khỏi khoản khi Lưu — vẫn giữ trong lịch sử.</p>}
                 {paid && row.trangThaiHang === "khong-con-hang" && <p className="inv-in-hop-lydo">Dòng không còn trong báo giá — không đính ảnh mới được.</p>}
-                <input ref={tepRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => void chonAnh(e)} />
+                <input name="anhChungTu" ref={tepRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => void chonAnh(e)} />
 
                 {xem && (
                   <div className="inv-in-hop-xem" aria-live="polite">

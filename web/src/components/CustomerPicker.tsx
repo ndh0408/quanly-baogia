@@ -32,7 +32,7 @@ export function CustomerPicker({ onClose, onPick, chonId }: { onClose: () => voi
       <div className="modal" role="dialog" aria-modal="true" aria-label="Chọn khách hàng">
         <div className="modal-head"><h3>Chọn khách hàng</h3><button className="icon-btn" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
-          <input type="search" autoFocus placeholder="Tìm mã / tên khách hàng…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 8 }} />
+          <input name="q" type="search" autoFocus placeholder="Tìm mã / tên khách hàng…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 8 }} />
           {!rows ? <div className="skeleton-wrap">{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
             : loi ? <div className="err" role="alert">⚠ {loi}</div>
             : rows.length === 0 ? <p className="muted">Không có khách hàng khớp.</p> : (
