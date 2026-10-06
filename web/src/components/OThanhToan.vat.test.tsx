@@ -94,7 +94,7 @@ describe("Lưới bảng nội bộ: bấm 🧾 / 📎 mở hộp xem chứng t�
   it("🧾 → GET chứng từ loai=vat của đúng báo giá / phía / rid; PDF hiện chữ 'Hóa đơn dạng PDF', không ô nhập; Esc đóng", async () => {
     h.xem.mockResolvedValue({ dataUrl: PDF, mime: "application/pdf", loai: "vat", uploadedAt: "2026-10-06T04:00:00.000Z", uploadedByName: "Kế toán Lan" });
     const s = { id: 1, templateId: 1, extraTables: [{ category: "hcm", templateId: 1, name: "B", items: [hang({ rid: "r1", name: "Thuê xe", chungTu: "VAT" })] }] as unknown as ExtraTable[], _activeExtra: 0 };
-    const daChi = dungMap(42, "sheet", { sheet: [{ rid: "r1", ...DA, coHdVat: true }], hn: [] });
+    const daChi = dungMap(42, "sheet", { sheet: [{ rid: "r1", ...DA, coHdVat: true, xemChungTu: true }], hn: [] });
     ve(<ExtraTables sheet={s} templates={MAU} companyId={1} editable canApprove onMarkDirty={() => {}} daChi={daChi} />);
     act(() => { (thung.querySelectorAll(".khoi-sheet-nut")[0] as HTMLButtonElement).click(); });
     const nut = thung.querySelector<HTMLButtonElement>('td.col-pay button[data-loai="vat"]')!;
@@ -111,7 +111,7 @@ describe("Lưới bảng nội bộ: bấm 🧾 / 📎 mở hộp xem chứng t�
   });
 
   it("màn chỉ-xem nội bộ: 📎 → ảnh ủy nhiệm chi hiện tại (img); lỗi máy chủ → câu lỗi + Thử lại", async () => {
-    h.daChi = { quoteId: 21, sheet: [{ rid: "r1", ...DA }], hn: [], vatChuaChi: { sheet: [], hn: [] } };
+    h.daChi = { quoteId: 21, sheet: [{ rid: "r1", ...DA, xemChungTu: true }], hn: [], vatChuaChi: { sheet: [], hn: [] } };
     h.quote = { id: 21, quoteNumber: "GN26021", companyId: 1, _internalView: true,
       internalSheets: [{ sheetId: 201, sheetName: "Trang 1", order: 1, tables: [{ category: "hcm", templateId: 1, name: "HCM", items: [hang({ rid: "r1", chungTu: "VAT" })] }] }], hnTables: [] };
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -127,6 +127,29 @@ describe("Lưới bảng nội bộ: bấm 🧾 / 📎 mở hộp xem chứng t�
     await act(async () => { [...document.querySelectorAll<HTMLButtonElement>(".xem-ct button")].find((b) => b.textContent === "Thử lại")!.click(); });
     await cho();
     expect(document.querySelector<HTMLImageElement>(".xem-ct img")!.getAttribute("src")).toBe(ANH);
+  });
+});
+
+describe("Người chỉ xem chung (máy chủ báo xemChungTu ≠ true): không có nút 📎 / 🧾, chữ trạng thái vẫn đủ", () => {
+  it("lưới: xemChungTu=false → không nút, vẫn '✓ Đã TT … · đã có VAT 📎 🧾'", () => {
+    const s = { id: 1, templateId: 1, extraTables: [{ category: "hcm", templateId: 1, name: "B", items: [hang({ rid: "r1", name: "Thuê xe", chungTu: "VAT" })] }] as unknown as ExtraTable[], _activeExtra: 0 };
+    const daChi = dungMap(42, "sheet", { sheet: [{ rid: "r1", ...DA, coHdVat: true, xemChungTu: false }], hn: [] });
+    ve(<ExtraTables sheet={s} templates={MAU} companyId={1} editable canApprove onMarkDirty={() => {}} daChi={daChi} />);
+    act(() => { (thung.querySelectorAll(".khoi-sheet-nut")[0] as HTMLButtonElement).click(); });
+    const o = thung.querySelector("td.col-pay")!;
+    expect(o.querySelectorAll("button")).toHaveLength(0);
+    expect(o.textContent).toBe("✓ Đã TT 06/10/2026 · đã có VAT 📎 🧾Kế toán Lan");
+  });
+
+  it("màn chỉ-xem nội bộ: máy chủ không gửi cờ (vắng) → không nút", async () => {
+    h.daChi = { quoteId: 21, sheet: [{ rid: "r1", ...DA }], hn: [], vatChuaChi: { sheet: [], hn: [] } };
+    h.quote = { id: 21, quoteNumber: "GN26021", companyId: 1, _internalView: true,
+      internalSheets: [{ sheetId: 201, sheetName: "Trang 1", order: 1, tables: [{ category: "hcm", templateId: 1, name: "HCM", items: [hang({ rid: "r1", chungTu: "VAT" })] }] }], hnTables: [] };
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => { goc.render(<QueryClientProvider client={qc}><InternalQuoteView quoteId={21} me={{ id: 1 } as never} /></QueryClientProvider>); });
+    await cho();
+    expect(thung.querySelector("td.col-pay")!.textContent).toBe("✓ Đã TT 06/10/2026 · chưa VAT 📎Kế toán Lan");
+    expect(thung.querySelectorAll("td.col-pay button")).toHaveLength(0);
   });
 });
 

@@ -84,7 +84,7 @@ describe("migration 20261006150000_input_invoice_vat — CHỈ THÊM", () => {
 
 describe.runIf(dbAvailable)("HĐ VAT của khoản chi + xem chứng từ từ bảng nội bộ", () => {
   let app, companyId, templateId, q;
-  let admin, ketoan, ngoai, chiPhi, hnU, ketoanKhongTich;
+  let admin, ketoan, ngoai, chiPhi, hnU, ketoanKhongTich, chu, tvHcm, tvMain, xemChung;
   const phien = new Map();
   const dn = async (u) => {
     if (!phien.has(u.id)) {
@@ -117,15 +117,20 @@ describe.runIf(dbAvailable)("HĐ VAT của khoản chi + xem chứng từ từ b
     ketoanKhongTich = await user("ketoan2", "accountant", [P.INVOICE_PAGE, P.INVOICE_EDIT]);
     ngoai = await user("ngoai", "manager");
     chiPhi = await user("chiphi", "hr", [P.QUOTE_READ_OWN, P.QUOTE_INTERNAL_VIEW]);
+    // Ma trận quyền XEM CHỨNG TỪ (chủ repo 2026-10-06: "admin, chủ báo giá, và người được thêm vào báo giá khi được cho phép").
+    chu = await user("chu", "manager");                                                     // người tạo báo giá (không phải admin)
+    tvHcm = await user("tvhcm", "manager");                                                 // thành viên được giao vùng Chi phí HCM
+    tvMain = await user("tvmain", "manager");                                               // thành viên chỉ được giao báo giá chính
+    xemChung = await user("xemchung", "hr", [P.QUOTE_READ_ALL, P.QUOTE_INTERNAL_VIEW]);       // xem chung mọi báo giá, không thuộc báo giá này
     hnU = await user("hn", "account_hn");
     companyId = (await prisma.company.create({ data: { code: `${TAG}CO`, name: "Cty thử", address: "1 Thử", quotePrefix: `V${`${Date.now()}`.slice(-6)}` } })).id;
     templateId = (await prisma.quoteTemplate.create({ data: { companyId, name: "Mẫu thử", code: `${TAG}k`, filePath: "templates/GN_KhongNgay.xlsx" } })).id;
     q = await prisma.quote.create({ data: {
       quoteNumber: `${TAG}-q`, projectCode: `${TAG}_q`, title: `${TAG} q`, searchText: TAG, toCompany: "Khách", companyId,
-      fromContact: "x", fromAddress: "x", city: "TP. Hồ Chí Minh", quoteDate: new Date(), createdById: admin.id,
+      fromContact: "x", fromAddress: "x", city: "TP. Hồ Chí Minh", quoteDate: new Date(), createdById: chu.id,
       hnStatus: "approved", hnReviewedAt: new Date("2026-09-25T01:00:00Z"), hnReviewerId: admin.id,
       hnTables: [{ name: "Giá HN", items: [hang("hn-1", "Thuê sàn HN", "VAT")] }],
-      members: { create: [{ userId: chiPhi.id, scopes: [] }, { userId: hnU.id, scopes: ["hanoi"] }] },
+      members: { create: [{ userId: chiPhi.id, scopes: [] }, { userId: hnU.id, scopes: ["hanoi"] }, { userId: tvHcm.id, scopes: ["hcm"] }, { userId: tvMain.id, scopes: ["main"] }] },
       sheets: { create: [{ templateId, order: 1, name: "Trang 1", codeNo: 1, extraTables: [
         { category: "hcm", name: "Chi phí HCM", items: [
           hang("v-sau", "Thuê xe (VAT, tích trước)", "VAT"),
@@ -139,7 +144,7 @@ describe.runIf(dbAvailable)("HĐ VAT của khoản chi + xem chứng từ từ b
 
   afterAll(async () => {
     const ids = (await prisma.quote.findMany({ where: { title: { startsWith: TAG } }, includeDeleted: true, select: { id: true } })).map((x) => x.id);
-    const userIds = [admin, ketoan, ketoanKhongTich, ngoai, chiPhi, hnU].filter(Boolean).map((u) => u.id);
+    const userIds = [admin, ketoan, ketoanKhongTich, ngoai, chiPhi, hnU, chu, tvHcm, tvMain, xemChung].filter(Boolean).map((u) => u.id);
     await prisma.inputInvoiceProof.deleteMany({ where: { entry: { quoteId: { in: ids } } } }).catch(() => {});
     await prisma.inputInvoiceEntry.deleteMany({ where: { quoteId: { in: ids } } }).catch(() => {});
     await prisma.auditEvent.deleteMany({ where: { OR: [{ actorId: { in: userIds } }, { resource: "quote", resourceId: { in: ids.map(String) } }] } }).catch(() => {});
@@ -205,16 +210,16 @@ describe.runIf(dbAvailable)("HĐ VAT của khoản chi + xem chứng từ từ b
     await ghiOk("sheet", "v-sau", { paid: true, paidProof: ANH_THAT, vatProof: PDF_THAT });
   });
 
-  it("nội bộ xem chứng từ HIỆN TẠI: admin + tài khoản chi phí 200 (ảnh / PDF), nhật ký proof-view noiBo", async () => {
+  it("nội bộ xem chứng từ HIỆN TẠI: admin + thành viên được giao vùng HCM 200 (ảnh / PDF), nhật ký proof-view noiBo", async () => {
     const a = await xemAnh(admin, "sheet", "v-sau", "chi");
     expect(a.status, JSON.stringify(a.body)).toBe(200);
     expect(a.body).toMatchObject({ loai: "chi", mime: "image/png" });
     expect(a.body.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
-    const v = await xemAnh(chiPhi, "sheet", "v-sau", "vat");
+    const v = await xemAnh(tvHcm, "sheet", "v-sau", "vat");
     expect(v.status, JSON.stringify(v.body)).toBe(200);
     expect(v.body).toMatchObject({ loai: "vat", mime: "application/pdf", uploadedByName: `${TAG} ketoan` });
     expect(v.body.dataUrl).toBe(PDF_THAT);
-    const ev = await nhatKyCuoi(chiPhi.id, "quote.internal.proof-view");
+    const ev = await nhatKyCuoi(tvHcm.id, "quote.internal.proof-view");
     expect(ev?.after).toMatchObject({ side: "sheet", rid: "v-sau", loai: "vat", noiBo: true, proofId: (await khoan("sheet", "v-sau")).currentVatProofId });
     expect(JSON.stringify({ b: ev?.before, a: ev?.after })).not.toContain("base64");
   });
@@ -227,9 +232,33 @@ describe.runIf(dbAvailable)("HĐ VAT của khoản chi + xem chứng từ từ b
     expect((await xemAnh(hnU, "sheet", "v-sau", "vat")).status).toBe(403);
   });
 
-  it("người ngoài 403, kế toán không có quote:read 403, chưa đăng nhập 401 — không ghi nhật ký xem", async () => {
+  it("THU HẸP: chủ báo giá 200; kế toán (không quote:read) 200 như ở trang Hóa đơn đầu vào; thành viên chỉ-xem / chỉ 'main' / người xem chung (quote:read:all + internal:view) → 403 + không nhật ký", async () => {
+    for (const u of [chu, ketoan]) {
+      const r = await xemAnh(u, "sheet", "v-sau", "vat");
+      expect(r.status, `${u.username}: ${JSON.stringify(r.body)}`).toBe(200);
+    }
+    expect((await xemAnh(ketoan, "hn", "hn-1", "chi")).status).toBe(200);
+    for (const u of [chiPhi, tvMain, xemChung]) {
+      for (const [side, rid, loai] of [["sheet", "v-sau", "chi"], ["sheet", "v-sau", "vat"], ["hn", "hn-1", "chi"]]) {
+        const r = await xemAnh(u, side, rid, loai);
+        expect(r.status, `${u.username} ${side}/${rid}/${loai}`).toBe(403);
+      }
+      expect(await nhatKyCuoi(u.id, "quote.internal.proof-view"), `${u.username} không được ghi là đã xem`).toBeNull();
+    }
+    expect((await xemAnh(tvHcm, "hn", "hn-1", "chi")).status, "thành viên vùng HCM không xem chứng từ hàng Hà Nội").toBe(403);
+  });
+
+  it("GET /:id/khoan-chi báo cờ xemChungTu đúng người (để giao diện ẩn 📎 / 🧾); chữ trạng thái vẫn đủ cho người xem chung", async () => {
+    const co = async (u) => { const r = await xemDs(u); expect(r.status).toBe(200); return Object.fromEntries([...r.body.sheet, ...r.body.hn].map((h) => [h.rid, h.xemChungTu])); };
+    expect(await co(admin)).toMatchObject({ "v-sau": true, "hn-1": true });
+    expect(await co(chu)).toMatchObject({ "v-sau": true, "hn-1": true });
+    expect(await co(tvHcm)).toMatchObject({ "v-sau": true, "hn-1": false });
+    expect(await co(hnU)).toEqual({ "hn-1": true });
+    for (const u of [chiPhi, tvMain, xemChung]) expect(await co(u), u.username).toEqual({ "v-sau": false, "hn-1": false });
+  });
+
+  it("người ngoài 403, chưa đăng nhập 401 — không ghi nhật ký xem", async () => {
     expect((await xemAnh(ngoai, "sheet", "v-sau", "chi")).status).toBe(403);
-    expect((await xemAnh(ketoan, "sheet", "v-sau", "vat")).status).toBe(403);
     expect((await request(app).get(`/api/quotes/${q.id}/khoan-chi/sheet/v-sau/anh?loai=chi`)).status).toBe(401);
     expect(await nhatKyCuoi(ngoai.id, "quote.internal.proof-view")).toBeNull();
   });

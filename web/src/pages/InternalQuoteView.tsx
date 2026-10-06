@@ -97,7 +97,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
                       <td className="col-luu-kho">{it.luuKho ? <span role="img" aria-label="Có lưu kho" title="Có lưu kho">✓</span> : dash}</td>
                       <td className="col-pay">
                         <OThanhToan h={tt} chungTu={it.chungTu}
-                          onBam={daChi && typeof it.rid === "string" && it.rid.trim()
+                          onBam={daChi && tt?.xemChungTu && typeof it.rid === "string" && it.rid.trim()
                             ? (e) => setXemCt({ hn: !!s.hn, rid: it.rid.trim(), loai: e.currentTarget.getAttribute("data-loai") === "vat" ? "vat" : "chi", ten: String(it.name ?? "") })
                             : undefined} />
                       </td>

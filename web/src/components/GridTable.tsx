@@ -2896,7 +2896,8 @@ function GridTableInner(props: GridTableProps) {
     return it.paid === true ? { rid: "", paidAt: typeof it.paidAt === "string" ? it.paidAt : null, paidByName: null, coAnh: it.hasPaidProof === true, paid: true } : null;
   };
   // 📎 / 🧾 bấm được khi map mang `nguon` (báo giá + phía) — mở hộp XemChungTu (chỉ xem, máy chủ kiểm quyền + ghi nhật ký).
-  const oThanhToan = (i: number) => <OThanhToan h={daChiCua(i)} chungTu={(items[i] as Record<string, unknown>).chungTu} onBam={daChi?.nguon ? xuLyBam : undefined} />;
+  // Nút chỉ hiện khi máy chủ báo người này MỞ ĐƯỢC chứng từ của hàng (`xemChungTu`) — người chỉ xem chung thấy chữ trạng thái.
+  const oThanhToan = (i: number) => { const h = daChiCua(i); return <OThanhToan h={h} chungTu={(items[i] as Record<string, unknown>).chungTu} onBam={daChi?.nguon && h?.xemChungTu ? xuLyBam : undefined} />; };
   const imagesCell = (i: number) => {
     const imgs = (items[i].images || []) as string[];
     return (
