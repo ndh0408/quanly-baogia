@@ -196,31 +196,31 @@ export function InvoicesInPage({ me }: { me: Me }) {
 
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">
-          <input className="grow" type="search" placeholder="Tìm không dấu: dự án, khách, hạng mục, NS, số tiền, người duyệt, ghi chú KT, ngày HĐ…" value={b.q} onChange={(e) => dat({ q: e.target.value })} aria-label="Tìm hóa đơn đầu vào" />
-          <select value={b.loai} onChange={(e) => dat({ loai: e.target.value })} aria-label="Lọc theo loại bảng">
+          <input className="grow" type="search" name="q" placeholder="Tìm không dấu: dự án, khách, hạng mục, NS, số tiền, người duyệt, ghi chú KT, ngày HĐ…" value={b.q} onChange={(e) => dat({ q: e.target.value })} aria-label="Tìm hóa đơn đầu vào" />
+          <select name="loai" value={b.loai} onChange={(e) => dat({ loai: e.target.value })} aria-label="Lọc theo loại bảng">
             <option value="">Loại bảng: Tất cả</option>
             {Object.entries(LOAI_BANG).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          <select value={b.chungTu} onChange={(e) => dat({ chungTu: e.target.value })} aria-label="Lọc theo chứng từ">
+          <select name="chungTu" value={b.chungTu} onChange={(e) => dat({ chungTu: e.target.value })} aria-label="Lọc theo chứng từ">
             <option value="">Chứng từ: Tất cả</option>
             {CHUNG_TU.map(([ma, nhan]) => <option key={ma} value={ma}>{nhan}</option>)}
             <option value="none">Chưa chọn chứng từ</option>
           </select>
-          <select value={b.thanhToan} onChange={(e) => dat({ thanhToan: e.target.value })} aria-label="Lọc theo thanh toán">
+          <select name="thanhToan" value={b.thanhToan} onChange={(e) => dat({ thanhToan: e.target.value })} aria-label="Lọc theo thanh toán">
             <option value="">Thanh toán: Tất cả</option><option value="paid">Đã thanh toán</option><option value="unpaid">Chưa thanh toán</option>
           </select>
         </div>
         {/* "Ngày HĐ" ở hàng HAI: ô tìm (sàn 260px) + bốn ô chọn ở hàng một tràn 30px ở laptop 1280px — khung lọc cắt mất
             nửa phải của ô thứ tư (đo headless 2026-10-06, scratchpad do-kt-cot.mjs). */}
         <div className="toolbar inv-filter-row inv-filter-extra">
-          <select value={b.trangThai} onChange={(e) => dat({ trangThai: e.target.value })} aria-label="Lọc theo trạng thái báo giá">
+          <select name="trangThai" value={b.trangThai} onChange={(e) => dat({ trangThai: e.target.value })} aria-label="Lọc theo trạng thái báo giá">
             <option value="">Báo giá: Tất cả</option><option value="converted">Đã chốt</option><option value="draft">Nháp</option><option value="lost">Không chốt</option><option value="other">Khác</option>
           </select>
-          <select value={b.ngayHd} onChange={(e) => dat({ ngayHd: e.target.value })} aria-label="Lọc theo ngày hóa đơn">
+          <select name="ngayHd" value={b.ngayHd} onChange={(e) => dat({ ngayHd: e.target.value })} aria-label="Lọc theo ngày hóa đơn">
             <option value="">Ngày HĐ: Tất cả</option><option value="co">Đã có ngày HĐ</option><option value="chua">Chưa có ngày HĐ</option>
           </select>
-          <label className="inv-date-filter"><span>Duyệt từ ngày</span><input type="date" value={b.tu} max={b.den || undefined} onChange={(e) => dat({ tu: e.target.value })} /></label>
-          <label className="inv-date-filter"><span>Đến ngày</span><input type="date" value={b.den} min={b.tu || undefined} onChange={(e) => dat({ den: e.target.value })} /></label>
+          <label className="inv-date-filter"><span>Duyệt từ ngày</span><input type="date" name="tu" value={b.tu} max={b.den || undefined} onChange={(e) => dat({ tu: e.target.value })} /></label>
+          <label className="inv-date-filter"><span>Đến ngày</span><input type="date" name="den" value={b.den} min={b.tu || undefined} onChange={(e) => dat({ den: e.target.value })} /></label>
           <span className="spacer" />
           <button className="btn btn-sm btn-ghost" type="button" disabled={!soBoLoc} onClick={xoaLoc}>Xóa tất cả{soBoLoc ? <span className="inv-filter-count">{soBoLoc}</span> : null}</button>
         </div>

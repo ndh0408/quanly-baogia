@@ -568,6 +568,8 @@ describe("lọc / tìm / thẻ số", () => {
     // phải của ô thứ tư (đo headless 2026-10-06).
     expect(chon("Lọc theo ngày hóa đơn").closest(".inv-filter-extra")).not.toBeNull();
     expect(khung.querySelectorAll(".inv-filter-main select")).toHaveLength(3);
+    // Mọi ô lọc có `name` — Chrome DevTools báo "form field should have an id or name" (soát 2026-10-06).
+    expect([...khung.querySelectorAll(".inv-filters input, .inv-filters select")].filter((e) => !e.getAttribute("name")), "ô lọc thiếu name").toHaveLength(0);
     go(chon("Lọc theo ngày hóa đơn"), "co");
     expect(tenDong()).toEqual(["A"]);
   });
