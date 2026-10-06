@@ -50,9 +50,31 @@ GOC="$PWD"
 # số, nên mục `/repo` KHÔNG phủ `--source=/repo` (tham số đó bắt đầu bằng `--source=`). Đo được:
 # thiếu `--source=` thì gitleaks chết bằng "FTL stat C:/Program Files/Git/repo: no such file or
 # directory" và thoát 1 — cổng đỏ trông y hệt "tìm thấy bí mật".
-export MSYS2_ARG_CONV_EXCL='/src;/repo;/root;--source=;--ignorefile=;--report-path='
+export MSYS2_ARG_CONV_EXCL='/src;/repo;/root;/gitchung;--source=;--ignorefile=;--report-path=;GIT_DIR=;GIT_WORK_TREE='
 duong_dan_may() { ( cd "$1" 2>/dev/null && { pwd -W 2>/dev/null || pwd; } ) || printf '%s' "$1"; }
 GOC_MOUNT=$(duong_dan_may "$GOC")
+
+# ── CHẠY TRONG GIT WORKTREE ──────────────────────────────────────────────────────────────────────
+# Ở worktree, `.git` là một TỆP ghi "gitdir: D:/QuanLY/.git/worktrees/<tên>" — đường dẫn của MÁY,
+# trong container không giải được. ĐO ĐƯỢC (2026-10-06, worktree D:\QuanLY-wt\tich-hop):
+#   · gitleaks `detect` (lịch sử) in "fatal: not a git repository … failed to scan Git repository"
+#     rồi "no leaks found" và THOÁT 0 — cổng XANH mà chưa đọc một commit nào;
+#   · semgrep không gọi được `git ls-files` nên "Running on all files instead" — lần từng thư mục
+#     qua ổ chia sẻ, kể cả node_modules THẬT, treo hàng giờ ở ~4% CPU (bị dừng tay sau 75 phút).
+# Gắn thêm thư mục git CHUNG và trỏ GIT_DIR / GIT_WORK_TREE vào đó thì cả hai đọc git bình
+# thường: semgrep "Scanning 984 files tracked by git" xong trong 110 giây. Ở checkout chính hay
+# trên CI (`.git` là thư mục) thì mảng rỗng — không đổi gì.
+git_args() {  # $1 = chỗ mã nguồn được gắn trong container (/repo hoặc /src)
+  [ -f "$GOC/.git" ] || return 0
+  local gd chung
+  gd=$(sed -n 's/^gitdir: //p' "$GOC/.git" | tr -d '\r')
+  [ -d "$gd" ] || return 0
+  chung=$(cd "$gd" && cd "$(cat commondir 2>/dev/null || echo .)" && { pwd -W 2>/dev/null || pwd; })
+  printf '%s\n' -v "$chung:/gitchung:ro" -e "GIT_DIR=/gitchung/worktrees/$(basename "$gd")" \
+    -e "GIT_WORK_TREE=$1" -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e 'GIT_CONFIG_VALUE_0=*'
+}
+mapfile -t GIT_REPO < <(git_args /repo)
+mapfile -t GIT_SRC < <(git_args /src)
 
 NHANH=0
 [ "${1:-}" = "--nhanh" ] && NHANH=1
@@ -97,7 +119,7 @@ if chay_buoc secrets; then
   #                     phải là đã xử lý;
   #   · lượt cây làm việc: bắt trước khi nó kịp thành lịch sử.
   buoc "[S1] Bí mật (gitleaks — HAI lượt: lịch sử git + cây làm việc)"
-  docker run --rm -v "$GOC_MOUNT:/repo" "$GITLEAKS" \
+  docker run --rm -v "$GOC_MOUNT:/repo" "${GIT_REPO[@]}" "$GITLEAKS" \
     detect --source=/repo --redact --no-banner --exit-code 1 >/dev/null 2>&1
   ket $? "lịch sử git sạch (chi tiết: docker run --rm -v \"\$PWD:/repo\" $GITLEAKS detect --source=/repo --redact)"
   # `--no-git` đi bộ trên HỆ TỆP, KHÔNG đọc .gitignore. Trên máy lập trình viên, thư mục đó chứa
@@ -175,7 +197,7 @@ if chay_buoc sast && [ "$NHANH" -eq 0 ]; then
   # `--json`: KHÔNG chỉ để lấy kết quả cho đẹp. Phần quan trọng nhất nằm ở mảng `errors` — xem
   # khối "LỖ THỦNG IM LẶNG" bên dưới.
   RA_SG="${SEMGREP_OUT:-/tmp/semgrep-$$.json}"
-  docker run --rm "${CA_ARGS[@]}" -v "$GOC_MOUNT:/src" -v "$(duong_dan_may "$CACHE/semgrep"):/root/.semgrep" -w /src "$SEMGREP" \
+  docker run --rm "${CA_ARGS[@]}" -v "$GOC_MOUNT:/src" "${GIT_SRC[@]}" -v "$(duong_dan_may "$CACHE/semgrep"):/root/.semgrep" -w /src "$SEMGREP" \
     semgrep scan \
       --config p/javascript --config p/typescript \
       --config p/nodejs --config p/expressjs --config p/react \
