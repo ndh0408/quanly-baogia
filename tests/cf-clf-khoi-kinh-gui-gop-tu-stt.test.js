@@ -16,15 +16,21 @@
  * Cả ba mẫu Colorfull: ô chủ B3, vùng gộp B3:I3 (bản có ngày B3:J3). Chữ mồi ở C3 vẫn phải mất.
  * Ba mẫu GN không khai `headerMerges` / `toBlockCell` nên không đổi.
  *
+ * Hai lớp chắn chốt thêm sau vòng soát: (1) chữ mồi ở C3 mất nhờ `extraCellsToClear` của TỪNG mẫu, không
+ * nhờ vùng gộp — bản có ngày khai lại danh sách đó và từng sót "C3"; (2) bề rộng mà phép đo chiều cao
+ * hàng 3 dùng bị kẹp từ HAI phía: không hẹp như vùng cũ C..cuối (hàng thừa một dòng), không rộng hơn vùng
+ * thật (hàng thiếu một dòng — lệch đủ lớn là Excel xén dòng mã).
+ *
  * Bài này đọc TỆP XUẤT THẬT (ExcelJS) chứ không đọc cấu hình: cơ chế gộp + làm phẳng style của
  * ExcelJS (`mergeCells` chép style ô chủ sang mọi ô phụ) chỉ kiểm được trên tệp.
  * ============================================================================
  */
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { fileURLToPath } from "node:url";
 import { buildQuoteBuffer, soDongKhiXuongHang } from "../src/excel.js";
-import { getConfig } from "../src/templateConfigs.js";
+import { getConfig, TEMPLATE_CONFIGS } from "../src/templateConfigs.js";
 import { parseQuoteWorkbook } from "../src/excelImport.js";
 
 /** mẫu → cột CUỐI của bảng (mẫu có ngày có thêm cột SỐ NGÀY nên dài hơn một cột). */
@@ -75,6 +81,8 @@ const gopHang = (ws, r) => (ws.model.merges || []).filter((m) => new RegExp(`^[A
 const cotCuaVung = (v) => { const m = /^([A-Z]+)\d+:([A-Z]+)\d+$/.exec(v); return [m[1], m[2]]; };
 /** Mọi chữ cái cột từ `a` tới `b` (một chữ cái, đủ cho B…K). */
 const dai = (a, b) => COT.slice(COT.indexOf(a), COT.indexOf(b) + 1);
+/** Tổng bề rộng (đơn vị cột) các cột `a`..`b` của tệp xuất. */
+const rongHai = (ws, a, z) => dai(a, z).reduce((s, L) => s + ws.getColumn(L).width, 0);
 const net = (c, canh) => c.border?.[canh]?.style ?? "-";
 
 describe("Colorfull — khối 'Kính gửi' gộp liền từ cột STT", () => {
@@ -113,6 +121,37 @@ describe("Colorfull — khối 'Kính gửi' gộp liền từ cột STT", () =>
       expect(mo, `${ma}: chữ mồi vẫn nằm đâu đó trong tệp`).toBe(0);
       // C3 bây giờ là ô PHỤ: nó đọc ra chuỗi của B3 (ExcelJS), không phải chữ mồi.
       expect(chu(ws.getCell("C3").value)).toBe(chu(ws.getCell("B3").value));
+    }, 300_000);
+
+    it(`${ma}: vùng gộp không áp được thì chữ mồi ở C3 vẫn KHÔNG sống lại — xoá tường minh, không nhờ vùng gộp`, async () => {
+      // C3 nay là ô PHỤ của B3:${cuoi}3 nên vùng gộp nuốt mất chữ mồi. Nhưng `safeMerge` nuốt lỗi, và ai đó có
+      // thể gỡ `headerMerges` — lớp chắn thật phải là `cleanup.extraCellsToClear`. Bản có ngày KHAI LẠI danh
+      // sách đó (K5/K8/H22) và từng sót "C3": gỡ vùng gộp là tệp có ngày in lại dòng chữ ĐỎ cạnh khối,
+      // trong khi hai bản không-ngày vẫn sạch.
+      const cfg = getConfig(ma);
+      // Tiền đề: tệp mẫu THẬT SỰ mang chữ mồi ở C3 — không thì bài này đúng một cách vô nghĩa.
+      const mau = new ExcelJS.Workbook();
+      await mau.xlsx.readFile(fileURLToPath(new URL(`../${cfg.filePath}`, import.meta.url)));
+      expect(chu(mau.worksheets[0].getCell("C3").value), `${ma}: tệp mẫu không còn chữ mồi ở C3`).toMatch(/logo cty/i);
+      // Mã mẫu tạm = chính mẫu này nhưng KHÔNG gộp đầu trang; mở đầu "clofull" như mọi mẫu Colorfull. Gỡ trong `finally`.
+      const tam = `${ma}_thu_khong_gop`;
+      TEMPLATE_CONFIGS[tam] = { ...cfg, headerMerges: [] };
+      try {
+        const buf = await buildQuoteBuffer(baoGia(tam));
+        const ws = await moFile(buf);
+        expect(ws.model.merges, "tiền đề: khối Kính gửi phải KHÔNG được gộp").not.toContain(`B3:${cuoi}3`);
+        expect(chu(ws.getCell("B3").value).startsWith("Kính gửi:"), "khối vẫn ghi vào B3").toBe(true);
+        expect(ws.getCell("C3").value ?? null, `${ma}: C3 còn giữ chữ của tệp mẫu khi không gộp`).toBeNull();
+        // Soi XML THÔ, không qua ExcelJS: chuỗi nằm trong gói là Excel đọc được.
+        const zip = await JSZip.loadAsync(buf);
+        const noi = [];
+        for (const [ten, tep] of Object.entries(zip.files)) {
+          if (!tep.dir && ten.endsWith(".xml") && /logo cty/i.test(await tep.async("string"))) noi.push(ten);
+        }
+        expect(noi, `${ma}: chữ mồi "logo cty khách hàng" sống lại trong tệp`).toEqual([]);
+      } finally {
+        delete TEMPLATE_CONFIGS[tam];
+      }
     }, 300_000);
 
     it(`${ma}: liền một mảng — mọi ô B..${cuoi} cùng kiểu, canh giữa, chữ không đỏ, không viền dọc ở ranh giới B|C`, async () => {
@@ -156,6 +195,8 @@ describe("Colorfull — khối 'Kính gửi' gộp liền từ cột STT", () =>
     }, 300_000);
 
     it(`${ma}: hàng 3 đủ cao cho 5 dòng người nhận + dòng mã — số dòng đo theo bề rộng THẬT của B..${cuoi}`, async () => {
+      // Sáu dòng ở đây đều xuống hàng TƯỜNG MINH, không dòng nào tự ngắt, nên bề rộng nào ≥ B..cuối cũng ra
+      // sáu dòng: bài này chỉ chốt mức sàn. Bề rộng mà phép đo dùng được kẹp ở hai bài ca biên bên dưới.
       const ws = await xuat(ma);
       const b3 = ws.getCell("B3");
       expect(b3.font?.size).toBe(12);
@@ -172,7 +213,6 @@ describe("Colorfull — khối 'Kính gửi' gộp liền từ cột STT", () =>
     it(`${ma}: phép đo chiều cao dùng bề rộng B..${cuoi}, không dùng bề rộng C..${cuoi} của vùng gộp cũ`, async () => {
       // Dựng một địa chỉ mà cùng một dòng chữ NGẮT HAI DÒNG ở C..cuối nhưng VỪA MỘT DÒNG ở B..cuối.
       // Nếu phép đo còn tính bề rộng vùng cũ thì hàng 3 cao thừa đúng một dòng (15,75pt).
-      const rongHai = (ws, a, z) => dai(a, z).reduce((s, L) => s + ws.getColumn(L).width, 0);
       const mau = await xuat(ma);
       const rongBI = rongHai(mau, "B", cuoi), rongCI = rongHai(mau, "C", cuoi);
       const f = { dam: false, co: 12 };
@@ -188,6 +228,36 @@ describe("Colorfull — khối 'Kính gửi' gộp liền từ cột STT", () =>
       expect(sai, "ca biên phải phân biệt được hai bề rộng").toBeGreaterThan(dungBI);
       expect(ws.getRow(3).height, `${ma}: hàng 3 cao theo bề rộng vùng gộp CŨ (${sai} dòng) thay vì ${dungBI} dòng`)
         .toBeCloseTo(dungBI * 15.75 + 3, 2);
+    }, 300_000);
+
+    it(`${ma}: phép đo chiều cao cũng KHÔNG dùng bề rộng LỚN hơn B..${cuoi} — dòng Đ/c vừa tràn sang dòng 2 vẫn được tính`, async () => {
+      // Ca biên ĐỐI XỨNG với bài trên. Bài trên chỉ bắt phép đo HẸP hơn vùng gộp — hàng cao thừa một dòng.
+      // Chiều ngược lại mới xén chữ: đo theo bề rộng LỚN hơn vùng thật (cộng nhầm một cột, nhân hệ số…)
+      // thì số dòng ước ra ÍT đi và hàng 3 thấp hơn chữ. Đo Excel COM: lệch ×1,5 với Đ/c "Nguyễn" ×22 là
+      // Excel xén cả nửa trên dòng "Kính gửi" lẫn dòng mã "(Số://…)"; lệch ×1,1 chưa xén trên máy đo nhưng
+      // đã ăn hết biên an toàn 5% của bộ ước lượng — biên dành cho máy khác DPI / bản Excel khác.
+      // Dựng dòng Đ/c NGẮT HAI DÒNG ở đúng B..cuối nhưng VỪA MỘT DÒNG khi chỉ rộng thêm MỘT đơn vị cột (7px):
+      // "Nguyễn" ×n rồi đệm một từ toàn chữ 'i' — ký tự hẹp nhất bảng đo (3px) — để đặt chuỗi sát ngưỡng.
+      const mau = await xuat(ma);
+      const rongBI = rongHai(mau, "B", cuoi);
+      const f = { dam: !!mau.getCell("B3").font?.bold, co: 12 };
+      let diaChi = null;
+      for (let n = 1; n < 60 && !diaChi; n++) {
+        for (let k = 0; k <= 20 && !diaChi; k++) {
+          const thu = `Đ/c: ${"Nguyễn ".repeat(n)}${"i".repeat(k)}`.trim();
+          if (soDongKhiXuongHang(thu, rongBI, f) === 2 && soDongKhiXuongHang(thu, rongBI + 1, f) === 1) diaChi = thu.slice(5);
+        }
+      }
+      expect(diaChi, "không dựng được ca biên sát ngưỡng — hiệu chuẩn ước lượng đã đổi?").toBeTruthy();
+      const ws = await xuat(ma, { over: { toAddress: diaChi } });
+      const text = ws.getCell("B3").value;
+      const dung = soDongKhiXuongHang(text, rongBI, f);
+      expect(dung, "5 dòng người nhận (dòng Đ/c ngắt làm hai) + dòng mã").toBe(7);
+      // Ca biên có răng: rộng thêm một đơn vị cột (≈0,7%) là ước lượng đã hụt một dòng — nên phép đo nào
+      // rộng hơn vùng gộp thật (×1,1 · ×1,5 · cộng thêm cột A…) cũng làm hàng 3 thấp đi đúng 15,75pt.
+      expect(soDongKhiXuongHang(text, rongBI + 1, f), "ca biên phải phân biệt được hai bề rộng").toBe(dung - 1);
+      expect(ws.getRow(3).height, `${ma}: hàng 3 đo theo bề rộng LỚN hơn B..${cuoi} — thiếu một dòng, xén dòng mã`)
+        .toBeCloseTo(dung * 15.75 + 3, 2);   // 7 × 15,75 + 3 = 113,25pt
     }, 300_000);
 
     it(`${ma}: cấu hình nhất quán — ô chủ của khối chính là đỉnh vùng gộp đầu trang phủ hàng 3`, () => {
