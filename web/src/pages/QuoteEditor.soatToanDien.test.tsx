@@ -7,7 +7,7 @@
 //   L62 — Lưu báo giá MỚI rồi rời trang trước khi máy chủ trả lời: instance đã gỡ kéo hash, tắt cờ.
 //   L63 — chế độ "Xem thử quyền" đọc/ghi/xoá bản nháp THẬT của admin.
 //   L64 — đổi mẫu có ngày → không ngày → có ngày làm mất số Ngày.
-//   Cột THANH TOÁN đã rời màn soạn (2026-10-06) — người có quyền cũ quote:internal:pay không còn cột / nút nào;
+//   Cột THANH TOÁN CHỈ XEM ở màn soạn (2026-10-06) — người có quyền cũ quote:internal:pay không có nút nào;
 //         trang / bảng còn hàng ĐÃ CHI bị chặn xoá ngay; Lưu nhận 400 'hang-da-chi' thì giữ phần đang soạn.
 //   (Bộ X2 — hộp thanh toán nhận mốc updatedAt mới — gỡ cùng hộp đó; ca quoteDate ≥17:00 UTC của nó chuyển
 //   sang bộ app#11 / napLaiSauHn ở QuoteEditor.soatCheo.test.tsx.)
@@ -41,6 +41,7 @@ const h = vi.hoisted(() => ({
   updateQuote: null as unknown as ReturnType<typeof vi.fn>,
   createQuote: null as unknown as ReturnType<typeof vi.fn>,
   getQuote: null as unknown as ReturnType<typeof vi.fn>,
+  daChi: { sheet: [] as unknown[], hn: [] as unknown[] },
 }));
 
 vi.mock("../lib/api", async (goc) => {
@@ -55,6 +56,7 @@ vi.mock("../lib/api", async (goc) => {
     createQuote: vi.fn(async () => ({ id: 99 })),
     markLost: vi.fn(async () => baoGia({ status: "lost" })),
     hnReview: vi.fn(async () => ({})),
+    quoteDaChi: vi.fn(async (id: number) => ({ quoteId: id, ...h.daChi })),
     sheetCustomerDecision: vi.fn(async () => ({ custStatus: "rejected" })),
   };
   h.updateQuote = fns.updateQuote;
@@ -499,13 +501,15 @@ describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () =>
   });
 });
 
-// CỘT THANH TOÁN ĐÃ RỜI MÀN SOẠN (2026-10-06, chủ repo: "cái thanh toán bên đó là cho kế toán, không nằm trong
-// kia nữa"): kế toán tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào. Bản cũ truyền canPay (quote:internal:pay)
-// + quoteId cho ExtraTables / HnTables → lưới vẽ cột THANH TOÁN, bấm mở hộp gọi route /pay (nay đã gỡ, 404). ME
-// ở tệp này VẪN giữ quote:internal:pay để khoá đúng chỗ đó: có quyền cũ, hàng mang cờ đã chi từ lớp phủ, cũng
-// không còn cột, nút hay dấu nào trên lưới.
-describe("Cột THANH TOÁN đã rời màn soạn — tích ĐÃ CHI nay ở trang Hóa đơn đầu vào", () => {
-  it("ME có quote:internal:pay → bảng HCM / Khách / HN không có th THANH TOÁN, không có button[data-xl=thanh-toan]", async () => {
+// CỘT THANH TOÁN Ở MÀN SOẠN = CHỈ XEM (2026-10-06). cb14f8c gỡ hẳn cột ("cái thanh toán bên đó là cho kế toán, không
+// nằm trong kia nữa"); rồi chủ repo: "cái thanh toán hiện đã thanh toán ở đây ngày như nào chứ, và bên hóa đơn đầu vào
+// là chỗ đó cho kế toán up hình" → cột quay lại, CHỈ HIỆN đã chi / ngày / người tích (GET /quotes/:id/khoan-chi), tích
+// + ảnh vẫn chỉ ở trang Hóa đơn đầu vào. ME ở tệp này VẪN giữ quote:internal:pay: có quyền cũ cũng không có nút / ô
+// tích nào (bản cũ vẽ nút mở hộp gọi route /pay đã gỡ).
+describe("Cột THANH TOÁN ở màn soạn chỉ xem — tích ĐÃ CHI ở trang Hóa đơn đầu vào", () => {
+  it("ME có quote:internal:pay → bảng HCM / Khách / HN có cột THANH TOÁN chỉ xem (ngày + người tích), không nút", async () => {
+    h.daChi = { sheet: [{ rid: "e1", paidAt: MOC_CU, paidByName: "Kế toán Lan", coAnh: true }, { rid: "e2", paidAt: MOC_CU, paidByName: null, coAnh: false }],
+      hn: [{ rid: "h1", paidAt: MOC_CU, paidByName: "Kế toán Lan", coAnh: false }] };
     const daChi = (rid: string) => ({ kind: "item", name: "Xe tải", unit: "chuyến", quantity: 1, unitPrice: 1000, rid, approved: true, paid: true, paidAt: MOC_CU, paidById: 3, hasPaidProof: true });
     h.getQuote.mockImplementationOnce(async () => baoGia({
       hnTables: [{ name: "HN", templateId: 1, groupSubtotal: false, items: [daChi("h1")] }],
@@ -521,18 +525,20 @@ describe("Cột THANH TOÁN đã rời màn soạn — tích ĐÃ CHI nay ở tr
       const k = khoi(cat);
       expect(k.querySelector("table.excel-table"), `không thấy lưới ${cat} — bài thành vô nghĩa`).not.toBeNull();
       const th = [...k.querySelectorAll("table.excel-table thead th")].map((x) => (x.textContent || "").trim());
-      expect(th, `lưới ${cat} còn cột THANH TOÁN`).not.toContain("THANH TOÁN");
-      expect(k.querySelectorAll('button[data-xl="thanh-toan"], td.col-pay'), `lưới ${cat} còn nút / ô thanh toán`).toHaveLength(0);
-      expect(k.textContent, `lưới ${cat} còn dấu đã thanh toán`).not.toMatch(/Đã TT|📎/);
+      expect(th, `lưới ${cat} thiếu cột THANH TOÁN`).toContain("THANH TOÁN");
+      expect(k.querySelectorAll('button[data-xl="thanh-toan"], td.col-pay button, td.col-pay input, td.col-pay a'), `lưới ${cat} có nút / ô tích thanh toán`).toHaveLength(0);
+      expect(k.querySelector('tr[data-row="0"] td.col-pay')?.textContent, `lưới ${cat}`).toContain("✓ Đã TT 20/09/2026");
     };
     await moKhoi("hcm");
     soat("hcm");
+    expect(khoi("hcm").querySelector('tr[data-row="0"] td.col-pay')?.textContent).toBe("✓ Đã TT 20/09/2026 📎Kế toán Lan");
     await moKhoi("khach");
     await bam(khoi("khach").querySelector(".sheet-tab") as HTMLElement);   // bảng Phí KH thành bảng đang sửa
     soat("khach");
     await moKhoi("hanoi");
     soat("hanoi");
     expect(hop!.querySelectorAll('button[data-xl="thanh-toan"]')).toHaveLength(0);
+    h.daChi = { sheet: [], hn: [] };
   });
 
   // Xoá cả TRANG / BẢNG thì Ctrl+Z không cứu được (ngăn hoàn tác đi cùng lưới bị gỡ). Máy chủ từ chối lần Lưu làm

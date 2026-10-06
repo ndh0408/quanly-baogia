@@ -15,6 +15,8 @@ import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuyenBanNhapCu } from "../lib/localDraft";
 import { useTrangAnToan } from "../lib/phienBan";
+import { sapMauHienThi } from "../lib/thuTuMau";
+import { useDaChiBaoGia } from "../lib/daChiHang";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
 const RONG: never[] = [];
@@ -309,6 +311,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // nhớ — kể cả lúc chưa gõ gì (cờ chưa-lưu còn tắt) — tải lại là mất trắng (soát 2026-09-24). Và chỉ cho
   // BẤM TAY khỏi hỏi, không cho TỰ tải: tự tải mất sheet đang mở, vị trí cuộn, lịch sử Ctrl+Z (soát vòng 2).
   useTrangAnToan(() => !isNew && !dirtyRef.current, { tuTai: false });
+  // Cột Thanh toán CHỈ XEM của bảng nội bộ / HN — tươi theo realtime khi kế toán tích (lib/daChiHang).
+  const daChi = useDaChiBaoGia(isNew ? null : quoteId);
   // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
   // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
   const draftRef = useRef<QuoteFull | null>(null);
@@ -1368,7 +1372,7 @@ Lý do (không bắt buộc):`,
             // (lưới gắn lại theo mẫu nên Ctrl+Z không cứu). Mẫu không ngày thì tiền vốn không nhân ngày
             // (lineAmount/sheetTotals theo `usesDays`) và save() đã tự gửi `days: null`.
             activeSheet.templateId = Number(e.target.value); mark(); redraw();
-          }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          }}>{sapMauHienThi(templates.filter((t) => t.companyId === q.companyId)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
           {suaMain && (
             <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (bản khách đã sửa hoặc file ngoài)"
@@ -1524,7 +1528,7 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
+        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} daChi={daChi?.sheet} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
@@ -1535,7 +1539,7 @@ Lý do (không bắt buộc):`,
             ở dưới nữa. Người dùng hỏi thẳng: "Account đang làm sao không nằm cùng với hà nội luôn
             đi". Nay trạng thái nằm trên TIÊU ĐỀ (liếc thấy cả khi khối đang đóng), còn giao việc /
             duyệt / trả lại nằm trong THÂN (hành động thì mở ra mới làm). */}
-        <HnTables tables={hnTables} templates={templates} companyId={q.companyId}
+        <HnTables tables={hnTables} templates={templates} companyId={q.companyId} daChi={daChi?.hn}
           editable={coScope("hanoi") && !hnKhoa && !saving}
           canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark}
           thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }}

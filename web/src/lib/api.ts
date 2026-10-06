@@ -146,6 +146,9 @@ export type KhoanChiDto = {
   keToanCapNhatLuc: string | null; keToanCapNhatBoi: string | null;
   nguon: "bang" | "json-cu" | "khong";
 };
+/** Một hàng ĐÃ CHI (trạng thái hiệu lực, máy chủ src/khoanChi.ts daChiTheoRid) — chỉ xem, không ảnh. */
+export type DaChiHang = { rid: string; paidAt: string | null; paidByName: string | null; coAnh: boolean };
+export type DaChiBaoGiaResp = { quoteId: number; sheet: DaChiHang[]; hn: DaChiHang[] };
 export type InputInvoiceRow = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "side"> & {
   /** `quoteId:side:rid` khi hàng có rid duy nhất; hàng thiếu / trùng rid: khoá theo vị trí và `coTheGhi = false`. */
   key: string;
@@ -666,6 +669,8 @@ export const api = {
   metaCompanies: () => req<EditorCompany[]>("/meta/companies"),
   metaTemplates: () => req<EditorTemplate[]>("/meta/templates"),
   getQuote: (id: number) => req<QuoteFull>(`/quotes/${id}`),
+  /** ĐÃ CHI từng hàng bảng nội bộ (chỉ xem) — cột "Thanh toán" ở màn soạn / Account HN / màn chỉ-xem nội bộ. */
+  quoteDaChi: (id: number) => req<DaChiBaoGiaResp>(`/quotes/${id}/khoan-chi`),
   createQuote: (payload: unknown) => req<QuoteFull>("/quotes", { method: "POST", body: JSON.stringify(payload) }),
   updateQuote: (id: number, payload: unknown) => req<QuoteFull>(`/quotes/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   // Presence: báo editor đang mở/heartbeat/đóng 1 báo giá → trả danh sách người đang sửa (gồm cả mình).

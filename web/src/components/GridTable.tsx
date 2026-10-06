@@ -10,6 +10,8 @@ import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, createImagePool, undoRedoKey } from "../lib/gridUndo";
+import type { DaChiTheoRid } from "../lib/daChiHang";
+import type { DaChiHang } from "../lib/api";
 import { doanBoCot } from "../lib/doanBoCot";
 import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM, TB_TU_TAT_NHOM } from "../lib/khoaThanhTienNhom";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
@@ -33,9 +35,12 @@ export type GridTableProps = {
   internalNote: boolean;
   approveCol?: boolean;
   canApprove?: boolean;
-  payCol?: boolean;                // cột THANH TOÁN nội bộ per-hàng (bảng nội bộ)
-  canPay?: boolean;                // có quyền quote:internal:pay → bấm được
-  onPayRow?: (item: ItemK) => void; // mở dialog tích thanh toán + ảnh cho 1 hàng
+  /** Cột THANH TOÁN của bảng nội bộ — CHỈ XEM (2026-10-06): "✓ Đã TT dd/mm/yyyy" + người tích (+ 📎 khi có ảnh).
+   *  Tích / ảnh chỉ ở trang Hóa đơn đầu vào của kế toán; lưới không có nút, không ghi gì vào hàng. */
+  payCol?: boolean;
+  /** Trạng thái ĐÃ CHI hiệu lực theo `rid` (lib/daChiHang — GET /quotes/:id/khoan-chi, tươi theo realtime). Không có
+   *  (chưa nạp / nạp lỗi) → đọc cờ lớp phủ máy chủ gắn trên hàng lúc nạp báo giá (`paid`/`paidAt`/`hasPaidProof`). */
+  daChi?: DaChiTheoRid | null;
   /** Ba cột CHỈ của bảng nội bộ (Chi phí HCM · Phí khách hàng · Hà Nội) — người dùng yêu cầu 2026-09-25:
    *  NS (chữ tự do như ô ghi chú) · CHỨNG TỪ (VAT / HĐNS / TM) · LƯU KHO (tích chọn). Lưới chính không bật. */
   cotNoiBo?: boolean;
@@ -211,6 +216,20 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
 /** Style cố định dùng chung — object nội tuyến mới mỗi lần vẽ cũng khiến React so lại ô. */
 const AN_O = { display: "none" } as const;
 
+/** Ảnh trong một lần dán (ClipboardEvent.clipboardData). Chrome/Edge đưa ảnh chụp màn hình và ảnh
+ *  "Sao chép hình ảnh" ở `items` (kind "file", type image/*); một số trình duyệt chỉ có ở `files`.
+ *  Cùng một ảnh thường có mặt ở CẢ HAI → lấy `items` trước, rỗng mới xét `files`, để không dán đôi. */
+export function anhTrongClipboard(dt: Pick<DataTransfer, "items" | "files"> | null | undefined): File[] {
+  if (!dt) return [];
+  const out: File[] = [];
+  for (const it of Array.from(dt.items || [])) {
+    if (it.kind !== "file" || !it.type.startsWith("image/")) continue;
+    const f = it.getAsFile(); if (f) out.push(f);
+  }
+  if (out.length) return out;
+  return Array.from(dt.files || []).filter((f) => f.type.startsWith("image/"));
+}
+
 /** Hai số chỉ khác nhau do sai số dấu phẩy động (≤ 1 phần tỉ) — coi là cùng một số. Số trong báo giá
  *  lưu tối đa 4 số lẻ, nên một thay đổi thật không bao giờ nhỏ tới mức này. */
 const chiLechDauPhayDong = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -233,7 +252,7 @@ let demCat = 0;
 const CAT_DA_XONG = new Set<string>();
 
 function GridTableInner(props: GridTableProps) {
-  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
+  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, daChi, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   const idLyDoKhoaNhom = useId();   // nối ô tích "Thành Tiền nhóm" với dòng giải thích khi bị khoá (nhiều lưới/trang → id riêng)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
@@ -1503,6 +1522,21 @@ function GridTableInner(props: GridTableProps) {
     // Đang đứng ở ô chọn / ô tích (không có vùng chọn): dán rơi về ô chữ nhớ lần trước (focusRef) là ghi
     // vào chỗ người dùng không nhìn — thà không làm gì, như dán vào một ô danh sách của Excel.
     if ((e.target as HTMLElement | null)?.closest?.("[data-oc]")) return;
+    // Ô HÌNH ẢNH đang giữ tiêu điểm: Ctrl+V chỉ nhận ẢNH trong clipboard và đi đúng đường chọn tệp
+    // (addImages → fileToImg nén JPEG, tối đa IMG_MAX ảnh/ô, một mốc hoàn tác). Chữ/khối ô thì KHÔNG
+    // rơi xuống nhánh dán ô bên dưới — nhánh đó dán vào ô nhớ lần trước (focusRef), tức chỗ người dùng
+    // không nhìn — mà báo cho biết ô này chỉ nhận ảnh.
+    const oAnh = (e.target as HTMLElement | null)?.closest?.("[data-o-anh]");
+    if (oAnh) {
+      e.preventDefault();
+      const tr = oAnh.closest("tr[data-row]");
+      const i = tr ? parseInt(tr.getAttribute("data-row") || "-1", 10) : -1;
+      if (i < 0 || i >= items.length) return;
+      const anh = anhTrongClipboard(e.clipboardData);
+      if (anh.length) void addImages(i, anh);
+      else toast("Ô Hình ảnh chỉ nhận ẢNH — chụp màn hình hoặc \"Sao chép hình ảnh\" rồi Ctrl+V vào đây", "info");
+      return;
+    }
     flushSoft();
     const ae = document.activeElement as HTMLElement | null;
     const f0 = (e.target as HTMLElement)?.getAttribute?.("data-f") || ae?.getAttribute?.("data-f");
@@ -1942,6 +1976,12 @@ function GridTableInner(props: GridTableProps) {
     const ae = e.target as HTMLInputElement | HTMLTextAreaElement | null;
     const oc = ae?.getAttribute?.("data-oc");
     if (oc && ae) { phimOc(e, ae, oc); return; }
+    // Đứng ở ô hình ảnh (vừa dán ảnh) → Ctrl+Z / Ctrl+Y vẫn hoàn tác / làm lại như ở mọi ô khác.
+    if (ae?.getAttribute?.("data-o-anh")) {
+      const uz = undoRedoKey(e.ctrlKey || e.metaKey, e.shiftKey, e.key);
+      if (uz) { e.preventDefault(); e.stopPropagation(); if (editable) (uz === "undo" ? doUndo : doRedo)(); }
+      return;
+    }
     const f = ae?.getAttribute?.("data-f"); const tr = ae?.closest?.("tr[data-row]");
     if (!f || !tr || !FIELDS.includes(f)) return;
     const ctrl = e.ctrlKey || e.metaKey;
@@ -2275,6 +2315,8 @@ function GridTableInner(props: GridTableProps) {
     // Vào ô chọn / ô tích (bàn phím — vaoOc — hay bấm chuột): thoát chế độ sửa của ô chữ vừa rời (blur đã
     // chốt nội dung), và bỏ vùng tô — ô này không thuộc vùng chọn, để vùng cũ lại là Ctrl+C chép chỗ khác.
     if ((e.target as HTMLElement | null)?.getAttribute?.("data-oc")) { onDangDung?.(); lockCell(null); clearSel(); return; }
+    // Vào ô hình ảnh: cũng bỏ vùng tô — Ctrl+C/Ctrl+V lúc này thuộc ô ảnh, không phải vùng ô chữ cũ.
+    if ((e.target as HTMLElement | null)?.getAttribute?.("data-o-anh")) { onDangDung?.(); lockCell(null); clearSel(); return; }
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
     if (!f || !tr) return;
     onDangDung?.();   // Tab vào một ô cũng là "đang làm ở lưới này"
@@ -2507,7 +2549,6 @@ function GridTableInner(props: GridTableProps) {
       if (vai === "xoa-dong") removeRow(i);
       else if (vai === "xem-tt") revealAmount(i, el);
       else if (vai === "xem-gia-nhom") revealSectionPrice(i, el);
-      else if (vai === "thanh-toan") onPayRow?.(items[i]);
       else if (vai === "xem-fx") {
         const f = el.getAttribute("data-fx-cot") || "";
         const fx = items[i].formulas?.[f];
@@ -2695,11 +2736,11 @@ function GridTableInner(props: GridTableProps) {
   const extraCols = (internalNote ? 1 : 0) + (cotNoiBo ? 3 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   // Chữ ký dòng cho DongNho: cấu hình cột (đổi là vẽ lại MỌI dòng) + mọi trường dòng hiển thị.
-  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, canPay, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, !!onPayRow].join("|");
+  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, !!daChi, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer].join("|");
   const chuKy = (i: number, them: string) => {
     const it = items[i] as Record<string, unknown>;
     return [cauHinhSig, i, them, it.kind, it.label, it.name, it.detail, it.unit, it.quantity, it.quantityExact, it.days, it.unitPrice,
-      it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, it.paid, it.paidAt, it.hasPaidProof,
+      it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, payCol ? JSON.stringify(daChiCua(i)) : "",
       JSON.stringify(it.formulas || null), JSON.stringify(it._fxWarn || null), JSON.stringify(it._fxLoi || null),
       ((it.images as string[] | undefined) || []).map((x) => x.length).join(",")].join("\u0001");
   };
@@ -2813,7 +2854,7 @@ function GridTableInner(props: GridTableProps) {
   // danh sách chụp lúc chọn tệp → ảnh rơi sang hạng mục khác, lần xong sau đè mất ảnh của lần trước,
   // và onChange của lưới đã gỡ vẫn chạy. Nay: nhận hàng theo `_k` lúc chọn, đọc ảnh HIỆN CÓ lúc ghi,
   // và chỉ ghi khi lưới còn gắn trên đúng mảng lúc chọn — không thì báo để người dùng chọn lại.
-  const addImages = async (i: number, files: FileList | null) => {
+  const addImages = async (i: number, files: FileList | File[] | null) => {
     if (!editable || !files || !files.length) return;
     const room = IMG_MAX - ((items[i].images || []) as string[]).length;
     if (room <= 0) { toast(`Tối đa ${IMG_MAX} ảnh mỗi ô`, "info"); return; }
@@ -2837,10 +2878,33 @@ function GridTableInner(props: GridTableProps) {
     const cur = (items[i].images || []) as string[];
     ghiSua(); (items[i] as Record<string, unknown>).images = cur.filter((_, idx) => idx !== k); onChange(); setImgVer((v) => v + 1);
   };
+  // ── Cột THANH TOÁN — CHỈ XEM (xem prop `payCol`/`daChi`). ──
+  const daChiCua = (i: number): DaChiHang | null => {
+    const it = items[i] as Record<string, unknown> | undefined;
+    if (!it) return null;
+    if (daChi) { const rid = typeof it.rid === "string" ? it.rid.trim() : ""; return rid ? daChi.get(rid) ?? null : null; }
+    return it.paid === true ? { rid: "", paidAt: typeof it.paidAt === "string" ? it.paidAt : null, paidByName: null, coAnh: it.hasPaidProof === true } : null;
+  };
+  const oThanhToan = (i: number) => {
+    const h = daChiCua(i);
+    if (!h) return <span className="pay-chua" title="Chưa thanh toán — kế toán đánh dấu ở trang Hóa đơn đầu vào">—</span>;
+    const ngay = h.paidAt ? M.fmtDate(h.paidAt) : "";
+    const tieuDe = `Kế toán đã đánh dấu ĐÃ CHI${ngay ? ` ngày ${ngay}` : ""}${h.paidByName ? ` — ${h.paidByName}` : ""}${h.coAnh ? " · có ảnh chứng từ" : ""}. Xem / sửa ở trang Hóa đơn đầu vào.`;
+    return (
+      <span className="pay-da" title={tieuDe}>
+        <span className="ap-date">✓ Đã TT{ngay ? ` ${ngay}` : ""}</span>
+        {h.coAnh ? <span role="img" aria-label="Có ảnh chứng từ"> 📎</span> : null}
+        {h.paidByName ? <span className="pay-nguoi">{h.paidByName}</span> : null}
+      </span>
+    );
+  };
   const imagesCell = (i: number) => {
     const imgs = (items[i].images || []) as string[];
     return (
-      <div className="cell-images">
+      // Ô hình ảnh NHẬN TIÊU ĐIỂM được (bấm vào chỗ trống của ô, hoặc Tab) → Ctrl+V dán ảnh từ clipboard
+      // (ảnh chụp màn hình, "Copy image" từ trình duyệt/Zalo) — xem nhánh `data-o-anh` đầu onPaste.
+      <div className="cell-images" data-o-anh="1" tabIndex={editable ? 0 : undefined}
+        title={editable ? "Bấm vào đây rồi Ctrl+V để dán ảnh" : undefined} aria-label={editable ? "Ô hình ảnh — Ctrl+V để dán ảnh" : undefined}>
         {imgs.map((src, k) => (
           <span className="cell-img" key={k}>
             <img src={safeImgSrc(src)} alt="" loading="lazy" title="Bấm để xem lớn" data-k={k} data-xl="phong-anh" onClick={xuLyBam} />
@@ -2901,11 +2965,7 @@ function GridTableInner(props: GridTableProps) {
       </>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
       {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" data-oc="approved" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
-      {payCol && <td className="col-pay">{canPay
-        ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} data-xl="thanh-toan" onClick={xuLyBam}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
-        : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
-        {(items[i] as Record<string, unknown>).paid && (items[i] as Record<string, unknown>).paidAt ? <span className="ap-date"> {M.fmtDate(String((items[i] as Record<string, unknown>).paidAt))}</span> : null}
-        {(items[i] as Record<string, unknown>).hasPaidProof ? <span title="Có ảnh chứng từ"> 📎</span> : null}</td>}
+      {payCol && <td className="col-pay">{oThanhToan(i)}</td>}
       {editable && <td className="col-action"><button className="rm-row" title="Xóa hàng" data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
     </>
   );

@@ -6,12 +6,15 @@ import { extraTableSum } from "../components/ExtraTables";
 import { mauBangHn } from "../components/HnTables";
 import { codeLabel, errMsg, fmtDate, dash } from "../lib/format";
 import { useTrangAnToan } from "../lib/phienBan";
+import { useDaChiBaoGia } from "../lib/daChiHang";
+import type { DaChiHang } from "../lib/api";
 
 // Màn hình CHỈ XEM BẢNG NỘI BỘ (quyền quote:internal:view) — tài khoản "chi phí": thấy các bảng nội bộ của
 // 1 báo giá + trạng thái ĐÃ CHI từng hàng. KHÔNG lộ giá/khách/báo giá chính (server đã lược).
 // CHỈ ĐỌC HOÀN TOÀN từ 2026-10-06: tích ĐÃ CHI + ảnh ủy nhiệm chi là việc của kế toán ở trang Hóa đơn đầu vào
-// (invoice:input:pay); quote:internal:pay hết tác dụng. Cột "Thanh toán" chỉ còn chữ, đọc từ LỚP PHỦ máy chủ
-// (khoản kế toán; chưa có khoản thì cờ JSON cũ) — không mở được ảnh, không thấy Ngày HĐ / ghi chú kế toán.
+// (invoice:input:pay); quote:internal:pay hết tác dụng. Cột "Thanh toán" chỉ còn chữ — đã chi chưa, ngày, ai tích —
+// đọc từ GET /quotes/:id/khoan-chi (lib/daChiHang, cùng nguồn với màn soạn; chưa nạp được thì LỚP PHỦ trên hàng) —
+// không mở được ảnh, không thấy Ngày HĐ / ghi chú kế toán.
 
 const catLabel = (c: string) => ({ hcm: "Chi Phí HCM", hanoi: "Báo Giá Hà Nội", khach: "Phí Khách Hàng" } as Record<string, string>)[c] || c;
 const isRow = (it: any) => it && !["section", "subsection", "info"].includes(it.kind);
@@ -37,6 +40,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
   // Danh sách mẫu — để biết bảng nào CÓ cột Số Ngày (luật chọn mẫu của HnTables / ExtraTables). Chưa có
   // thì chưa vẽ số: vẽ tạm kiểu "nhân days bất kể mẫu" là nháy một con số tiền sai.
   const mau = useQuery({ queryKey: ["meta-templates"], queryFn: () => api.metaTemplates(), staleTime: 5 * 60_000 });
+  const daChi = useDaChiBaoGia(quoteId);
 
   if (isPending || mau.isPending) return <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
   if (error || !data || mau.error) return <div className="err">⚠ {errMsg(error || mau.error, "Không tải được.")} <button className="btn btn-sm" onClick={() => { void refetch(); void mau.refetch(); }}>Thử lại</button></div>;
@@ -48,6 +52,10 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
   // hàng HN (cùng trạng thái đã chi của chúng) khỏi màn. Số đếm ở danh sách (presentQuoteRow nhánh
   // internalOnly) thì VẪN cộng cả hàng HN, nên bỏ sót ở đây là hai con số trên hai màn đá nhau.
   const bangHn: any[] = (Array.isArray(q.hnTables) ? q.hnTables : []).map((t: any) => ({ ...t, category: "hanoi" }));
+  const daChiCua = (it: any, hn: boolean): DaChiHang | null => {
+    if (daChi) { const rid = typeof it.rid === "string" ? it.rid.trim() : ""; return rid ? (hn ? daChi.hn : daChi.sheet).get(rid) ?? null : null; }
+    return it.paid === true ? { rid: "", paidAt: it.paidAt ?? null, paidByName: null, coAnh: it.hasPaidProof === true } : null;
+  };
   const tables = [
     ...sheets.flatMap((s) => (s.tables || []).map((t: any) => ({ s, t }))),
     ...bangHn.map((t) => ({ s: { sheetId: null, sheetName: null, hn: true }, t })),
@@ -72,7 +80,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
               <thead><tr><th scope="col">Hạng mục</th><th scope="col" className="num" style={{ width: 80 }}>SL</th><th scope="col" className="num" style={{ width: 120 }}>Đơn giá</th><th scope="col" className="num" style={{ width: 130 }}>Thành tiền</th>{COT_NOI_BO.map((nhan) => <th scope="col" key={nhan}>{nhan}</th>)}<th scope="col" style={{ width: 150 }}>Thanh toán</th></tr></thead>
               <tbody>
                 {rows.length === 0 ? <tr><td colSpan={SO_COT} className="muted" style={{ textAlign: "center", padding: 14 }}>(không có hàng)</td></tr>
-                  : rows.map((it: any, ri: number) => (
+                  : rows.map((it: any, ri: number) => { const tt = daChiCua(it, !!s.hn); return (
                     <tr key={it.rid || ri}>
                       <td>{it.name || dash}</td>
                       <td className="num">{M.fmtNumCell(it.quantity, !!it.quantityExact)}</td>
@@ -82,11 +90,12 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
                       <td className="col-chung-tu">{nhanChungTu(it.chungTu) ?? dash}</td>
                       <td className="col-luu-kho">{it.luuKho ? <span role="img" aria-label="Có lưu kho" title="Có lưu kho">✓</span> : dash}</td>
                       <td className="col-pay">
-                        {it.paid ? <span className="ap-date">✓ Đã TT{it.paidAt ? ` · ${fmtDate(it.paidAt)}` : ""}</span> : dash}
-                        {it.hasPaidProof ? <span title="Có ảnh chứng từ (kế toán xem ở trang Hóa đơn đầu vào)" role="img" aria-label="Có ảnh chứng từ"> 📎</span> : null}
+                        {tt ? <span className="ap-date">✓ Đã TT{tt.paidAt ? ` · ${fmtDate(tt.paidAt)}` : ""}</span> : dash}
+                        {tt?.coAnh ? <span title="Có ảnh chứng từ (kế toán xem ở trang Hóa đơn đầu vào)" role="img" aria-label="Có ảnh chứng từ"> 📎</span> : null}
+                        {tt?.paidByName ? <span className="pay-nguoi">{tt.paidByName}</span> : null}
                       </td>
                     </tr>
-                  ))}
+                  ); })}
               </tbody>
               {rows.length > 0 && (
                 <tfoot>

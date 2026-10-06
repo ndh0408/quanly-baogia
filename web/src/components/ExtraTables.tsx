@@ -5,6 +5,8 @@ import { GridTable } from "./GridTable";
 import { type EditorTemplate } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
 import { KhoiSheet } from "./KhoiSheet";
+import type { DaChiTheoRid } from "../lib/daChiHang";
+import { sapMauHienThi } from "../lib/thuTuMau";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -125,11 +127,10 @@ export async function removeExtraTableAt(
   return r.removed;
 }
 
-// Cột THANH TOÁN đã RỜI lưới này (2026-10-06): kế toán tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào
-// (InvoicesIn). GridTable vẫn còn khả năng payCol nhưng không ai truyền nữa — và KHÔNG thêm cột / dấu khoá / biểu
-// tượng nào cho hàng đã chi (chủ repo: "không nằm trong kia nữa"); người soạn chỉ gặp câu báo khi xoá / Lưu chạm
-// tới hàng đó.
-export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, onMarkDirty, thanhChung }: {
+// Cột THANH TOÁN (2026-10-06): việc tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào của kế toán (InvoicesIn);
+// ở đây chỉ HIỆN đã chi chưa / ngày / ai tích (chủ repo: "cái thanh toán hiện đã thanh toán ở đây ngày như nào chứ")
+// — cột chỉ xem, không nút, không ghi gì vào hàng. Nguồn `daChi` (lib/daChiHang), thiếu thì cờ lớp phủ lúc nạp.
+export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, onMarkDirty, thanhChung, daChi }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
   /**
    * PHẠM VI theo TỪNG LOẠI bảng — dành cho "account phụ" chỉ được giao một phần (vd chỉ bảng Hà
@@ -142,6 +143,8 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   onMarkDirty: () => void;
   /** Thanh "+ Thêm hàng…" dùng chung ở đáy trang. Vắng = mỗi lưới tự vẽ tại chỗ (đường cũ). */
   thanhChung?: ThanhChung;
+  /** Trạng thái ĐÃ CHI từng hàng (phía "sheet" của useDaChiBaoGia) — cột Thanh toán chỉ xem. */
+  daChi?: DaChiTheoRid | null;
 }) {
   const [, setTick] = useState(0);
   const trongPhamVi = (cat: string) => (editableCat ? editableCat(cat) : true);
@@ -259,7 +262,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                     <div className="extra-table-head">
                       <span className={`extra-here cat-${cat}`}>📍 Đang ở: {label}</span>
                       <input className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${active + 1}`}"`} disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} />
-                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
                       {/* "Chuyển loại" chỉ liệt kê loại người này ĐƯỢC PHÉP sửa — không thì họ kéo
                           bảng sang loại ngoài phạm vi rồi sửa ở đó (server sẽ 409, nhưng để họ gõ
                           xong mới báo là kiểu tệ nhất). */}
@@ -277,6 +280,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                       onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}
                       usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false} cotNoiBo
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
+                      payCol={t.category === "hcm" || t.category === "khach"} daChi={daChi}
                       groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
                       sheetTotalLine={false} />
                   </div>

@@ -52,7 +52,7 @@ describe("gridPropsEqual — khi nào lưới ĐƯỢC PHÉP bỏ qua một lư�
   it("mọi prop GIÁ TRỊ lệch đều bắt vẽ lại", () => {
     for (const p of [{ editable: false }, { usesDays: true }, { showDetail: true }, { addrDetail: true },
       { numberSubs: true }, { internalNote: false }, { groupSubtotal: false }, { showImages: true },
-      { approveCol: true }, { canApprove: true }, { payCol: true }, { canPay: true },
+      { approveCol: true }, { canApprove: true }, { payCol: true }, { daChi: new Map() },
       { fxBar: false }, { clfTheme: true }] as Partial<GridTableProps>[]) {
       expect(gridPropsEqual(props(), props(p)), JSON.stringify(p)).toBe(false);
     }

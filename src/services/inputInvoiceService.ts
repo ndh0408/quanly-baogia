@@ -16,7 +16,7 @@
 import type { Request } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma, type TxClient } from "../db.js";
-import { can, PERMISSIONS as P } from "../permissions.js";
+import { can, canOnQuote, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../httpError.js";
 import { audit } from "../audit.js";
 import { emitChange } from "../sse.js";
@@ -32,6 +32,7 @@ import {
   hatGiongJson,
   coDauVetJsonCu,
   tenHangDaChi,
+  daChiTheoRid,
   ngayTuChuoi,
   ngayRaChuoi,
   dtoKhoanChi,
@@ -41,6 +42,7 @@ import {
   type AnhChungTuNap,
   type KhoanChiDto,
   type LyDoRutAnh,
+  type DaChiHangDto,
 } from "../khoanChi.js";
 
 /** Trần số ảnh MỘT khoản giữ được (kể cả ảnh đã rút) — ảnh chỉ thêm, nên phải có trần. */
@@ -112,6 +114,38 @@ export async function khoanDaChiCuaBaoGia(tx: TxClient, quoteId: number): Promis
   const sheet = await bangCuaPhia(tx, quoteId, "sheet");
   const hn = await bangCuaPhia(tx, quoteId, "hn");
   return [...tenHangDaChi("sheet", sheet, khoan), ...tenHangDaChi("hn", hn, khoan)];
+}
+
+/**
+ * GET /api/quotes/:id/khoan-chi — trạng thái ĐÃ CHI hiệu lực (KT-3) từng hàng bảng nội bộ của MỘT báo giá, CHỈ XEM, cho
+ * cột "Thanh toán" ở màn soạn / Account HN (chủ repo 2026-10-06: "cái thanh toán hiện đã thanh toán ở đây ngày như nào").
+ * Việc tích + ảnh vẫn chỉ ở trang Hóa đơn đầu vào; màn soạn gọi lại endpoint này khi có sự kiện `inputInvoice` thay vì
+ * nạp lại cả báo giá (đang soạn dở, và báo giá có thể nặng hàng chục MB ảnh).
+ *
+ * QUYỀN = đúng GET /api/quotes/:id: `canOnQuote(read)` (404 / 403 cùng câu), và đúng PHẦN mà GET đó trả cho người gọi —
+ * account Hà Nội (`quote:hn:fill`, presentQuoteForAccountHn) chỉ thấy phía "hn"; mọi người đọc được báo giá khác thấy cả hai
+ * phía (presentQuote / presentQuoteForInternal đều trả bảng nội bộ + bảng HN). Không ảnh, không Ngày HĐ / ghi chú kế toán.
+ * Đọc bảng qua SQL đã CẮT `paidProof`.
+ */
+export async function daChiCuaBaoGia(req: Request): Promise<{ quoteId: number; sheet: DaChiHangDto[]; hn: DaChiHangDto[] }> {
+  const id = Number(req.params.id);
+  const q = await prisma.quote.findFirst({ where: { id }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
+  if (!q) throw httpError(404, "Không tìm thấy báo giá");
+  if (!canOnQuote(req.session, "read", q)) throw httpError(403, "Bạn không có quyền xem báo giá này");
+  const phia: PhiaKhoanChi[] = can(req.session, P.QUOTE_HN_FILL) ? ["hn"] : ["sheet", "hn"];
+  const khoan = await docKhoanChiTrongTx(prisma, id);
+  const theoPhia = new Map<PhiaKhoanChi, ReturnType<typeof daChiTheoRid>>();
+  for (const side of phia) theoPhia.set(side, daChiTheoRid(side, await bangCuaPhia(prisma, id, side), khoan));
+  // Hàng cờ JSON cũ chỉ lưu id người tích — tra tên MỘT câu (gồm cả tài khoản đã xoá, như danh sách Hóa đơn đầu vào).
+  const idCanTra = new Set<number>();
+  for (const ds of theoPhia.values()) for (const h of ds) if (!h.paidByName && h.paidById != null) idCanTra.add(h.paidById);
+  const ten = new Map<number, string>(
+    idCanTra.size ? ((await prisma.user.findMany({ where: { id: { in: [...idCanTra] } }, select: { id: true, displayName: true }, includeDeleted: true } as any)) as { id: number; displayName: string }[]).map((u) => [u.id, u.displayName] as [number, string]) : [],
+  );
+  const dto = (side: PhiaKhoanChi): DaChiHangDto[] => (theoPhia.get(side) ?? []).map((h) => ({
+    rid: h.rid, paidAt: h.paidAt, paidByName: h.paidByName ?? (h.paidById != null ? ten.get(h.paidById) ?? null : null), coAnh: h.coAnh,
+  }));
+  return { quoteId: id, sheet: dto("sheet"), hn: dto("hn") };
 }
 
 /** Lớp phủ cho hàng THÔ của danh sách báo giá (nhánh bảng nội bộ của listQuotes) — để "Đã TT x/y" đếm theo khoản. */

@@ -6,6 +6,8 @@ import { type EditorTemplate } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
 import { extraTableSum, removeTableFromList, loiXoaBangDaChi, type ExtraTable } from "./ExtraTables";
 import { KhoiSheet } from "./KhoiSheet";
+import type { DaChiTheoRid } from "../lib/daChiHang";
+import { sapMauHienThi } from "../lib/thuTuMau";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
 //
@@ -22,8 +24,8 @@ import { KhoiSheet } from "./KhoiSheet";
 // lưới chính mới bật fxBar; phần HN là nơi người ta gõ giá nên cần đúng bộ Excel đó: công thức,
 // copy/cắt/dán nhiều ô, fill-down, Ctrl+Z/Y, gõ tiếng Việt bằng IME.
 //
-// KHÔNG có cột THANH TOÁN (2026-10-06): kế toán tích ĐÃ CHI + ảnh chứng từ của hàng HN ở trang Hóa đơn đầu vào,
-// như hàng Chi phí HCM / Phí KH — xem ExtraTables.tsx.
+// Cột THANH TOÁN CHỈ XEM (2026-10-06): kế toán tích ĐÃ CHI + ảnh chứng từ của hàng HN ở trang Hóa đơn đầu vào,
+// như hàng Chi phí HCM / Phí KH; ở đây chỉ hiện đã chi chưa / ngày / ai tích — xem ExtraTables.tsx.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
 
 /** Mẫu cột của một bảng HN: `templateId` của bảng, thiếu thì mẫu đầu của công ty (không có thì mẫu đầu
@@ -34,7 +36,7 @@ export function mauBangHn(t: { templateId?: number }, templates: EditorTemplate[
   return templates.find((x) => x.id === (t.templateId || ds[0]?.id)) || ds[0];
 }
 
-export function HnTables({ tables, templates, companyId, editable, canApprove, onMarkDirty, moMacDinh = false, thanhChung, phuHieu, dieuKhien }: {
+export function HnTables({ tables, templates, companyId, editable, canApprove, onMarkDirty, moMacDinh = false, thanhChung, phuHieu, dieuKhien, daChi }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
   tables: HnTable[];
   templates: EditorTemplate[];
@@ -51,6 +53,8 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
   phuHieu?: ReactNode;
   /** Khối giao việc / duyệt / trả lại, dán đầu thân khối — xem KhoiSheet. */
   dieuKhien?: ReactNode;
+  /** Trạng thái ĐÃ CHI từng hàng (phía "hn" của useDaChiBaoGia) — cột Thanh toán CHỈ XEM; tích ở trang Hóa đơn đầu vào. */
+  daChi?: DaChiTheoRid | null;
 }) {
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
@@ -166,7 +170,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
             {editable && (
               <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu:
                 <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>
-                  {tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  {sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </select>
               </label>
             )}
@@ -175,7 +179,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
             clfTheme={!!tplOf(t)?.code?.startsWith("clofull")}   // bảng phụ của báo giá Colorfull phải cùng màu với lưới chính và với tệp Excel
             usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
             editable={editable} internalNote={false} cotNoiBo
-            approveCol={false} canApprove={!!canApprove}
+            approveCol={false} canApprove={!!canApprove} payCol daChi={daChi}
             groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
             sheetTotalLine={false}
             dock={thanhChung ? thanhChung.dock : undefined}

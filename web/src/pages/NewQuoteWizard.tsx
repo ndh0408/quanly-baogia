@@ -3,6 +3,7 @@ import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type A
 import { toast, toLocalInputDate } from "../lib/ui";
 import { setPendingNewQuote } from "../lib/pendingQuote";
 import { CustomerPicker } from "../components/CustomerPicker";
+import { sapMauHienThi } from "../lib/thuTuMau";
 
 // Port "Tạo báo giá mới" (renderNewQuote) — 3 bước: chọn công ty → chọn mẫu (nhiều = nhiều sheet) →
 // thông tin (tiêu đề/khách/người-gửi/VAT/ngày/logo). KHÔNG tạo ngay: dựng draft _new + mở editor #/rnew
@@ -74,7 +75,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
     location.hash = "#/rnew";
   };
 
-  const coTemplates = templates.filter((t) => t.companyId === companyId);
+  const coTemplates = sapMauHienThi(templates.filter((t) => t.companyId === companyId));   // Không ngày → Banner → Có ngày
 
   return (
     <div className="wizard">
