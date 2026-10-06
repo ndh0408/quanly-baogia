@@ -214,7 +214,7 @@ describe("logo COLORFUL: CHỖ và CHIỀU CAO như tệp mẫu, bề ngang theo
         kiemNeoTrongO(ra, r.from, `${code} góc trên-trái`);
         kiemNeoTrongO(ra, r.to, `${code} góc dưới-phải`);
         // KHÔNG ĐÈ: logo rộng ra bên phải nên soi mọi ô có chữ / vùng gộp ở hàng 1–4 (khối người gửi F1,
-        // tiêu đề B2, khối Kính gửi C3, tiêu đề cột hàng 4). A1 là dấu mẫu ẩn (numFmt ";;;").
+        // tiêu đề B2, khối Kính gửi B3:I3, tiêu đề cột hàng 4). A1 là dấu mẫu ẩn (numFmt ";;;").
         const oChu = ra.oCoChu(4);
         expect(oChu.length, `${code}: không đọc được ô nào ở hàng 1–4 — phép soi đè vô nghĩa`).toBeGreaterThan(3);
         if (day) expect(oChu.some((o) => /^F1(:|$)/.test(o.ten)), `${code}: khối người gửi (F1) phải có chữ`).toBe(true);

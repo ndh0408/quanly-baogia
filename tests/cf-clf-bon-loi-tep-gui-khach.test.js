@@ -17,7 +17,8 @@
  * 2. KHỐI "KÍNH GỬI" IN RA CHỮ ĐỎ TƯƠI
  *    Ô C3 của hai tệp mẫu CLF vốn là chữ mồi "logo cty khách hàng", font FFFF0000. Bỏ tính năng
  *    logo thì `extraCellsToClear` dọn GIÁ TRỊ mà giữ STYLE, `headerMerges` nhân style đỏ ra cả
- *    dải C3:I3, rồi khối "Kính gửi" được ghi vào đúng ô ấy.
+ *    dải C3:I3 (nay B3:I3 — xem tests/cf-clf-khoi-kinh-gui-gop-tu-stt.test.js), rồi khối "Kính gửi"
+ *    được ghi vào đúng ô ấy.
  *
  * 3. HÀNG "KÍNH GỬI" CAO KHÔNG ĐỦ → CẮT DÒNG EMAIL
  *    Mẫu khoá 67pt, mà `toBlockFormat` sinh 5 dòng nên cần khoảng 75pt. Cắt kể cả khi mọi trường
@@ -127,7 +128,7 @@ describe("Colorfull — bốn lỗi của tệp gửi khách", () => {
   it("[2] khối 'Kính gửi' KHÔNG in ra chữ đỏ — CẢ VÙNG GỘP, không chỉ ô chủ", async () => {
     // Soi cả dải là có lý do đo được: bản vá đầu chỉ đặt lại màu cho Ô CHỦ, và ca này VẪN XANH
     // trong khi tệp do máy chủ dev xuất ra còn D3/E3/F3/G3/H3/I3 mang FFFF0000. `headerMerges`
-    // gộp C3:I3 TRƯỚC, mà `mergeCells` của ExcelJS làm phẳng style ra toàn dải nên màu đỏ của
+    // gộp C3:I3 (nay B3:I3) TRƯỚC, mà `mergeCells` của ExcelJS làm phẳng style ra toàn dải nên màu đỏ của
     // chữ mồi "logo cty khách hàng" đã kịp nhân ra ô phụ. Excel vẽ theo ô chủ nên mắt thường
     // không thấy — nhưng bỏ gộp trong Excel là đỏ hiện lại, và mọi công cụ đọc ô phụ vẫn thấy đỏ.
     for (const ma of CLF) {

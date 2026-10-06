@@ -238,7 +238,7 @@ chọn dùng chung với bước 3 của "Tạo báo giá mới": `web/src/compo
 
 - **GN không ngày** — khách: công ty C2, người liên hệ C3 (mẫu này không có ô riêng cho Tel/Địa chỉ khách); người gửi F3 (tên _ chức danh _ SĐT gộp một dòng), địa chỉ F4.
 - **GN có ngày** — khách C1/C2, Tel C3, Địa chỉ C4; người gửi E2, SĐT E3, địa chỉ E4.
-- **CLF** — khối "Kính gửi" (F3): công ty + người liên hệ + ĐT + Đ/c + email; letterhead (F1): tên công ty + địa chỉ + tên · chức danh · SĐT.
+- **CLF** — khối "Kính gửi" (gộp B3:I3 từ cột STT; bản có ngày B3:J3): công ty + người liên hệ + ĐT + Đ/c + email; letterhead (F1): tên công ty + địa chỉ + tên · chức danh · SĐT.
 
 Một báo giá nhiều sheet xuất ra **một file Excel nhiều sheet**, ghép ở mức XML/zip
 ([`src/xlsxStitcher.ts`](../../src/xlsxStitcher.ts)) để không đụng vào định dạng của mẫu.

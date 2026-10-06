@@ -1,7 +1,11 @@
 // XLSX-06 — excel.ts / pdf.ts / excelImport.ts nhân tiền bằng double rồi Math.round → lệch ±1đ so
 // với Decimal của máy chủ (src/money.ts) khi giá không phải bội số 10. ĐÃ ĐO: giá 15 × SL 4,1 —
 // double 61, Decimal 62. Ba đường nay dùng chung nhanLamTronDong (src/tienDong.ts).
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Vòng vét k × giá × ngày trùng Decimal từng đồng: chạy riêng vài giây nhưng dưới tải của cả bộ song
+// song vượt trần 20s (lượt verify 5 đỏ, chạy riêng xanh).
+vi.setConfig({ testTimeout: 90_000 });
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { nhanLamTronDong } from "../src/tienDong.js";

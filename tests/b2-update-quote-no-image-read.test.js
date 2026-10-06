@@ -19,7 +19,11 @@
 // mà phản hồi vẫn cần) rồi đòi cả lượt PUT không được vượt 1,6 lần con số đó. Bản cũ đọc hai lượt
 // nên nằm quanh 2,0 lần → đỏ; bản vá đọc một lượt → xanh. Cách này miễn nhiễm với việc máy/CI có
 // block size hay mức nén khác nhau.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+
+// Nạp `src/app.js` lần đầu (cache vite còn nguội, vd ngay sau khi đổi node_modules) có lúc vượt trần
+// 30s của beforeAll: lượt verify 5 báo "file hỏng lúc NẠP" không kèm thông điệp, chạy riêng xanh.
+vi.setConfig({ hookTimeout: 120_000 });
 import { QUOTE_UPDATE_STATE_SELECT } from "../src/quoteUtils.js";
 import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
