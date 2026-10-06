@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, isPreviewMode, type EditorTemplate, type QuoteFull } from "../lib/api";
+import { mauMacDinhMoi } from "../lib/thuTuMau";
 import { toast, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
@@ -199,7 +200,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   const tplOf = (id?: number) => mauBangHn({ templateId: id }, templates, q.companyId);
   const usesDaysOf = (id?: number) => !!tplOf(id)?.layout?.hasDays;
   const addrDetailOf = (id?: number) => !!(tplOf(id)?.layout?.reserveDetail ?? tplOf(id)?.layout?.hasDetail);
-  const newSheetTemplateId = (code?: string | null) => (code ? templates.find((x) => x.code === code)?.id : undefined) ?? hnTables[0]?.templateId ?? defTplId;
+  const newSheetTemplateId = (code?: string | null) => (code ? templates.find((x) => x.code === code)?.id : undefined) ?? hnTables[0]?.templateId ?? (mauMacDinhMoi(templates, q.companyId)?.id || defTplId);   // bảng mới: mẫu đầu theo thứ tự hiển thị
 
   // L64: chỉ nhân Số Ngày khi mẫu của bảng CÓ ngày — cùng luật với tổng đầu khối của HnTables.
   const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never, usesDaysOf(t.templateId)), 0);

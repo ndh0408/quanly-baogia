@@ -6,7 +6,7 @@ import { type EditorTemplate } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
 import { KhoiSheet } from "./KhoiSheet";
 import type { DaChiTheoRid } from "../lib/daChiHang";
-import { sapMauHienThi } from "../lib/thuTuMau";
+import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -165,6 +165,9 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   const tplList0 = templates.filter((t) => t.companyId === companyId);
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id || sheet.templateId;
+  // Bảng MỚI chọn sẵn mẫu đầu theo thứ tự hiển thị (Không ngày → Banner → Có ngày). KHÔNG đổi defTplId: nó là mẫu
+  // dự phòng của bảng CŨ chưa gắn mẫu, quyết định có nhân Số Ngày — đổi là đổi tiền báo giá cũ.
+  const mauBangMoi = mauMacDinhMoi(templates, companyId)?.id || defTplId;
   const tplOf = (t: ExtraTable) => templates.find((x) => x.id === (t.templateId || defTplId)) || tplList[0];
   // L64 (đợt 3): KHÔNG còn xoá `days` lúc vẽ khi bảng dùng mẫu không ngày (bản cũ, theo drawExtraTables
   // SPA) — đổi mẫu qua lại là mất số Ngày vĩnh viễn, và mở bảng còn days cũ là bị coi "đã sửa". Tổng chỉ
@@ -184,7 +187,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
 
   const addTable = (cat: string) => {
     const it = M.blankItem(false) as ItemK; it._k = nextK();
-    tables.push({ category: cat, templateId: defTplId, name: "", groupSubtotal: true, items: [it], _k: nextK() });
+    tables.push({ category: cat, templateId: mauBangMoi, name: "", groupSubtotal: true, items: [it], _k: nextK() });
     setMo((m) => ({ ...m, [cat]: true }));   // thêm vào khối đang đóng thì phải mở ra mới thấy
     sheet._activeExtra = tables.length - 1; onChange();
   };

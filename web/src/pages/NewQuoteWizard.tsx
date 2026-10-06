@@ -3,7 +3,7 @@ import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type A
 import { toast, toLocalInputDate } from "../lib/ui";
 import { setPendingNewQuote } from "../lib/pendingQuote";
 import { CustomerPicker } from "../components/CustomerPicker";
-import { sapMauHienThi } from "../lib/thuTuMau";
+import { sapMauHienThi, sapIdMauDaChon } from "../lib/thuTuMau";
 
 // Port "Tạo báo giá mới" (renderNewQuote) — 3 bước: chọn công ty → chọn mẫu (nhiều = nhiều sheet) →
 // thông tin (tiêu đề/khách/người-gửi/VAT/ngày/logo). KHÔNG tạo ngay: dựng draft _new + mở editor #/rnew
@@ -63,7 +63,8 @@ export function NewQuoteWizard({ me }: { me: Me }) {
     if (!info.title.trim()) return toast("Nhập tiêu đề báo giá", "error");
     if (!customer) return toast("Chọn mã khách hàng (bấm 'Chọn khách hàng')", "error");
     if (!info.toCompany.trim()) return toast("Nhập tên khách hàng", "error");
-    const sheets = templateIds.map((tid) => { const t = templates.find((x) => x.id === tid); return { templateId: tid, name: t?.name || "Sheet", groupSubtotal: true, items: [{ kind: "item", name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] }; });
+    // Sheet theo thứ tự hiển thị (Không ngày → Banner → Có ngày), không theo thứ tự bấm chọn mẫu.
+    const sheets = sapIdMauDaChon(templateIds, coTemplates).map((tid) => { const t = templates.find((x) => x.id === tid); return { templateId: tid, name: t?.name || "Sheet", groupSubtotal: true, items: [{ kind: "item", name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] }; });
     const draft: QuoteFull = {
       id: 0, _new: true, status: "draft", title: info.title, shortTitle: info.shortTitle.trim() || null, toCompany: info.toCompany, toContact: info.toContact,
       fromContact: info.fromContact, fromPhone: info.fromPhone, fromTitle: info.fromTitle, fromAddress: info.fromAddress,

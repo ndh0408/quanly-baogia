@@ -23,3 +23,19 @@ export function sapMauHienThi<T extends Pick<EditorTemplate, "code" | "name" | "
     || (a.name || "").localeCompare(b.name || "", "vi")
     || (a.code || "").localeCompare(b.code || ""));
 }
+
+/** Mẫu chọn sẵn cho sheet / bảng MỚI tạo: mẫu đầu theo thứ tự hiển thị (Không ngày → Banner → Có ngày) trong
+ *  các mẫu của công ty, không có thì trong mọi mẫu. KHÁC "mẫu dự phòng" của bảng CŨ thiếu templateId (mẫu đầu
+ *  theo thứ tự API — giữ nguyên vì nó quyết định có nhân Số Ngày, đổi là đổi tiền báo giá cũ). */
+export function mauMacDinhMoi<T extends Pick<EditorTemplate, "code" | "name" | "layout"> & { id: number; companyId?: number | null }>(
+  ds: readonly T[], companyId?: number | null,
+): T | undefined {
+  const cuaCty = ds.filter((t) => t.companyId === companyId);
+  return sapMauHienThi(cuaCty.length ? cuaCty : ds)[0];
+}
+
+/** Thứ tự sheet khi tạo báo giá từ các mẫu đã tích: theo thứ tự hiển thị, không theo thứ tự bấm. */
+export function sapIdMauDaChon(daChon: readonly number[], hienThi: readonly { id: number }[]): number[] {
+  const trongDs = hienThi.map((t) => t.id).filter((id) => daChon.includes(id));
+  return trongDs.concat(daChon.filter((id) => !trongDs.includes(id)));
+}

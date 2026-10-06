@@ -7,7 +7,7 @@ import { confirmModal, toast } from "../lib/ui";
 import { extraTableSum, removeTableFromList, loiXoaBangDaChi, type ExtraTable } from "./ExtraTables";
 import { KhoiSheet } from "./KhoiSheet";
 import type { DaChiTheoRid } from "../lib/daChiHang";
-import { sapMauHienThi } from "../lib/thuTuMau";
+import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
 //
@@ -71,6 +71,8 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
   const tplList0 = templates.filter((t) => t.companyId === companyId);
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id;
+  // Bảng HN MỚI (chưa có bảng nào để theo) chọn sẵn mẫu đầu theo thứ tự hiển thị; defTplId giữ làm dự phòng cho bảng cũ.
+  const mauBangMoi = mauMacDinhMoi(templates, companyId)?.id || defTplId;
   const tplOf = (t: HnTable) => mauBangHn(t, templates, companyId);
 
   // L64 (đợt 3): KHÔNG còn xoá `days` lúc vẽ khi bảng dùng mẫu không ngày — đổi mẫu qua lại là mất số
@@ -104,7 +106,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
 
   const themBang = () => {
     const it = M.blankItem(false) as ItemK; it._k = nextK();
-    tables.push({ templateId: t?.templateId || defTplId, name: "", groupSubtotal: true, items: [it], _k: nextK() });
+    tables.push({ templateId: t?.templateId || mauBangMoi, name: "", groupSubtotal: true, items: [it], _k: nextK() });
     setMo(true);   // bấm "+ Thêm sheet" khi khối đang đóng mà không mở ra thì tưởng nút hỏng
     setActive(tables.length - 1);
     onChange();

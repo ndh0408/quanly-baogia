@@ -15,7 +15,7 @@ import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuyenBanNhapCu } from "../lib/localDraft";
 import { useTrangAnToan } from "../lib/phienBan";
-import { sapMauHienThi } from "../lib/thuTuMau";
+import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
 import { useDaChiBaoGia } from "../lib/daChiHang";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
@@ -762,7 +762,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const dangLuuHoacDaDoi = () => !songRef.current || savingRef.current || qRef.current !== q;
   const addSheet = () => {
     if (dangLuuHoacDaDoi()) return;
-    const t = templates.filter((x) => x.companyId === q.companyId)[0] || templates[0];
+    // Sheet MỚI chọn sẵn mẫu đầu tiên theo thứ tự hiển thị (Không ngày → Banner → Có ngày), không theo thứ tự trong CSDL.
+    const t = mauMacDinhMoi(templates, q.companyId);
     sheets.push({ _k: nextK(), templateId: t?.id, name: "", groupSubtotal: true, items: [], extraTables: [] });
     q._activeSheet = sheets.length - 1; mark(); redraw();
   };
