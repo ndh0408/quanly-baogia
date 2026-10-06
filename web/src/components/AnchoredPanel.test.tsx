@@ -102,12 +102,22 @@ describe("AnchoredPanel", () => {
     expect(onClose, "cuộn trong hộp mà hộp tự đóng").not.toHaveBeenCalled();
   });
 
-  it("cuộn NGOÀI hộp thì ĐÓNG — hộp `fixed` không đi theo nút được", () => {
+  it("cuộn NGOÀI hộp mà nút neo TRÔI ĐI thì ĐÓNG — hộp `fixed` không đi theo nút được", () => {
     // Vế đối trọng: bỏ hẳn việc đóng theo cuộn thì hộp đứng yên một chỗ trong khi nút neo trôi đi,
     // và người dùng thấy một menu lơ lửng chẳng dính vào đâu.
-    const { onClose } = dung();
+    const { nut, onClose } = dung();
+    nut.getBoundingClientRect = () => ({ top: -120, bottom: -88, left: 0, right: 32, width: 32, height: 32, x: 0, y: -120, toJSON() {} }) as DOMRect;
     act(() => { document.dispatchEvent(new Event("scroll", { bubbles: true })); });
-    expect(onClose, "cuộn trang mà hộp vẫn dính lại một chỗ").toHaveBeenCalled();
+    expect(onClose, "cuộn trang, nút trôi đi mà hộp vẫn dính lại một chỗ").toHaveBeenCalled();
+  });
+
+  it("cuộn trang mà nút neo ĐỨNG YÊN (nút trong thanh đáy `sticky`) thì KHÔNG đóng — lỗi đã làm đỏ ui-smoke [U13]", () => {
+    // Đo 2026-10-06: Playwright cuộn trang tới nút "⋯" sticky trước khi bấm, lượt cuộn kéo dài qua lúc menu vừa mở →
+    // menu bị gỡ sau 15ms, `page.click` vào "Tải Excel gửi khách" hết giờ. Nút đứng yên ở top 803 suốt lúc đó.
+    // Người dùng thật: bấm "⋯" khi trang còn trôi theo quán tính cuộn → menu vừa hiện đã tắt.
+    const { onClose } = dung();   // jsdom: hộp của nút không đổi giữa lúc mở và lúc cuộn = nút đứng yên
+    act(() => { document.dispatchEvent(new Event("scroll", { bubbles: true })); });
+    expect(onClose, "nút đứng yên — hộp vẫn đúng chỗ, đóng là sai").not.toHaveBeenCalled();
   });
 
   it("Escape thì đóng", () => {

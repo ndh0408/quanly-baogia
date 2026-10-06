@@ -56,6 +56,8 @@ function go(el: HTMLInputElement | HTMLSelectElement, v: string) {
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!;
   act(() => { setter.call(el, v); el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input", { bubbles: true })); });
 }
+/** Chip trạng thái của bộ lọc đầy đủ (người thường không còn ô chọn trạng thái — chip bật/tắt, chọn được nhiều). */
+const chipTT = (nhan: string) => [...hop.querySelectorAll('[aria-label="Trạng thái báo giá"] button')].find((b) => b.textContent?.startsWith(nhan)) as HTMLButtonElement;
 
 describe("L75 — Danh sách báo giá giữ trang từ URL, đổi bộ lọc về trang 1 bằng MỘT request", () => {
   it("F5 / Back về #/list?page=3: ở lại trang 3, chỉ gọi page=3, URL giữ ?page=3", async () => {
@@ -80,10 +82,10 @@ describe("L75 — Danh sách báo giá giữ trang từ URL, đổi bộ lọc v
     await mo("#/list");
     await latToi(3);
     h.goi.length = 0;
-    go(hop.querySelector('select[aria-label="Lọc theo trạng thái"]') as HTMLSelectElement, "draft");
+    await act(async () => { chipTT("Nháp").click(); });
     await cho(20);
     expect(h.goi.map((g) => `${g.status}:${g.page}`)).toEqual(["draft:1"]);
-    go(hop.querySelector('select[aria-label="Lọc theo trạng thái"]') as HTMLSelectElement, "");
+    await act(async () => { chipTT("Nháp").click(); });   // bật lại = tắt
     await cho(20);
     await latToi(3);
     h.goi.length = 0;
@@ -94,9 +96,8 @@ describe("L75 — Danh sách báo giá giữ trang từ URL, đổi bộ lọc v
 
   it("đổi bộ lọc rồi đổi LẠI như cũ: vẫn ở trang 1 (không bật về trang cũ)", async () => {
     await mo("#/list?page=3");
-    const chon = hop.querySelector('select[aria-label="Lọc theo trạng thái"]') as HTMLSelectElement;
-    go(chon, "draft"); await cho(20);
-    go(chon, ""); await cho(20);
+    await act(async () => { chipTT("Nháp").click(); }); await cho(20);
+    await act(async () => { chipTT("Nháp").click(); }); await cho(20);
     expect(chuTrang()).toBe("Trang 1/3");
   });
 

@@ -4,8 +4,8 @@
  *
  * ── BỐI CẢNH ────────────────────────────────────────────────────────────────
  * `reconcileExtraPayments` (src/services/quoteService.ts) là lớp chặn "tự đánh dấu đã trả qua
- * payload": ai KHÔNG có `quote:internal:pay` thì trạng thái thanh toán bị ép về đúng bản CSDL,
- * khớp theo `rid` của từng hàng.
+ * payload": trạng thái thanh toán bị ép về đúng bản CSDL, khớp theo `rid` của từng hàng — từ 2026-10-06 cho
+ * MỌI người (cờ cũ ĐÓNG BĂNG; "đã chi" ghi ở trang Hóa đơn đầu vào, bảng InputInvoiceEntry).
  *
  * ── LỖI ─────────────────────────────────────────────────────────────────────
  * `rid` do CHÍNH CLIENT gửi lên, và `sanitizeExtraTables` (src/quoteUtils.ts:240) giữ NGUYÊN VĂN
@@ -20,8 +20,8 @@
  *     (account_hn đọc được `rid` ngay trong payload trả về của chính họ).
  *
  * ── BẤT BIẾN ĐÓNG LỖ ────────────────────────────────────────────────────────
- * AI KHÔNG ĐƯỢC ĐẶT `paid` THÌ CŨNG KHÔNG ĐƯỢC ĐỔI SỐ TIỀN CỦA HÀNG ĐÃ TRẢ. Cộng thêm: mỗi `rid`
- * chỉ kế thừa MỘT lần. Người có `quote:internal:pay` không bị ràng buộc (họ vốn đặt `paid` trực tiếp).
+ * AI KHÔNG ĐƯỢC TÍCH "ĐÃ CHI" THÌ CŨNG KHÔNG ĐƯỢC ĐỔI SỐ TIỀN CỦA HÀNG ĐÃ CHI. Cộng thêm: mỗi `rid`
+ * chỉ kế thừa MỘT lần. Người có quyền tích (`invoice:input:pay`, trước là `quote:internal:pay`) không bị ràng buộc.
  *
  * ── CƠ CHẾ: TỪ CHỐI CẢ LẦN LƯU, KHÔNG PHẢI "CẮT KẾ THỪA" ────────────────────
  * Bản đầu phản ứng bằng `p = null`, tức ép `paid=false` và bỏ luôn `paidAt`/`paidById`/`paidProof`.
@@ -47,7 +47,7 @@ const hang = (p) => p[0].extraTables[0].items;
 describe("reconcileExtraPayments — rid do client gửi", () => {
   it("rid BỊA không đặt được paid (chiều này vốn đã an toàn — khoá lại để không hồi quy)", () => {
     const p = payload([{ rid: "BIA-MOI", name: "Hàng bịa", quantity: 1, unitPrice: 50_000_000, paid: true, paidById: 1, paidProof: ANH }]);
-    reconcileExtraPayments(p, db([hangDb()]), false, 1);
+    reconcileExtraPayments(p, db([hangDb()]));
     expect(hang(p)[0].paid).toBe(false);
     expect(hang(p)[0].paidAt).toBeNull();
     expect(hang(p)[0].paidProof).toBeNull();
@@ -56,7 +56,7 @@ describe("reconcileExtraPayments — rid do client gửi", () => {
   it("CHÉP rid của hàng đã trả sang hàng ĐỔI SỐ TIỀN → cả lần lưu bị từ chối", () => {
     const p = payload([{ rid: "r-that", name: "Hàng bịa 50 triệu", quantity: 1, unitPrice: 50_000_000, paid: true }]);
     let loi;
-    try { reconcileExtraPayments(p, db([hangDb()]), false, 1); } catch (e) { loi = e; }
+    try { reconcileExtraPayments(p, db([hangDb()])); } catch (e) { loi = e; }
     expect(loi, "hàng bịa đi lọt — phải chặn cả lần ghi").toBeTruthy();
     expect(loi.status, "phải là lỗi của người gửi, không phải 500").toBe(400);
     expect(loi.message, "thông điệp phải nêu đích danh hàng vướng").toContain("Hàng bịa 50 triệu");
@@ -66,12 +66,12 @@ describe("reconcileExtraPayments — rid do client gửi", () => {
 
   it("đổi SỐ LƯỢNG cũng tính là đổi số tiền", () => {
     const p = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 40, unitPrice: 1_000_000, paid: true }]);
-    expect(() => reconcileExtraPayments(p, db([hangDb()]), false, 1)).toThrowError(/đã thanh toán/);
+    expect(() => reconcileExtraPayments(p, db([hangDb()]))).toThrowError(/đã chi/);
   });
 
   it("đổi SỐ NGÀY cũng vậy", () => {
     const p = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 1, unitPrice: 1_000_000, days: 30, paid: true }]);
-    expect(() => reconcileExtraPayments(p, db([hangDb({ days: 1 })]), false, 1)).toThrowError(/đã thanh toán/);
+    expect(() => reconcileExtraPayments(p, db([hangDb({ days: 1 })]))).toThrowError(/đã chi/);
   });
 
   it("hai hàng CÙNG rid → chỉ hàng ĐẦU kế thừa, bản sao thì không", () => {
@@ -79,7 +79,7 @@ describe("reconcileExtraPayments — rid do client gửi", () => {
       { rid: "r-that", name: "Thi công nhỏ", quantity: 1, unitPrice: 1_000_000, paid: true },
       { rid: "r-that", name: "Bản sao", quantity: 1, unitPrice: 1_000_000, paid: true },
     ]);
-    reconcileExtraPayments(p, db([hangDb()]), false, 1);
+    reconcileExtraPayments(p, db([hangDb()]));
     expect(hang(p)[0].paid, "hàng gốc phải giữ được trạng thái đã trả").toBe(true);
     expect(hang(p)[1].paid, "bản sao cùng rid vẫn nhận được trạng thái đã trả").toBe(false);
   });
@@ -87,7 +87,7 @@ describe("reconcileExtraPayments — rid do client gửi", () => {
   // ── KHÔNG ĐƯỢC PHÁ NGHIỆP VỤ ĐANG CHẠY ────────────────────────────────────
   it("KHÔNG đổi tiền → hàng đã trả GIỮ NGUYÊN trạng thái, ảnh và người trả", () => {
     const p = payload([{ rid: "r-that", name: "Đổi tên thôi", quantity: 1, unitPrice: 1_000_000, paid: true }]);
-    reconcileExtraPayments(p, db([hangDb()]), false, 1);
+    reconcileExtraPayments(p, db([hangDb()]));
     const it = hang(p)[0];
     expect(it.paid).toBe(true);
     expect(it.paidById).toBe(9);
@@ -97,14 +97,14 @@ describe("reconcileExtraPayments — rid do client gửi", () => {
 
   it("hàng CHƯA trả đổi giá tự do — ràng buộc chỉ áp cho hàng ĐÃ trả", () => {
     const p = payload([{ rid: "r-chua", name: "Sửa giá", quantity: 2, unitPrice: 9_000_000 }]);
-    reconcileExtraPayments(p, db([{ rid: "r-chua", quantity: 1, unitPrice: 1_000_000, paid: false }]), false, 1);
+    reconcileExtraPayments(p, db([{ rid: "r-chua", quantity: 1, unitPrice: 1_000_000, paid: false }]));
     expect(hang(p)[0].paid).toBe(false);
     expect(hang(p)[0].unitPrice).toBe(9_000_000);   // giá người dùng gõ KHÔNG bị đụng
   });
 
-  it("người CÓ quote:internal:pay vẫn đổi được giá hàng đã trả (luồng kế toán không đổi)", () => {
+  it("người CÓ quyền tích (invoice:input:pay — mienChotTien) vẫn đổi được giá hàng đã trả", () => {
     const p = payload([{ rid: "r-that", name: "Kế toán chỉnh", quantity: 1, unitPrice: 3_000_000, paid: true }]);
-    reconcileExtraPayments(p, db([hangDb()]), true, 5);
+    reconcileExtraPayments(p, db([hangDb()]), { mienChotTien: true });
     const it = hang(p)[0];
     expect(it.paid).toBe(true);
     expect(it.paidById).toBe(9);                    // giữ người trả gốc
@@ -120,18 +120,20 @@ describe("reconcileExtraPayments — rid do client gửi", () => {
   it("bản CSDL KHÔNG ghi số tiền → giữ nguyên kế thừa (fail-open, không xoá dữ liệu thật)", () => {
     const p = payload([{ rid: "r-cu", name: "Thuê xe (sửa chính tả)", quantity: 1, unitPrice: 100, paid: true }]);
     // Đúng hình dạng hàng cũ: chỉ có rid/name/paid/paidAt/paidById, không có quantity/unitPrice.
-    reconcileExtraPayments(p, db([{ rid: "r-cu", name: "Thuê xe", paid: true, paidAt: "2026-08-01T00:00:00Z", paidById: 7, paidProof: ANH }]), false, 1);
+    reconcileExtraPayments(p, db([{ rid: "r-cu", name: "Thuê xe", paid: true, paidAt: "2026-08-01T00:00:00Z", paidById: 7, paidProof: ANH }]));
     const it = hang(p)[0];
     expect(it.paid, "hàng cũ hợp lệ bị xoá mất trạng thái đã trả").toBe(true);
     expect(it.paidById).toBe(7);
     expect(it.paidProof).toBe(ANH);
   });
 
-  it("người có quyền vẫn ĐÁNH DẤU MỚI được, có đóng dấu người/thời điểm", () => {
-    const p = payload([{ rid: "r-chua", quantity: 1, unitPrice: 1_000_000, paid: true }]);
-    reconcileExtraPayments(p, db([{ rid: "r-chua", quantity: 1, unitPrice: 1_000_000, paid: false }]), true, 5);
-    expect(hang(p)[0].paid).toBe(true);
-    expect(hang(p)[0].paidById).toBe(5);
-    expect(hang(p)[0].paidAt).toBeTruthy();
+  // ĐẢO 2026-10-06: trước đây người có quote:internal:pay đánh dấu mới được QUA PAYLOAD Lưu. Nay "đã chi" chỉ ghi ở
+  // trang Hóa đơn đầu vào (bảng InputInvoiceEntry) — cờ JSON cũ ĐÓNG BĂNG cho MỌI người, kể cả người được miễn chốt tiền.
+  it("KHÔNG ai đánh dấu mới qua payload Lưu được nữa — kể cả người có quyền tích", () => {
+    const p = payload([{ rid: "r-chua", quantity: 1, unitPrice: 1_000_000, paid: true, paidAt: "2026-10-06T00:00:00Z", paidById: 5 }]);
+    reconcileExtraPayments(p, db([{ rid: "r-chua", quantity: 1, unitPrice: 1_000_000, paid: false }]), { mienChotTien: true });
+    expect(hang(p)[0].paid).toBe(false);
+    expect(hang(p)[0].paidById).toBeNull();
+    expect(hang(p)[0].paidAt).toBeNull();
   });
 });

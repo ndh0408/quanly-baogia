@@ -53,19 +53,29 @@ export const PERMISSIONS = {
   AUDIT_VIEW_FULL:        "audit:view:full",   // xem CHI TIẾT nhật ký (tên đối tượng + before/after + IP)
   // Hóa đơn / Quản lý dự án. TÁCH NGUYÊN TỬ: xem / sửa-thông-tin / đánh-dấu-thanh-toán RIÊNG —
   // để phân "người này sửa hóa đơn, người kia đánh dấu thanh toán" (thanh toán per-trang, không gộp).
+  // HAI TRANG kế toán: Hóa đơn ĐẦU RA (tiền VÀO — invoice:edit / invoice:pay theo trang báo giá) và Hóa đơn
+  // ĐẦU VÀO (tiền RA — invoice:input:pay theo từng hàng bảng nội bộ; ngày HĐ + ghi chú KT dùng invoice:edit).
   INVOICE_READ:           "invoice:read",      // xem trang "Quản lý dự án" (mọi dự án + tình trạng hóa đơn)
   INVOICE_PAGE:           "invoice:page",      // xem trang "HÓA ĐƠN" (kế toán) — nơi NHẬP mọi thông tin hóa đơn
   INVOICE_EDIT:           "invoice:edit",      // nhập số HĐ/PO/link + ngày gửi/nhận chứng từ (trang Hóa đơn)
   INVOICE_PAY:            "invoice:pay",        // ĐÁNH DẤU đã thanh toán hóa đơn (ngày thu tiền)
   INVOICE_MANAGE:         "invoice:manage",    // [CŨ] gộp sửa+thanh toán — giữ để bắc cầu → edit+pay
+  // Hóa đơn ĐẦU VÀO: tích "ĐÃ CHI" + ảnh ủy nhiệm chi cho TỪNG HÀNG bảng nội bộ đã duyệt (chủ repo 2026-10-06 — thay
+  // quote:internal:pay của tài khoản chi phí). KHÔNG dùng lại invoice:pay: đó là ngày THU tiền (tiền vào), và dùng lại
+  // thì mọi người đang giữ invoice:pay (qua ghi đè vai trò / quyền riêng / invoice:manage bắc cầu) tự động tích được.
+  INVOICE_INPUT_PAY:      "invoice:input:pay",
   // Ký chứng từ (trang Quản lý dự án) — TÁCH cờ canSign cũ thành quyền gán được, có phạm vi rõ.
   QUOTE_SIGN_OWN:         "quote:sign:own",    // ký chứng từ dự án DO MÌNH TẠO
   QUOTE_SIGN_ALL:         "quote:sign:all",    // ký chứng từ MỌI dự án (admin/giám đốc)
   // (KHÔNG thêm quote:duplicate / quote:members — nhân bản đã kiểm create+đọc-nguồn; members đã đúng
   //  chủ-báo-giá/admin. Thêm scope là sai logic + thừa — bỏ theo phản hồi chủ dự án.)
-  // Bảng nội bộ (HCM/HN/Phí KH) — tài khoản "chi phí": CHỈ xem nội bộ + thanh toán per-hàng.
+  // Bảng nội bộ (HCM/HN/Phí KH) — tài khoản "chi phí": CHỈ xem nội bộ.
   QUOTE_INTERNAL_VIEW:    "quote:internal:view", // CHỈ thấy bảng nội bộ — ẩn báo giá/giá/khách
-  QUOTE_INTERNAL_PAY:     "quote:internal:pay",  // tích "đã thanh toán" + ảnh cho TỪNG HÀNG nội bộ
+  // [CŨ — KHÔNG CÒN TÁC DỤNG từ 2026-10-06] tích "đã thanh toán" + ảnh cho từng hàng nội bộ. Việc đó chuyển sang kế
+  // toán ở trang Hóa đơn đầu vào (invoice:input:pay). Không chỗ nào kiểm khoá này nữa và nó đã rời ma trận; hằng số
+  // GIỮ LẠI (như product:* / role:assign) để vai trò / tài khoản đang lưu khoá này vẫn lưu lại được (PUT quyền trả 400
+  // khi gặp khoá lạ — src/routes/permissions.routes.ts).
+  QUOTE_INTERNAL_PAY:     "quote:internal:pay",
   // Khách hàng — TÁCH manage gộp → create/edit/delete nguyên tử + ghi chú.
   CUSTOMER_CREATE:        "customer:create",
   CUSTOMER_EDIT_OWN:      "customer:edit:own",
@@ -136,14 +146,15 @@ export const PERMISSION_LABELS = {
   [P.QUOTE_INTERNAL_APPROVE]: "Duyệt dòng bảng nội bộ",
   [P.AUDIT_VIEW_FULL]: "Xem chi tiết nhật ký (tên + thay đổi)",
   [P.INVOICE_READ]:   "Xem trang Quản lý dự án (hóa đơn)",
-  [P.INVOICE_PAGE]:   "Xem trang Hóa đơn (kế toán)",
+  [P.INVOICE_PAGE]:   "Xem trang Hóa đơn đầu ra + đầu vào (kế toán)",
   [P.INVOICE_EDIT]:   "Sửa hóa đơn (số HĐ/PO/ngày)",
   [P.INVOICE_PAY]:    "Đánh dấu thanh toán (ngày thu tiền)",
   [P.INVOICE_MANAGE]: "Sửa hóa đơn / đánh dấu thanh toán",
+  [P.INVOICE_INPUT_PAY]: "Hóa đơn đầu vào: tích ĐÃ CHI + ảnh chứng từ",
   [P.QUOTE_SIGN_OWN]: "Ký chứng từ — dự án của mình",
   [P.QUOTE_SIGN_ALL]: "Ký chứng từ — mọi dự án",
   [P.QUOTE_INTERNAL_VIEW]: "Xem CHỈ bảng nội bộ (ẩn báo giá)",
-  [P.QUOTE_INTERNAL_PAY]:  "Thanh toán từng dòng nội bộ (tích + ảnh)",
+  [P.QUOTE_INTERNAL_PAY]:  "[CŨ — không còn tác dụng] Thanh toán từng dòng nội bộ",
   [P.CUSTOMER_CREATE]:     "Tạo khách hàng",
   [P.CUSTOMER_EDIT_OWN]:   "Sửa KH của mình",
   [P.CUSTOMER_EDIT_ALL]:   "Sửa mọi khách hàng",
@@ -198,15 +209,16 @@ export const PERMISSION_DESC: Record<string, string> = {
   [P.PERSONNEL_CONFIRM]:      "Trang Nhân sự: xác nhận 'đã ký' (admin).",
   [P.PERSONNEL_ACCOUNTING_NOTE]: "Trang Nhân sự: ghi cột 'Kế toán ghi chú'.",
   [P.INVOICE_READ]:   "Mở trang Quản lý dự án (THAM CHIẾU — dữ liệu hóa đơn chỉ xem, nhập ở trang Hóa đơn).",
-  [P.INVOICE_PAGE]:   "Mở trang HÓA ĐƠN (kế toán) — nơi NHẬP mọi thông tin hóa đơn; xem MỌI dự án đã chốt.",
-  [P.INVOICE_EDIT]:   "Nhập thông tin hóa đơn ở trang Hóa đơn: số HĐ, ngày HĐ, PO, CTy, hình thức TT, chứng từ, link… (KHÔNG gồm ngày thu tiền).",
-  [P.INVOICE_PAY]:    "CHỈ nhập 'Ngày thu tiền' (đánh dấu đã thanh toán) ở trang Hóa đơn.",
+  [P.INVOICE_PAGE]:   "Mở trang HÓA ĐƠN đầu ra + đầu vào (kế toán) — đầu ra: MỌI dự án đã chốt; đầu vào: MỌI hàng bảng nội bộ đã duyệt.",
+  [P.INVOICE_EDIT]:   "Hóa đơn ĐẦU RA: số HĐ, ngày HĐ, PO, CTy, hình thức TT, chứng từ, link… (KHÔNG gồm ngày thu tiền) · Hóa đơn ĐẦU VÀO: Ngày hóa đơn + Ghi chú kế toán.",
+  [P.INVOICE_PAY]:    "CHỈ nhập 'Ngày thu tiền' (đánh dấu đã thanh toán) ở trang Hóa đơn đầu ra.",
+  [P.INVOICE_INPUT_PAY]: "Trang Hóa đơn đầu vào: đánh dấu ĐÃ CHI (tiền RA) cho từng khoản đã duyệt; đính, thay, gỡ và XEM ảnh ủy nhiệm chi (dữ liệu cá nhân bên thứ ba). Ngày HĐ và ghi chú kế toán dùng quyền Sửa hóa đơn.",
   [P.USER_MANAGE]:      "Mời/khóa tài khoản + TÍCH QUYỀN cho người khác.",
   [P.AUDIT_VIEW]:       "Xem nhật ký (tóm tắt: ai-làm-gì-khi-nào).",
   [P.AUDIT_VIEW_FULL]:  "Xem nhật ký CHI TIẾT (tên đối tượng + nội dung thay đổi + IP).",
   [P.SETTINGS_MANAGE]:  "Cài đặt hệ thống (email, sao lưu, tích hợp).",
   [P.QUOTE_INTERNAL_VIEW]: "CHỈ thấy các bảng nội bộ (HCM/HN/Phí KH) của báo giá — KHÔNG lộ báo giá chính (giá/khách/tổng). Dành tài khoản 'chi phí'.",
-  [P.QUOTE_INTERNAL_PAY]:  "Tích 'đã thanh toán' + up ẢNH chứng từ cho TỪNG HÀNG bảng nội bộ (thanh toán nội bộ, riêng trang này).",
+  [P.QUOTE_INTERNAL_PAY]:  "KHÔNG CÒN TÁC DỤNG (2026-10-06): tích 'đã chi' + ảnh chứng từ nay do kế toán làm ở trang Hóa đơn đầu vào (quyền 'Hóa đơn đầu vào: tích ĐÃ CHI + ảnh chứng từ').",
   [P.CUSTOMER_CREATE]:     "Thêm mã khách hàng mới.",
   [P.CUSTOMER_EDIT_OWN]:   "Sửa khách hàng mình phụ trách.",
   [P.CUSTOMER_EDIT_ALL]:   "Sửa BẤT KỲ khách hàng nào.",
@@ -236,7 +248,9 @@ export const PERMISSION_GROUPS = [
     P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL,
     P.QUOTE_SEND, P.QUOTE_EXPORT,
     P.QUOTE_HN_FILL, P.QUOTE_HN_MANAGE, P.QUOTE_INTERNAL_APPROVE,
-    P.QUOTE_INTERNAL_VIEW, P.QUOTE_INTERNAL_PAY,
+    // quote:internal:pay ĐÃ RỜI ma trận (2026-10-06): không còn chỗ nào kiểm nó — tích "đã chi" chuyển sang
+    // invoice:input:pay ở nhóm "Hóa đơn" bên dưới. Hằng số giữ lại (xem chú thích ở PERMISSIONS).
+    P.QUOTE_INTERNAL_VIEW,
   ] },
   { key: "customer", label: "Khách hàng", perms: [
     P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_CREATE,
@@ -266,7 +280,7 @@ export const PERMISSION_GROUPS = [
   { key: "venue", label: "Danh mục rạp (kích thước)", perms: [P.VENUE_READ, P.VENUE_MANAGE] },
   { key: "file", label: "Tệp đính kèm", perms: [P.FILE_UPLOAD] },
   { key: "invoice", label: "Hóa đơn / Quản lý dự án", perms: [
-    P.INVOICE_READ, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
+    P.INVOICE_READ, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.INVOICE_INPUT_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
   ] },
 ];
 
@@ -304,9 +318,9 @@ const ADMIN = [
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
   P.SETTINGS_MANAGE,
   P.QUOTE_INTERNAL_APPROVE, // duyệt dòng bảng nội bộ (trước là check role===admin)
-  P.QUOTE_INTERNAL_PAY,     // admin đánh dấu thanh toán hàng nội bộ (KHÔNG thêm internal:view — admin xem FULL)
   P.AUDIT_VIEW_FULL,        // xem chi tiết nhật ký (trước là check role===admin strip PII)
   P.INVOICE_READ, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_ALL, // Quản lý dự án + trang Hóa đơn + sửa/thanh toán + ký mọi dự án
+  P.INVOICE_INPUT_PAY,      // Hóa đơn đầu vào: tích ĐÃ CHI + ảnh chứng từ (thay quote:internal:pay cũ của admin)
   // Nhân sự + Danh bạ: admin sửa/xóa MỌI + đánh dấu thanh toán + xác nhận đã ký + ghi kế toán ghi chú.
   P.PERSONNEL_READ_ALL, P.PERSONNEL_EDIT_ALL, P.PERSONNEL_DELETE_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
   P.EMPLOYEE_READ_ALL, P.EMPLOYEE_EDIT_ALL, P.EMPLOYEE_DELETE_ALL,
@@ -317,7 +331,9 @@ const ADMIN = [
 const HR = [P.PERSONNEL_READ_ALL];
 // Kế toán: xem mọi hồ sơ + ĐÁNH DẤU đã thanh toán (có ngày) + ghi cột "KẾ TOÁN GHI CHÚ". KHÔNG sửa hồ sơ khác.
 // 2026-07-06: kế toán chuyển sang trang HÓA ĐƠN (invoice:page) — KHÔNG còn xem Quản lý dự án (invoice:read).
-const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_ACCOUNTING_NOTE, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY];
+// 2026-10-06: + Hóa đơn đầu vào — tích ĐÃ CHI + ảnh chứng từ từng hàng nội bộ đã duyệt (invoice:input:pay). Vẫn KHÔNG
+// có quote:read:* — kế toán không mở báo giá; mọi thao tác nằm ngay trên trang Hóa đơn đầu vào.
+const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_ACCOUNTING_NOTE, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.INVOICE_INPUT_PAY];
 
 // Account Hà Nội: quyền TỐI THIỂU. Chỉ với tay tới báo giá ĐƯỢC GIAO (là member) để
 // đọc/sửa — nhưng presentQuote LƯỢC chỉ còn bảng nội bộ "hanoi" + route write-guard chỉ

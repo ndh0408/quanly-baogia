@@ -13,6 +13,13 @@
 // Đó chính là khối dữ liệu đã đi qua dây. Kèm hai khẳng định giữ NGUYÊN kết quả nghiệp vụ — số
 // hàng nội bộ, số hàng đã trả, và TỔNG TIỀN Hà Nội phải y hệt trước khi vá (đây là số TIỀN, đổi
 // cách lấy dữ liệu mà lệch số là hỏng nặng hơn cái đang chữa).
+//
+// ── 2026-10-06: "ĐÃ TRẢ" LÀ TRẠNG THÁI HIỆU LỰC ─────────────────────────────
+// Việc tích đã chi chuyển sang kế toán ở trang Hóa đơn đầu vào (bảng InputInvoiceEntry); cờ `paid` cũ
+// trong JSON hàng ĐÓNG BĂNG. Số "đã trả" của danh sách đếm theo LỚP PHỦ (src/khoanChi.ts trangThaiHieuLuc
+// qua phuKeToanDanhSach): có khoản thì khoản thắng, không thì cờ JSON cũ — hai ca đầu vẫn đếm 2 vì chưa
+// có khoản nào (đọc dự phòng), ca cuối khoá chiều ngược lại: kế toán BỎ tích thì số phải giảm dù JSON
+// vẫn ghi paid:true.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../src/db.js";
 import { listQuotes } from "../src/services/quoteService.js";
@@ -62,6 +69,9 @@ describe.runIf(dbAvailable)("Danh sách báo giá cho vai trò nội bộ — kh
   });
 
   afterAll(async () => {
+    // Khoản kế toán RESTRICT báo giá: dọn khoản TRƯỚC khi xoá cứng (Promise.resolve: bản mã chưa có model thì bỏ qua êm).
+    const ids = (await prisma.quote.findMany({ where: { title: { startsWith: TAG } }, includeDeleted: true, select: { id: true } })).map((q) => q.id);
+    await Promise.resolve().then(() => prisma.inputInvoiceEntry.deleteMany({ where: { quoteId: { in: ids } } })).catch(() => {});
     await prisma.quote.deleteMany({ where: { title: { startsWith: TAG } }, hardDelete: true, includeDeleted: true }).catch(() => {});
     await prisma.quoteTemplate.deleteMany({ where: { code: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
     await prisma.company.deleteMany({ where: { code: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
@@ -97,4 +107,21 @@ describe.runIf(dbAvailable)("Danh sách báo giá cho vai trò nội bộ — kh
     expect(rows.length).toBe(SO_BAO_GIA);
     expect(rows[0].sheets, "người không có quyền nội bộ thì không có lý do gì tải bảng nội bộ").toBeUndefined();
   });
+
+  it("kế toán đã BỎ tích (khoản paid=false) trên hàng JSON cũ đã trả → 'Đã TT' của ĐÚNG báo giá đó giảm; báo giá khác không đổi; JSON vẫn paid:true; vẫn không kéo ảnh", async () => {
+    const q = await prisma.quote.findFirst({ where: { title: `${TAG} bg 1` }, select: { id: true } });
+    // Hàng "A-1" (bảng HN "A") đã trả trong JSON cũ; kế toán bỏ tích ở trang Hóa đơn đầu vào → khoản thắng.
+    await prisma.inputInvoiceEntry.create({ data: {
+      quoteId: q.id, side: "hn", rid: "A-1", paid: false, rowSnapshot: { name: "Thuê xe" }, source: "json-cu", version: 1,
+      legacySeed: { paid: true, paidAt: null, paidById: null, hasProof: true },
+    } });
+    const { rows } = await listQuotes(reqGia(["quote:read:all", "quote:internal:view"]));
+    expect(rows.length).toBe(SO_BAO_GIA);
+    const theoId = new Map(rows.map((r) => [r.id, presentQuoteRow(r, { internalOnly: true })]));
+    expect(theoId.get(q.id)).toMatchObject({ internalRows: 4, internalPaidRows: 1 });
+    for (const [id, r] of theoId) if (id !== q.id) expect(r.internalPaidRows, `báo giá ${id} bị đếm lây`).toBe(2);
+    expect(JSON.stringify(rows).includes("paidProof")).toBe(false);
+    const db = await prisma.quote.findUnique({ where: { id: q.id }, select: { hnTables: true } });
+    expect(db.hnTables[0].items.find((it) => it.rid === "A-1").paid, "lớp phủ chỉ ở phản hồi — JSON đóng băng").toBe(true);
+  }, 60_000);
 });

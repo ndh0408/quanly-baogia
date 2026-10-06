@@ -6,7 +6,7 @@ lại stack, cách dựng máy, bảng lệnh npm hay cây thư mục — nhữn
 - [README.md](../../README.md) — công nghệ và hai bài toán khó của sản phẩm
 - [docs/development/SETUP.md](../development/SETUP.md) — dựng môi trường, bảng npm script
 - [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — hệ thống ghép lại thế nào
-- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (142 endpoint)
+- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (143 endpoint)
 
 QuanLY là **công cụ nội bộ** của Gia Nguyễn / Colorfull. Không có khách hàng ngoài,
 không có gói cước, không có self-service đăng ký: tài khoản do admin mời.
@@ -30,7 +30,7 @@ Bốn giá trị cũ `pending`, `approved`, `rejected`, `sent` **vẫn còn tron
 `QuoteStatus`** (`prisma/schema.prisma`) để không phải migrate dữ liệu lịch sử —
 gặp chúng trong DB hay trong biểu đồ phễu thì đó là **dữ liệu cũ, không phải bug**.
 
-Chỉ báo giá **đã chốt** mới chảy sang trang Quản lý dự án, trang Hoá đơn, số doanh
+Chỉ báo giá **đã chốt** mới chảy sang trang Quản lý dự án, trang Hóa đơn đầu ra, số doanh
 thu và luồng ký chứng từ.
 
 ### 1.2 Trình soạn báo giá — lưới kiểu Excel
@@ -202,11 +202,25 @@ Hai loại **Chi Phí HCM** và **Phí Khách Hàng** có cột **Duyệt** theo
   (`reconcileExtraApprovals` trong [`src/services/quoteService.ts`](../../src/services/quoteService.ts)) —
   gửi `approved: true` trong payload **không** tự duyệt được.
 
-Riêng từng hàng nội bộ còn đánh dấu được **đã thanh toán** kèm **ảnh chứng từ**
-(quyền `quote:internal:pay`). Ảnh ở đây **vẫn là data-URL base64 nằm trong JSON của
-sheet** — khác với chứng từ Nhân sự (mục 6) đã chuyển sang kho object. Bù lại nó
-không đi kèm mọi lần đọc báo giá: phải gọi riêng
-`GET /:id/extra/:sheetId/:rid/proof` mới lấy ảnh.
+Mỗi hàng nội bộ **đã duyệt** còn là một **khoản chi** của kế toán: tích **đã chi** kèm **ảnh
+chứng từ** (ủy nhiệm chi), ghi **Ngày hóa đơn** + **Ghi chú kế toán**. Từ 2026-10-06 việc đó làm ở
+trang **Hóa đơn đầu vào** (mục 5), **không còn ở màn soạn báo giá** — màn soạn không còn cột / nút thanh
+toán (chủ repo: "cái thanh toán bên đó là cho kế toán, không nằm trong kia nữa"). Quyền
+`invoice:input:pay` cho đã chi + ảnh, `invoice:edit` cho ngày HĐ + ghi chú.
+
+- Dữ liệu ở **bảng riêng** `InputInvoiceEntry` (khoản) / `InputInvoiceProof` (ảnh), không trong JSON của
+  sheet — nên không đường Lưu báo giá, nhân bản hay lùi phiên bản nào ghi đè được nó. Ảnh **vẫn là
+  data-URL base64 trong CSDL** (khác chứng từ Nhân sự ở mục 6 đã lên kho object: kho object production
+  chưa có bản sao), **chỉ thêm** (thay / gỡ / bỏ tích chỉ rút vào lịch sử), và không bao giờ đi kèm lần
+  đọc báo giá hay danh sách — phải gọi riêng `GET /api/quotes/input-invoices/:quoteId/:side/:rid/proof`.
+- Bốn cờ cũ `paid` / `paidAt` / `paidById` / `paidProof` còn trong JSON hàng thì **đóng băng**: không ai đổi
+  được qua đường Lưu nữa, và chúng chỉ còn là nguồn dự phòng cho hàng chưa có khoản (công cụ
+  `backfillKhoanChi` chép chúng sang bảng ngay sau deploy).
+- Màn soạn **chặn làm mất hàng ĐÃ CHI**: xoá hàng / bảng / trang chứa nó → lỗi nêu tên hàng (xoá bảng /
+  trang bị chặn ngay trên trình duyệt; xoá dòng thì Ctrl+Z khôi phục được), nạp Excel mà làm mất nó ("Thay
+  toàn bộ" khi dòng không còn trong file, hay xoá sheet) bị chặn ngay ở hộp nạp, không xoá được báo giá chứa
+  nó, và chỉ người có quyền tích mới đổi được số lượng / đơn giá / số ngày của hàng đó. Lối thoát: nhờ kế
+  toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước.
 
 ### 1.6 Danh mục rạp gắn vào lưới
 
@@ -237,6 +251,63 @@ Cố ý không đẻ thêm đường ghi nào.
 - **Thành viên báo giá** (`PUT /:id/members`): người tạo hoặc admin thêm đồng nghiệp
   vào để cùng xem/sửa một báo giá cụ thể.
 - Nhân bản báo giá: `POST /:id/duplicate`.
+
+### 1.9 Ghi chú và màu ở danh sách báo giá
+
+Mỗi dòng của **Danh sách báo giá** có cột **Ghi chú** ở cuối hàng, ngay trước cột nút thao tác; cả bảng
+được tô **trắng / xám xen kẽ** để đọc theo hàng (chỉ bảng này — `.ql-table`).
+
+- Một ô = một chấm màu + chữ (tối đa 200 ký tự, một dòng). **Bấm chữ** để gõ — Enter hoặc rời ô là lưu,
+  Esc là huỷ; **bấm chấm** để chọn **một trong 5 màu** (đỏ · cam · xanh lá · xanh dương · tím) theo kiểu
+  bảng chọn của Zalo: chấm đang chọn có dấu ✓, bấm lại để bỏ màu. Enter chốt một từ của bộ gõ tiếng Việt
+  (OpenKey/Unikey) **không** bị tính là lệnh lưu.
+- **Dùng chung**: ghi chú thuộc về dòng báo giá, ai thấy dòng đó đều thấy (người ghi + giờ ghi hiện khi rê
+  chuột) — không phải ghi chú riêng từng người.
+- **Ai được ghi**: cùng cổng với sửa báo giá (`loadAuthorizedQuote(update)`) — chủ, thành viên có ít nhất một
+  vùng, người có `quote:update:all`. Thành viên chỉ-xem và người chỉ có `quote:read:all` xem được nhưng không
+  sửa. Account Hà Nội và tài khoản chi phí (view bị lược) không thấy cột này và bị 403 nếu gọi thẳng.
+- **Nằm ở bảng riêng `QuoteListNote`, KHÔNG phải cột trên `Quote`.** Ghi lên `Quote` làm `updatedAt` nhảy —
+  tức đá văng lần Lưu kế tiếp của người đang soạn chính báo giá đó (khoá lạc quan, mục 1.8). Nên ghi chú
+  không đổi `updatedAt`, không sinh `QuoteVersion`, không bị khoá khi báo giá đã xuất hoá đơn (dòng đó
+  chính là dòng cần nhắc "chờ thu"). Có thực thể realtime riêng (`quoteNote`) để danh sách của người khác
+  tự tươi mà không kéo theo tải lại trang Hóa đơn / Tổng quan.
+
+### 1.10 Bộ lọc, tìm thông minh và sắp xếp ở danh sách báo giá
+
+- **Bộ lọc** (`web/src/components/BoLocBaoGia.tsx`): chip **Trạng thái** (Nháp · Đã chốt · Không chốt, chọn nhiều; chip
+  "Khác" chỉ hiện khi còn dữ liệu của bốn trạng thái cũ) · **Người tạo** và **Công ty** (chọn nhiều, có hộp tìm) · **Của tôi** ·
+  **Ngày báo giá** (mẫu nhanh: hôm nay, 7 / 30 ngày qua, tháng này / trước, quý, năm — hoặc từ–đến) · **Tổng tiền** (gõ kiểu
+  người Việt: `100tr`, `1,5 tỷ`, `500k`; gõ chưa hiểu thì báo lỗi ngay tại ô, không đoán bừa số tiền) · **Ghi chú** (có / chưa có /
+  theo 5 màu; "chưa có" và "theo màu" loại trừ nhau). Các nhóm kết hợp **AND** với nhau và với phạm vi quyền — bộ lọc không bao
+  giờ mở rộng thứ người dùng được thấy.
+- **Số đếm** trên từng ô lấy từ `GET /api/quotes/facets`: mỗi nhóm đếm theo **mọi bộ lọc KHÁC** của nó (trừ chính nhóm đó),
+  nên bấm "Đã chốt" thì các nhóm còn lại cho biết lọc thêm sẽ ra bao nhiêu. Số đếm lỗi / chưa về thì bộ lọc vẫn dùng bình
+  thường, chỉ thiếu con số. Bộ lọc nằm trên URL (`#/list?status=draft,converted&company=2&from=…`) — dán link cho nhau là ra
+  đúng màn hình.
+- **Tìm thông minh** (`src/quoteListFilter.ts`): nhiều từ, không dấu, không cần đúng thứ tự; **mọi từ phải khớp**, mỗi từ khớp ở
+  bất kỳ nơi nào trong mã / tiêu đề / khách gõ tay, khách trong danh mục (mã, tên, SĐT, email, MST, người liên hệ), người tạo,
+  công ty, ghi chú dòng.
+- **Sắp xếp mọi cột** (Mã dự án · Người tạo · Tiêu đề · Ngày · Tổng · Công ty · Khách · Mã KH · Trạng thái). Cột **Tiêu đề** sắp
+  theo **chữ ô đang hiện** (tiêu đề rút gọn nếu có) bằng `sapIdTheoTieuDe` — SQL không `ORDER BY` được biểu thức đó, còn sắp
+  theo cột gốc thì dòng có tiêu đề rút gọn nằm sai chỗ; thứ tự tiếng Việt (dấu, đ) và số tự nhiên ("Sự kiện 2" trước "Sự kiện
+  10"). Cột có nhiều dòng bằng nhau dùng `id` làm khoá phụ nên phân trang không trùng / sót dòng.
+- **View bị lược** (account HN, tài khoản chi phí) chỉ còn ô tìm cũ + trạng thái + ngày; `GET /facets` trả 403; tìm / lọc / sắp
+  xếp theo thứ họ không thấy (tổng tiền, ghi chú, người tạo, khách danh mục) bị bỏ — lọc theo thứ người ta không được thấy là
+  cách đọc trộm nó bằng cách dò.
+
+### 1.11 Đổi khách hàng ngay trong báo giá
+
+Khối **Bên nhận · Khách hàng** ở màn soạn có ô **Mã khách hàng (danh mục)** hiện khách đang gắn và nút **Đổi khách hàng** (hộp
+chọn dùng chung với bước 3 của "Tạo báo giá mới": `web/src/components/CustomerPicker.tsx`).
+
+- Đổi khách là đổi **cả khối bên nhận**: tên, người liên hệ, email, SĐT, địa chỉ lấy theo khách mới. Ô nào khách mới để
+  trống thì **để trống** — không giữ email / SĐT của khách cũ dưới tên khách mới (báo giá gửi đi mang email của công ty khác
+  nặng hơn nhiều một ô trống). Chưa lưu cho tới khi bấm Lưu; các ô vẫn sửa tay được. Chọn lại đúng khách đang gắn thì không
+  đè gì.
+- Cùng cổng với mọi ô của khối này: báo giá đã xuất hoá đơn, người chỉ xem, và account phụ không có vùng "Báo giá chính"
+  không thấy nút.
+- Máy chủ kiểm khách mới (`kiemKhachDuocGan`, xem [QUOTE_WORKFLOW.md](QUOTE_WORKFLOW.md) bất biến 6): phải tồn tại và người đổi
+  phải đọc được nó; chỉ kiểm khi giá trị **đổi**. Nhật ký `quote.update` ghi mã + tên khách trước / sau.
 
 ---
 
@@ -328,13 +399,16 @@ Sửa một ô chỉ cập nhật đúng dòng đó, không vẽ lại cả tran
 
 ## 5. Hoá đơn và công nợ (kế toán)
 
-Trang **Hoá đơn** thay bảng Excel theo dõi hoá đơn của kế toán. **Cùng nguồn dữ liệu**
+Trang **Hóa đơn đầu ra** (tên cũ "Hoá đơn"; hoá đơn xuất cho khách) thay bảng Excel theo dõi hoá đơn của kế toán. **Cùng nguồn dữ liệu**
 với Quản lý dự án (bảng `QuoteSheet`): kế toán **nhập ở đây**, trang Dự án chỉ **tham chiếu**.
 
 - Kế toán nhập: Hạng mục · PO/HĐ · CTy (GN/SM/CLF) · Số hoá đơn · Ngày hoá đơn ·
   Hình thức thanh toán · Ngày đóng đơn hàng · Link hoá đơn · Chứng từ gửi đi / trả về · Năm · Note.
 - **Ngày thanh toán** tách thành quyền riêng `invoice:pay` — người nhập hoá đơn
-  không mặc nhiên đánh dấu được đã thu tiền.
+  không mặc nhiên đánh dấu được đã thu tiền. `invoice:pay` chỉ là ngày **THU** tiền (tiền VÀO) của trang
+  này; việc **CHI** (tiền RA) theo từng hàng bảng nội bộ dùng quyền riêng `invoice:input:pay` ở trang Hóa
+  đơn đầu vào — cố ý không dùng chung, để ai đang giữ `invoice:pay` (qua ghi đè vai trò, quyền riêng, hay
+  `invoice:manage` bắc cầu) không tự động tích được "đã chi".
 - **Tình trạng HĐ tự động** chuyển "Hoàn tất" khi có đủ Số hoá đơn + Ngày hoá đơn (không tick tay).
 - **Công nợ** = số ngày từ Ngày hoá đơn khi chưa thanh toán, **tô đỏ khi quá hạn**.
   Hạn tính theo **hạn công nợ riêng của từng khách** (đặt ở trang Mã khách hàng);
@@ -342,8 +416,52 @@ với Quản lý dự án (bảng `QuoteSheet`): kế toán **nhập ở đây**
 - Ô bắt buộc chưa điền **tô hồng**, điền rồi trở lại nền trắng.
 
 Có thêm màn **chỉ-xem bảng nội bộ** (`quote:internal:view`) cho tài khoản phụ trách
-chi phí: thấy bảng nội bộ của một báo giá và đánh dấu thanh toán từng hàng, **không**
-thấy giá khách, khách hàng hay báo giá chính — server đã lược dữ liệu trước khi trả.
+chi phí: thấy bảng nội bộ của một báo giá, **không** thấy giá khách, khách hàng hay báo giá
+chính — server đã lược dữ liệu trước khi trả. Từ 2026-10-06 màn này **chỉ xem**: cột Thanh toán chỉ
+còn chữ "✓ Đã TT · ngày" (theo khoản kế toán), không tích được, không mở được ảnh chứng từ, không thấy
+ngày HĐ / ghi chú KT. Quyền `quote:internal:pay` mà tài khoản này từng dùng để tích nay không còn tác
+dụng — việc tích thuộc về kế toán ở trang Hóa đơn đầu vào.
+
+### Hóa đơn đầu vào
+
+Trang **Hóa đơn đầu vào** (mới 2026-09-30, `#/invoices-in`; **ghi được** từ 2026-10-06) là đối xứng của trang
+Hóa đơn đầu ra: liệt kê mọi **hàng bảng nội bộ ĐÃ DUYỆT** — mỗi hàng là một khoản chi mà kế toán phải đòi /
+đối chiếu hoá đơn đầu vào — và **kế toán ghi ngay tại đây**, không cần (và không thể) mở báo giá.
+
+- **"Đã duyệt" có hai dạng.** Chi phí HCM và Phí khách hàng: duyệt **theo từng hàng** (mục 1.5). Báo giá Hà
+  Nội: duyệt ở **mức báo giá** (`hnStatus = approved`, mục 3) — khi đó mọi hàng HN vào. Hàng chưa duyệt không
+  cộng vào tổng báo giá nên không xuất hiện (trừ khi nó đã có dữ liệu kế toán — xem "Cần chú ý").
+- Mỗi dòng: mã dự án (theo sheet) · khách · hạng mục (kèm loại bảng, chi tiết) · NS · SL / đơn giá / thành
+  tiền · chứng từ (VAT / HĐNS / TM) · lưu kho · ngày + người duyệt · cột **Kế toán** (đã chi + ngày chi, có ảnh
+  hay chưa, ngày HĐ, ghi chú). Lọc theo loại bảng, chứng từ, đã chi, có ngày HĐ hay chưa, trạng thái báo giá,
+  khoảng ngày duyệt; tìm không dấu (cả ghi chú KT, ngày HĐ, người đánh dấu); sắp theo ngày duyệt / thành tiền.
+- **Ghi ở hộp "Khoản chi"** (mở từ cột Kế toán): tích **Đã chi** kèm **ảnh ủy nhiệm chi** (`invoice:input:pay`
+  — ngày chi do máy chủ đóng dấu lúc tích; ảnh không bắt buộc, khoản đã chi mà thiếu ảnh hiện "⚠ chưa có
+  ảnh"), **Ngày hóa đơn** + **Ghi chú kế toán** (`invoice:edit`, tối đa 1000 ký tự). Bỏ tích / thay ảnh / gỡ
+  ảnh chỉ **rút** ảnh cũ vào lịch sử — vẫn xem lại được, tối đa 20 ảnh một khoản. Thiếu quyền ô nào thì ô
+  đó khoá kèm lý do.
+- **Không đụng báo giá.** Ghi vào bảng riêng nên không đổi `Quote.updatedAt` (người đang soạn báo giá không
+  bị đá văng), không sinh phiên bản báo giá. Hai kế toán sửa cùng một khoản: người lưu sau nhận báo "vừa có
+  người sửa", trang nạp lại và **giữ** phần đang nhập — không ghi đè im lặng; danh sách tự nạp lại (realtime)
+  mà người kia vừa đổi đúng ô mình đang sửa thì hộp **hỏi trước khi ghi đè** (nêu người + giá trị mới). Hộp
+  còn thay đổi chưa lưu thì F5 / đóng tab / Back / bấm menu đều hỏi; đang nén ảnh thì chưa Lưu được; Ngày
+  hóa đơn ngoài 2000–2100 báo ngay.
+- **TÍCH MỚI chỉ cho hàng đã duyệt.** Hàng đã có dữ liệu kế toán mà sau đó bị bỏ duyệt, phần Hà Nội bị trả
+  lại / giao lại, hàng bị xoá khỏi báo giá, hay báo giá bị xoá — vẫn hiện ở thẻ **Cần chú ý** (tách khỏi danh
+  sách chính và khỏi mọi tổng tiền) để kế toán thấy, sửa, bỏ tích được; dòng của báo giá đã xoá không mở được
+  báo giá nữa nhưng hộp Khoản chi vẫn mở ở chế độ **chỉ xem** (xem ảnh chứng từ, ngày HĐ, ghi chú, lịch sử ảnh).
+  Hàng cũ trùng mã nội bộ chỉ xem cho tới lần Lưu báo giá kế (máy tách mã, mỗi hàng giữ cờ của chính nó); hàng
+  cũ đã trả mà THIẾU mã thì báo giá đó không Lưu được cho tới khi quản trị chạy công cụ chuẩn hoá mã
+  (`backfillKhoanChi --sua-rid` — DISASTER_RECOVERY.md).
+- Số tiền của hàng đã chi bị đổi **sau** khi chi (chỉ người có quyền tích làm được) → trang báo "Số tiền đã
+  đổi sau khi chi", kế toán đối chiếu rồi bấm "Xác nhận số tiền hiện tại".
+- Duyệt, bỏ duyệt, đổi chứng từ vẫn làm ở màn soạn báo giá. Tiền tính bằng ĐÚNG `extraTableSum` ở máy chủ
+  (`src/inputInvoices.ts`) — trang không tự cộng lại.
+- Quyền vào trang `invoice:page` (cùng trang Hóa đơn đầu ra). Quyền xem Quản lý dự án (`invoice:read`)
+  **không đủ**: đây là dữ liệu chi phí. Danh sách không bao giờ mang ảnh ủy nhiệm chi — chỉ người có
+  `invoice:input:pay` mở được ảnh, và mỗi lần mở ghi nhật ký (`quote.internal.proof-view`).
+- **Cố ý chưa có:** số hoá đơn / nhà cung cấp riêng cho từng khoản (chủ repo 2026-10-06), tích nhiều khoản
+  một lần, sửa thẳng trong bảng, dán ảnh bằng Ctrl+V.
 
 ---
 
@@ -380,7 +498,7 @@ Hệ thống làm được:
 
 - Mã khách hàng + tên công ty, tìm kiếm có debounce, sắp xếp, phân trang.
 - **Ghi chú / theo dõi khách** (`POST /:id/notes`, quyền `customer:note:add`).
-- **Hạn công nợ riêng cho từng khách** — trang Hoá đơn dùng số này để tô đỏ.
+- **Hạn công nợ riêng cho từng khách** — trang Hóa đơn đầu ra dùng số này để tô đỏ.
 - Phạm vi dữ liệu cô lập ở **server** theo người sở hữu (`customer:read:own` so với
   `customer:read:all`); giao diện không nới lỏng gì thêm.
 
@@ -451,7 +569,7 @@ ghi đè ở hai mức:
 
 Cả hai được resolve lại **mỗi request** từ CSDL. Vì vậy **đừng đọc bảng vai trò như
 một danh sách cố định** — nguồn sự thật là
-[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 142 endpoint ở
+[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 143 endpoint ở
 [ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md), có
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI.
 
@@ -463,7 +581,7 @@ một danh sách cố định** — nguồn sự thật là
 | `manager` | Account | làm báo giá của mình + báo giá được thêm làm thành viên; chốt/không-chốt theo khách; xem dự án của mình |
 | `account_hn` | Account HN | **chỉ** điền giá Hà Nội của báo giá được giao |
 | `hr` | Nhân sự | **chỉ xem** hồ sơ nhân sự |
-| `accountant` | Kế toán | xem hồ sơ nhân sự + đánh dấu thanh toán + ghi chú kế toán; nhập hoá đơn |
+| `accountant` | Kế toán | xem hồ sơ nhân sự + đánh dấu thanh toán + ghi chú kế toán; nhập hoá đơn đầu ra; ở trang Hóa đơn đầu vào tích đã chi + ảnh chứng từ, ghi ngày HĐ + ghi chú — **không** thấy báo giá |
 
 > Cột nhãn lấy từ `ROLE_LABEL` ở [`web/src/lib/format.tsx`](../../web/src/lib/format.tsx)
 > — một nguồn duy nhất cho mọi màn. Đáng chú ý: `manager` hiện là **"Account"**, không

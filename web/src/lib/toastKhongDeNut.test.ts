@@ -10,7 +10,7 @@
  * jsdom không có layout nên phần "đè" kiểm qua hai thứ quyết định nó: toast được nâng lên trên thanh
  * khi đang ở trình soạn, và CSS thật sự cho chuột đi xuyên hộp chứa.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { toast } from "./ui";
 
 // Đọc NGUYÊN VĂN styles.css. KHÔNG dùng `?raw`: vitest xử lý tệp .css riêng và trả chuỗi RỖNG (đã đo)
@@ -31,6 +31,65 @@ describe("toast không đè thanh nút của trình soạn", () => {
     document.body.innerHTML = '<div class="editor"><div class="actions"><button>⋯</button></div></div>';
     toast("Đã lưu", "success");
     expect(document.getElementById("toast-host")!.style.bottom).toBe("84px");
+  });
+
+  // Thanh có mép trên ở `top` (toạ độ khung nhìn) và cao `cao` — jsdom không dàn trang nên tự đặt hộp. Cửa sổ jsdom cao 768px.
+  const dinhThanh = (top: number, cao: number) => {
+    const thanh = document.querySelector(".editor .actions") as HTMLElement;
+    thanh.getBoundingClientRect = () => ({ top, bottom: top + cao, height: cao, left: 0, right: 0, width: 0, x: 0, y: top, toJSON() {} }) as DOMRect;
+  };
+  const day = () => window.innerHeight;
+  const vaoSoan = () => { document.body.innerHTML = '<div class="editor"><div class="actions"><button>⋯</button></div></div>'; };
+  const bottom = () => document.getElementById("toast-host")!.style.bottom;
+
+  it("thanh CAO hơn một hàng (lớp hai hàng ~100px, dính đáy) → toast nâng theo mép trên THẬT + 21px, không cố định 84px", () => {
+    vaoSoan();
+    dinhThanh(day() - 100.4, 100.4);
+    toast("Đã lưu", "success");
+    // ceil(100.4) + 21 = 122 — làm tròn LÊN để không hở nửa điểm ảnh đè lên mép trên của thanh
+    expect(bottom()).toBe("122px");
+  });
+
+  it("thanh THẤP dính đáy (một hàng 63px, hoặc dải cuộn điện thoại 55px) → vẫn giữ sàn 84px như trước", () => {
+    vaoSoan();
+    dinhThanh(day() - 63, 63);
+    toast("Đã lưu", "success");
+    expect(bottom()).toBe("84px");
+    dinhThanh(day() - 55, 55);
+    toast("Đã lưu lần nữa", "success");
+    expect(bottom()).toBe("84px");
+  });
+
+  it("CUỘN HẾT TRANG: thanh đứng ở chỗ tĩnh, cao hơn đáy cửa sổ 53px → toast đặt theo MÉP TRÊN của thanh, không theo chiều cao", () => {
+    // Đo 2026-10-06 ở 1280×720 / 1366×768 / 1024×768: đặt theo chiều cao (63 + 21 = 84px) thì toast đè "⋯" 43×13px.
+    vaoSoan();
+    dinhThanh(day() - 53 - 63, 63);
+    toast("Đã lưu", "success");
+    expect(bottom()).toBe(`${53 + 63 + 21}px`);
+  });
+
+  it("trang NGẮN: thanh nằm hẳn phía trên vùng toast → không nâng (vị trí mặc định của CSS)", () => {
+    vaoSoan();
+    dinhThanh(200, 63);
+    toast("Đã lưu", "success");
+    expect(bottom()).toBe("");
+  });
+
+  it("đo LẠI sau hai khung hình: toast sinh giữa lúc lưu (thanh tạm thấp) vẫn kịp nâng khi thanh cao lên", () => {
+    // Lớp hai hàng: GridTable tạm gỡ nhóm thêm hàng lúc lưu → thanh 79px, vẽ lại xong 93px (đo 2026-10-06, 1024×768).
+    const hang: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((f) => { hang.push(f); return hang.length; });
+    try {
+      vaoSoan();
+      dinhThanh(day() - 79, 79);
+      toast("Đã lưu", "success");
+      expect(bottom()).toBe(`${79 + 21}px`);
+      dinhThanh(day() - 93, 93);
+      while (hang.length) hang.shift()!(0);
+      expect(bottom()).toBe(`${93 + 21}px`);
+    } finally {
+      raf.mockRestore();
+    }
   });
 
   it("ngoài trình soạn → vị trí mặc định của CSS (không đặt inline)", () => {

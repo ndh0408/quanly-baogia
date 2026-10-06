@@ -11,7 +11,8 @@ import { taiLaiTrang } from "../lib/phienBan";
 async function guardLeave(): Promise<boolean> {
   const w = window as Window & { __editorDirty?: boolean };
   if (!w.__editorDirty) return true;
-  const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trong báo giá. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
+  // Cờ dùng chung của màn soạn báo giá, màn Account HN và hộp Khoản chi (Hóa đơn đầu vào) — câu hỏi không nói "báo giá".
+  const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trên trang này. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
   // FE-12: chọn bỏ → báo editor xoá bản nháp cục bộ (không thì lần mở sau lại hỏi khôi phục đúng phần
   // người dùng vừa quyết định bỏ).
   if (ok) { w.__editorDirty = false; window.dispatchEvent(new Event("editor:discard")); }
@@ -91,6 +92,7 @@ import { DashboardPage } from "../pages/Dashboard";
 import { QuoteListPage } from "../pages/QuoteList";
 import { ProjectsPage } from "../pages/Projects";
 import { InvoicesPage } from "../pages/Invoices";
+import { InvoicesInPage } from "../pages/InvoicesIn";
 // CHỈ lấy kiểu — `import type` bị xoá khi biên dịch nên trình soạn vẫn ở chunk riêng.
 import type { QuoteEditorPage as QuoteEditorThat } from "../pages/QuoteEditor";
 // Lazy-load các trang NẶNG/route-riêng (editor + lưới + công thức/clipboard, wizard, view HN) → tách
@@ -147,7 +149,8 @@ const ICON: Record<string, ReactNode> = {
   venues: <svg {...S}><path d="M3 20V8l9-4 9 4v12" /><path d="M3 20h18" /><rect x="8" y="12" width="8" height="8" /><line x1="8" y1="16" x2="16" y2="16" /></svg>,
   notifications: <svg {...S}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>,
   projects: <svg {...S}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>,
-  invoices: <svg {...S}><path d="M6 3h9l4 4v14l-2.5-1.5L14 21l-2.5-1.5L9 21l-2.5-1.5L4 21V5a2 2 0 0 1 2-2z" /><line x1="8" y1="9" x2="15" y2="9" /><line x1="8" y1="13" x2="15" y2="13" /></svg>,
+  invoices: <svg {...S}><path d="M6 3h9l4 4v14l-2.5-1.5L14 21l-2.5-1.5L9 21l-2.5-1.5L4 21V5a2 2 0 0 1 2-2z" /><line x1="11.5" y1="14" x2="11.5" y2="8.5" /><polyline points="9,11 11.5,8.5 14,11" /></svg>,
+  "invoices-in": <svg {...S}><path d="M6 3h9l4 4v14l-2.5-1.5L14 21l-2.5-1.5L9 21l-2.5-1.5L4 21V5a2 2 0 0 1 2-2z" /><line x1="11.5" y1="8.5" x2="11.5" y2="14" /><polyline points="9,11.5 11.5,14 14,11.5" /></svg>,
   users: <svg {...S}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2a3 3 0 0 1 0 5.6" /><path d="M17.5 20a5.5 5.5 0 0 0-3-4.9" /></svg>,
   permissions: <svg {...S}><path d="M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z" /></svg>,
   audit: <svg {...S}><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></svg>,
@@ -178,7 +181,10 @@ const NAV: Nav[] = [
   { key: "employees", label: "Danh bạ nhân sự", group: "Công việc", perm: "employee:read:own" },
   { key: "notifications", label: "Thông báo", group: "Công việc" },
   { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: ["quote:create", "invoice:read"] },
-  { key: "invoices", label: "Hóa đơn", group: "Quản trị", perm: "invoice:page" },
+  // "Hóa đơn" cũ (kế toán theo dõi hoá đơn XUẤT cho khách) đổi tên thành ĐẦU RA theo yêu cầu chủ repo 2026-09-30;
+  // GIỮ khoá `invoices` (link / dấu trang / Dashboard "Cần xử lý" vẫn trỏ #/invoices). Trang ĐẦU VÀO đứng ngay sau.
+  { key: "invoices", label: "Hóa đơn đầu ra", group: "Quản trị", perm: "invoice:page" },
+  { key: "invoices-in", label: "Hóa đơn đầu vào", group: "Quản trị", perm: "invoice:page" },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage" },
   { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage" },
   { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view" },
@@ -559,6 +565,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               : key === "permissions" ? <PermissionsPage me={me} />
               : key === "projects" ? <ProjectsPage me={me} />
               : key === "invoices" ? <InvoicesPage me={me} />
+              : key === "invoices-in" ? <InvoicesInPage me={me} />
               : key === "profile" ? <ProfilePage me={me} onMe={onMe} />
               : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
               : key === "employees" ? <EmployeesPage me={me} query={query} onQuery={setQuery} />

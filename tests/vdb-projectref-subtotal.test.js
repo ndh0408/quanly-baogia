@@ -30,7 +30,7 @@ const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "Quote" LIMIT 1'
 if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres");
 
 // TAG có dấu thời gian → không đụng dữ liệu của agent/bộ test khác trên cùng CSDL dùng chung.
-// KHÔNG được kết thúc bằng `_NNN`: validator projectCode (src/validators.ts:46) cắt hậu tố đó.
+// KHÔNG được kết thúc bằng `_NNN`: validator `projectCode` (src/validators.ts) cắt hậu tố đó.
 const TAG = `vdbpref${Date.now()}`;
 const MA_CHUA_BACKFILL = `${TAG}-CB`;   // subtotal = 0 (dữ liệu cũ), items có tiền thật
 const MA_KHOP = `${TAG}-KHOP`;          // cột khớp items (dữ liệu lưu bình thường)

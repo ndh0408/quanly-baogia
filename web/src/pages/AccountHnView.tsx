@@ -343,8 +343,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       )}
 
       <HnTables moMacDinh tables={hnTables} templates={templates} companyId={q.companyId}
-        editable={editable && !saving} canApprove={false} canPay={false} quoteId={q.id}
-        onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; }} />
+        editable={editable && !saving} canApprove={false} onMarkDirty={mark} />
 
       <div className="ahn-grand-card"><span className="ahn-grand-label">Tổng tất cả {hnTables.length} sheet Hà Nội</span><span className="ahn-grand-val">{M.fmtMoney(tong)}</span></div>
 

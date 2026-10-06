@@ -42,3 +42,14 @@ Cái KHÔNG lùi được: những **tệp đã ghi SAU khi bật kho object** k
 lùi thật thì phải kéo chúng về CSDL trước — chưa có script cho việc đó, và viết nó là điều kiện bắt
 buộc nếu quyết định này bị lật. `scripts/backup/backup-objects.sh` + bài diễn tập khôi phục là thứ
 bảo đảm dữ liệu vẫn còn để kéo về.
+
+## Ngoại lệ có chủ ý (2026-10-06): ảnh khoản chi hàng bảng nội bộ
+
+Quyết định trên áp cho chứng từ **Nhân sự** (`PersonnelRecord.paymentProof`). Ảnh ủy nhiệm chi của
+**khoản chi hàng bảng nội bộ** (trang Hóa đơn đầu vào, bảng `InputInvoiceProof`) thì CỐ Ý vẫn nằm trong
+Postgres: kho object production **chưa có bản sao nào** (`docs/operations/DISASTER_RECOVERY.md`, bảng
+đầu), còn Postgres có dump trước mỗi deploy và hằng đêm — đưa chứng từ tài chính MỚI vào chỗ không có
+bản sao là đổi một rủi ro "dump phình" lấy rủi ro mất hẳn. Ảnh và khoản ghi trong cùng một transaction
+nên không có "con trỏ vào hư không". Bảng đã giữ `sha256` / `size` / `mime`, nên khi kho object có sao
+lưu off-host thì chuyển theo đúng khuôn đọc-song-song ở trên là việc cơ học (nợ ghi ở
+`docs/REMAINING_RISKS.md`).

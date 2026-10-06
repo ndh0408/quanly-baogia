@@ -54,7 +54,7 @@ Chromium được tìm theo thứ tự `SMOKE_CHROMIUM` → thư mục `PLAYWRIG
 `scripts/ci/docker-smoke.sh` (bước `[11/13]`, chạy trong container). Ba script chia
 nhau ba vế — xem mục dưới để biết vì sao hai vế production không gộp làm một.
 
-**19 bước, đi hết một luồng người dùng thật:**
+**20 bước, đi hết một luồng người dùng thật:**
 
 | Bước | Kiểm gì |
 |---|---|
@@ -70,6 +70,7 @@ nhau ba vế — xem mục dưới để biết vì sao hai vế production khô
 | `U10b` | mất tab giữa chừng — bản nháp cục bộ cứu được phần chưa lưu |
 | `U11`–`U12` | wizard 3 bước tạo báo giá mới → lưu bản mới (POST tạo bản ghi thật) |
 | `U13` | xuất Excel từ menu ⋯ — file thật, không phải trang HTML |
+| `U13b` | **thanh nút dính đáy màn soạn — không nút nào đè nút nào** ở 22 cỡ cửa sổ từ 360px tới 3840px (điện thoại, máy tính bảng, laptop 1366×768 và 1280×720, FHD tỉ lệ 125%/150%, 2K, 4K): đổi cỡ rồi đo `getBoundingClientRect` từng cặp nút trên Chromium thật, kèm "thanh không tràn ngang" và "Lưu luôn trong màn hình" (kiểm ngược đã đo: đưa khối `@media (max-height: 820px), (max-width: 860px)` cũ trở lại thì bước này ĐỎ ở 12/22 cỡ, nặng nhất 117px ở 1366×768 — CI chạy 1440×900 nên lỗi từng sống qua mọi lượt xanh). Luật CSS tương ứng khoá thêm ở `web/src/styles.thanhDay.test.ts` (giải cascade thật, chạy trong vitest) |
 | `U14` | đăng xuất |
 | `U15` | phân quyền: `account_hn` gọi thẳng API của admin và phải nhận đúng 403 |
 | `U15b` | **account HN gõ giá rồi bấm Lưu MỘT lần — CSDL phải đổi** (kiểm ngược đã đo: gỡ hai luật `.account-hn-view .grid-stat` trong `web/src/styles.css` thì nút Lưu xê 28px khi ô nhận focus, `mouseup` trượt khỏi nút, trình duyệt không sinh `click`, và CSDL giữ nguyên số cũ) |

@@ -4,7 +4,7 @@ import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable } from "./GridTable";
 import { type EditorTemplate } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
-import { extraTableSum, removeTableFromList, ExtraPayDialog, type ExtraTable } from "./ExtraTables";
+import { extraTableSum, removeTableFromList, loiXoaBangDaChi, type ExtraTable } from "./ExtraTables";
 import { KhoiSheet } from "./KhoiSheet";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
@@ -21,6 +21,9 @@ import { KhoiSheet } from "./KhoiSheet";
 // Lưới là GridTable ĐẦY ĐỦ như lưới báo giá chính, kèm `fxBar` (thanh công thức). Trước đây chỉ
 // lưới chính mới bật fxBar; phần HN là nơi người ta gõ giá nên cần đúng bộ Excel đó: công thức,
 // copy/cắt/dán nhiều ô, fill-down, Ctrl+Z/Y, gõ tiếng Việt bằng IME.
+//
+// KHÔNG có cột THANH TOÁN (2026-10-06): kế toán tích ĐÃ CHI + ảnh chứng từ của hàng HN ở trang Hóa đơn đầu vào,
+// như hàng Chi phí HCM / Phí KH — xem ExtraTables.tsx.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
 
 /** Mẫu cột của một bảng HN: `templateId` của bảng, thiếu thì mẫu đầu của công ty (không có thì mẫu đầu
@@ -31,18 +34,14 @@ export function mauBangHn(t: { templateId?: number }, templates: EditorTemplate[
   return templates.find((x) => x.id === (t.templateId || ds[0]?.id)) || ds[0];
 }
 
-export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false, thanhChung, phuHieu, dieuKhien }: {
+export function HnTables({ tables, templates, companyId, editable, canApprove, onMarkDirty, moMacDinh = false, thanhChung, phuHieu, dieuKhien }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
   tables: HnTable[];
   templates: EditorTemplate[];
   companyId?: number;
   editable: boolean;
   canApprove?: boolean;
-  canPay?: boolean;
-  quoteId?: number;
   onMarkDirty: () => void;
-  /** Mốc `updatedAt` MỚI sau khi route /pay bump — màn gọi phải nhận để khỏi tự đâm 409 giả. */
-  onQuoteTouched?: (updatedAt: string) => void;
   /** Mở sẵn khối. `AccountHnView` bật (cả trang chỉ có mỗi nó); trang soạn báo giá để TẮT, vì ở đó
    *  khối này là một trong ba luồng và mở hết là trang dài ra mấy màn hình. */
   moMacDinh?: boolean;
@@ -56,7 +55,6 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
   const onChange = () => { onMarkDirty(); redraw(); };
-  const [payRow, setPayRow] = useState<ItemK | null>(null);
   const [active, setActive0] = useState(0);
   const [mo, setMo] = useState(moMacDinh);
   const setActive = (i: number) => { setActive0(i); redraw(); };
@@ -115,6 +113,8 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
       `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
       { danger: true, confirmText: "Xoá" },
     ).then((dong) => dong && songRef.current));
+    // Bảng có hàng kế toán đã đánh dấu ĐÃ CHI: lõi chặn trước cả hộp hỏi (xem removeTableFromList).
+    if (r.chan) { toast(loiXoaBangDaChi(r.chan), "error"); return; }
     if (!r.removed) return;
     setActive(r.active);
     onChange();
@@ -176,9 +176,6 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
             usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
             editable={editable} internalNote={false} cotNoiBo
             approveCol={false} canApprove={!!canApprove}
-            payCol={!!canPay && !!quoteId}
-            canPay={!!canPay && !!quoteId}
-            onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu phần Hà Nội trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
             groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
             sheetTotalLine={false}
             dock={thanhChung ? thanhChung.dock : undefined}
@@ -187,16 +184,6 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
         </div>
       ) : (
         <div className="muted" style={{ padding: "6px 0 2px" }}>Chưa có sheet Hà Nội — bấm “+ Thêm sheet” phía trên.</div>
-      )}
-
-      {payRow && quoteId && (
-        <ExtraPayDialog quoteId={quoteId} hn item={payRow} onClose={() => setPayRow(null)} onQuoteTouched={onQuoteTouched}
-          onSaved={(paid, hasProof) => {
-            const r = payRow as Record<string, unknown>;
-            r.paid = paid; r.hasPaidProof = hasProof;
-            if (!paid) { r.paidAt = null; r.paidById = null; }
-            setPayRow(null); onChange();
-          }} />
       )}
     </KhoiSheet>
   );

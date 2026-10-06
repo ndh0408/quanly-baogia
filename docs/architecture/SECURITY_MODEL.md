@@ -62,9 +62,20 @@ lại mỗi request.
 **Quyền nằm ở SERVER.** Ẩn menu ở frontend là tiện lợi cho người dùng, không phải
 phân quyền. Mọi endpoint tự kiểm quyền.
 
-`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 142 endpoint và
+`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 143 endpoint và
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI — **một endpoint không
 có trong ma trận là một endpoint chưa ai soát quyền**.
+
+**Ghi `global` có chủ ý của kế toán (trang Hóa đơn đầu vào, từ 2026-10-06).** Kế toán không có
+`quote:read:*` — không mở được báo giá (`GET /api/quotes/:id` → 403) — nhưng ghi được khoản chi của
+**hàng bảng nội bộ đã duyệt** ở `PUT /api/quotes/input-invoices/:quoteId/:side/:rid`, không qua
+`canOnQuote`: cùng tiền lệ trang Hóa đơn đầu ra (`PUT /sheets/:sheetId/invoice`) và ghi chú / thanh
+toán hồ sơ nhân sự. Bù lại bằng kiểm trên ĐÚNG bản ghi: TÍCH MỚI chỉ cho hàng đã duyệt của báo giá chưa
+xoá; quyền theo TỪNG TRƯỜNG (`invoice:input:pay` cho đã chi + ảnh, `invoice:edit` cho ngày HĐ + ghi
+chú — thiếu quyền của bất kỳ trường nào là 403 và không ghi gì); phản hồi chỉ mang trường kế toán của
+đúng khoản đó, không tổng tiền báo giá, không thông tin khách, không ảnh. `invoice:input:pay` là khoá
+RIÊNG, cố ý không dùng lại `invoice:pay` (ngày thu tiền): dùng lại thì mọi người đang giữ `invoice:pay`
+qua ghi đè vai trò / quyền riêng / `invoice:manage` bắc cầu tự động tích được "đã chi".
 
 ## PII khi lưu trữ
 
@@ -74,6 +85,7 @@ có trong ma trận là một endpoint chưa ai soát quyền**.
 |---|---|
 | CCCD, số tài khoản, lương | mã hoá khi `PII_ENC_KEY` được đặt |
 | bí mật TOTP (MFA) | mã hoá bằng `MFA_ENC_KEY` (bắt buộc ở production) |
+| ảnh ủy nhiệm chi của khoản chi hàng nội bộ (`InputInvoiceProof.dataUrl`) | **KHÔNG** mã hoá — base64 thô trong CSDL, như `paidProof` cũ trong JSON hàng; gác bằng quyền đọc + nhật ký mỗi lần xem (đoạn cuối mục này) |
 
 Không đặt `PII_ENC_KEY` → mã hoá **TẮT ÊM**, dữ liệu ghi thô. Ở production việc
 này nay có cảnh báo lúc khởi động (`src/config.ts`), và bảng trạng thái tính năng
@@ -82,6 +94,14 @@ này nay có cảnh báo lúc khởi động (`src/config.ts`), và bảng trạ
 > **MẤT KHOÁ = MẤT DỮ LIỆU VĨNH VIỄN.** Đã diễn tập trên DEV: khôi phục dump +
 > đúng khoá → giải mã 72/72 trường khớp từng byte; dump + sai khoá →
 > `unable to authenticate data`. Khoá phải cất **tách khỏi** bản dump.
+
+**Ảnh ủy nhiệm chi là PII của bên thứ ba** (tên + số tài khoản người nhận + số tiền). Chỉ người có
+`invoice:input:pay` xem được (`GET /api/quotes/input-invoices/:quoteId/:side/:rid/proof`); tài khoản chi
+phí (`quote:internal:view`) không còn đường xem nào — đặc quyền tối thiểu. Mỗi lần xem ghi nhật ký
+`quote.internal.proof-view` (chỉ định danh: phía, mã hàng, mã ảnh — không chép ảnh). Ảnh không bao giờ đi
+vào danh sách, phản hồi báo giá, nhật ký, bản xuất GDPR hay phiên bản báo giá; không bao giờ bị xoá (thay
+/ gỡ / bỏ tích chỉ rút vào lịch sử, FK `RESTRICT`). Nằm ở Postgres chứ chưa ở kho object vì kho object
+production chưa có bản sao — dump CSDL vì thế mang theo ảnh ở dạng thô.
 
 ## Bí mật
 
@@ -107,8 +127,12 @@ thật lọt vào file mẫu.
 
 `src/audit.ts` ghi: đăng nhập (thành công/thất bại), đổi mật khẩu, thay đổi MFA,
 đổi vai trò, vô hiệu hoá tài khoản, thao tác trên báo giá, duyệt, xuất file, và
-thao tác chứng từ thanh toán. Bảng thiên về **chỉ ghi thêm**; job dọn theo
-`RETAIN_AUDIT_DAYS` (mặc định 730 ngày).
+thao tác chứng từ thanh toán — gồm khoản chi của trang Hóa đơn đầu vào (`quote.internal.pay` /
+`unpay` / `ke-toan`, before/after không chép ảnh) và mỗi lần xem ảnh (`quote.internal.proof-view`).
+Bảng thiên về **chỉ ghi thêm**; job dọn theo `RETAIN_AUDIT_DAYS` (mặc định 730 ngày).
+
+`audit()` là best-effort (nuốt lỗi), nên chuỗi bằng chứng của khoản chi **không** dựa vào nhật ký: khoản
+tự giữ `version` / `updatedBy*` / ảnh chụp hàng lúc tích, dòng ảnh tự giữ người tải lên và người rút.
 
 ## ĐÃ BIẾT LÀ CHƯA LÀM
 

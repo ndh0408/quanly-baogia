@@ -9,13 +9,13 @@
 ## A. Executive Summary
 
 **Trước.** Một hệ quản lý báo giá đang chạy thật, kiến trúc lành mạnh (React SPA → Express →
-Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 142 endpoint, tiền dùng `Decimal`. Nhưng
+Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 143 endpoint, tiền dùng `Decimal`. Nhưng
 lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml` khai đủ cổng mà **chưa bao giờ chạy**
 (tài khoản GitHub bị khoá vì billing — mọi lượt Actions hỏng sau vài giây; nay CI là `verify-local.sh`), không có E2E, không có quy tắc cảnh báo, không ai đo đường
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
 
 **Sau.** Cổng kiểm là thứ **chạy được và đỏ được**: 13 bước, 39 khẳng định, gồm dựng + smoke image
-Docker thật, smoke giao diện Chromium 19 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
+Docker thật, smoke giao diện Chromium 20 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
 SQL Prisma thật sự chạy, quét bảo mật thật, và bốn luật ranh giới tầng. Đường lưu báo giá lần đầu
 được **đo**, rồi mới sửa: 10.000 dòng đi từ 3.255 ms xuống 931 ms. Bộ test đi từ ~1.271 lên
 **1.448 bài backend + 293 bài web** (cả hai đo 2026-08-28 trong cùng một lượt `npm run verify` trọn, sau khi thêm
@@ -313,7 +313,7 @@ Chỉ những thứ **thật sự cần**, theo thứ tự.
 | **6–12 tháng** | Bật Loki/Grafana khi lên nhiều instance | Một VM thì `docker logs` còn đủ |
 | **6–12 tháng** | Chuyển sang kéo ảnh theo digest làm mặc định | Cần VM đăng nhập được registry |
 | **12–24 tháng** | Dựng `/api/v1` — **chỉ khi** có consumer ngoài repo | Phiên bản là lời hứa với người khác; hứa với không ai thì chỉ còn là chi phí |
-| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 142 endpoint. Xem lại khi Express 4 hết hỗ trợ |
+| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 143 endpoint. Xem lại khi Express 4 hết hỗ trợ |
 | **khi có áp lực TỔ CHỨC** | Ranh giới dọc (`src/modules/`) | Đọc lại bảng bảy câu ở ADR 0008: lúc đó cột "vấn đề đo được" mới không còn rỗng |
 
 **Không đề xuất:** microservices · NestJS · Next.js · Kafka · event sourcing/CQRS · Kubernetes bắt

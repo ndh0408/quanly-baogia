@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, isPreviewMode, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite } from "../lib/api";
+import { api, ApiError, isPreviewMode, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite, type Customer } from "../lib/api";
 import { toast, confirmModal, promptModal, useEscClose, modalChotBaoGia, toLocalInputDate } from "../lib/ui";
 import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
-import { ExtraTables } from "../components/ExtraTables";
+import { ExtraTables, loiXoaBangDaChi, soHangDaChiCuaTrang } from "../components/ExtraTables";
 import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
+import { CustomerPicker } from "../components/CustomerPicker";
 import { sapXepTheoFile } from "../lib/importApply";
 import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { giuBanNhap } from "../lib/pendingQuote";
@@ -100,6 +101,14 @@ const boKhoaPhien = (o: unknown): Record<string, unknown> => {
 };
 
 /**
+ * Trường KẾ TOÁN của một hàng nội bộ (2026-10-06). Kế toán tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào: lần
+ * ghi đó KHÔNG bump `updatedAt`, không đi qua màn này, nhưng mọi phản hồi báo giá (GET / PUT / chốt…) mang cờ mới
+ * qua LỚP PHỦ máy chủ. Lưới đang soạn vẫn giữ cờ lúc nạp — vân tay "có ai lưu chen không" đem chúng vào là tưởng có
+ * người sửa, không nhận mốc mới, lần Lưu kế tự đâm 409 GIẢ chỉ vì kế toán vừa làm việc của họ.
+ */
+const TRUONG_KE_TOAN = ["paid", "paidAt", "paidById", "hasPaidProof"] as const;
+
+/**
  * app#11 — VÂN TAY PHẦN NGOÀI HÀ NỘI của một bản báo giá MÁY CHỦ trả về: các trường đầu trang dạng
  * giá trị đơn, và từng trang (id · mẫu · tên · Discount · cờ · hạng mục). Bỏ `updatedAt`, `members`,
  * mọi trường `hn*` — đúng những thứ giao/duyệt phần HN được phép đổi (src/hnWorkflow.ts).
@@ -109,7 +118,7 @@ const boKhoaPhien = (o: unknown): Record<string, unknown> => {
  * — nhận là vô hiệu khoá lạc quan và lần Lưu kế đè im lặng lên bản người kia.
  *
  * Mọi bản đem so đều phải là JSON THÔ của máy chủ: đường nạp lấy vân tay TRƯỚC khi chuẩn hoá ngày
- * (ngayChoO +7h làm quoteDate cũ ≥17:00 UTC qua ngày — X2). Ngày (`…Date`) vẫn cắt 10 ký tự cho chắc.
+ * (ngayChoO +7h làm quoteDate cũ ≥17:00 UTC qua ngày). Ngày (`…Date`) vẫn cắt 10 ký tự cho chắc.
  * Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
  */
 export const vanTayMain = (q: unknown): string => {
@@ -132,13 +141,13 @@ export const vanTayMain = (q: unknown): string => {
 };
 
 /**
- * Đợt 3 (kẽ hở X2) — NỘI DUNG bảng nội bộ của một trang, cho vanTayMain. Account phụ (phạm vi riêng) lưu
- * bảng nội bộ qua ghiVungNoiBoDuocGiao (src/services/quoteService.ts): chỉ ghi `extraTables`, GIỮ id
- * trang, bump updatedAt. Thiếu phần này thì lượt lưu đó không làm vân tay đổi, và mốc mới (tích thanh
- * toán / duyệt HN đến sau) nuốt luôn nó — lần Lưu kế đè im lặng bảng người kia vừa lưu.
- * Bỏ đúng các trường route /pay được đổi (`paid*`, `hasPaidProof`) cùng `rid`, `_k`: người khác tích
- * thanh toán KHÔNG làm nó đổi. GIỮ `approved` — không có route nào đổi nó ngoài đường Lưu, nên nó đổi là
- * đã có người lưu chen (chặt hơn vanTayHnNoiDung, nơi duyệt HN ở cấp báo giá).
+ * Đợt 3 — NỘI DUNG bảng nội bộ của một trang, cho vanTayMain. Account phụ (phạm vi riêng) lưu bảng nội bộ
+ * qua ghiVungNoiBoDuocGiao (src/services/quoteService.ts): chỉ ghi `extraTables`, GIỮ id trang, bump
+ * updatedAt. Thiếu phần này thì lượt lưu đó không làm vân tay đổi, và mốc mới (duyệt HN đến sau — xem
+ * napLaiSauHn) nuốt luôn nó — lần Lưu kế đè im lặng bảng người kia vừa lưu.
+ * Chỉ liệt kê trường người dùng GÕ, nên bỏ được các trường kế toán (`paid*`, `hasPaidProof` — xem TRUONG_KE_TOAN)
+ * cùng `rid`, `_k`: kế toán tích ĐÃ CHI KHÔNG làm nó đổi. GIỮ `approved` — không có route nào đổi nó ngoài đường
+ * Lưu, nên nó đổi là đã có người lưu chen.
  */
 function noiDungBangNoiBo(ts: unknown) {
   type Hang = Record<string, unknown>;
@@ -155,28 +164,6 @@ function noiDungBangNoiBo(ts: unknown) {
     })),
   }));
 }
-
-/**
- * X2 — VÂN TAY NỘI DUNG BẢNG HÀ NỘI của một bản máy chủ: chỉ phần người dùng GÕ (tên, mẫu, nhóm, hạng
- * mục). Bỏ các trường máy chủ sở hữu — thanh toán (`paid*`, `hasPaidProof`), duyệt (`approved*`), `rid`,
- * `_k` — đúng như quoteUtils.vanTayHn ở máy chủ: người khác tích thanh toán KHÔNG làm nó đổi, còn account
- * HN lưu giá thì đổi.
- */
-export const vanTayHnNoiDung = (ts: unknown): string => {
-  type Hang = { kind?: unknown; label?: unknown; name?: unknown; detail?: unknown; unit?: unknown; quantity?: unknown; quantityExact?: unknown; unitPrice?: unknown; days?: unknown; notes?: unknown; ns?: unknown; luuKho?: unknown; chungTu?: unknown };
-  type Bang = { name?: unknown; templateId?: unknown; groupSubtotal?: unknown; items?: Hang[] };
-  return JSON.stringify((Array.isArray(ts) ? ts as Bang[] : []).map((t) => ({
-    name: t?.name ? String(t.name).trim() : null,
-    templateId: t?.templateId != null ? Number(t.templateId) : null,
-    groupSubtotal: !!t?.groupSubtotal,
-    items: (t?.items || []).map((it) => ({
-      kind: it?.kind ?? null, label: it?.label ?? null, name: String(it?.name || "").trim(), detail: it?.detail ?? null,
-      unit: it?.unit ?? null, quantity: Number(it?.quantity) || 0, quantityExact: !!it?.quantityExact,
-      unitPrice: Number(it?.unitPrice) || 0, days: it?.days != null ? Number(it.days) : null, notes: it?.notes ?? null,
-      ns: it?.ns ?? null, luuKho: !!it?.luuKho, chungTu: it?.chungTu ?? null,   // khớp quoteUtils.vanTayHn
-    })),
-  })));
-};
 
 /**
  * app#10 — BẢN GIỮ LẠI LÚC 409 MANG ID TRANG CŨ. Người kia Lưu = máy chủ xoá-tạo-lại trang nên id đổi
@@ -266,6 +253,32 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     (id: string, nhan: string) => setLuoiDangLam((v) => (v.id === id && v.nhan === nhan ? v : { id, nhan })),
     [],
   );
+  // Tab vào một nút đang khuất MỘT PHẦN trong khung cuộn của thanh đáy (nhóm thêm hàng khi thiếu chỗ, dải điện thoại ≤640px): trình
+  // duyệt chỉ tự cuộn khi nút khuất HẲN — nút lấp ló thì để nguyên, nút và vòng focus bị cắt (đo 2026-10-06 ở 1280×720 và 390×844).
+  // Chỉ cuộn NGANG khung cuộn gần nhất bên trong thanh, chừa 6px cho vòng focus (2px + offset 2px).
+  // KHÔNG dùng scrollIntoView: với phần tử trong thanh `position: sticky`, Chromium cuộn cả TRANG tới vị trí TĨNH của thanh (cuối trang
+  // soạn) — bản đầu làm vậy và ui-smoke [U13] bắt được: bấm "⋯" thì trang nhảy xuống cuối, menu bám nút trượt đi rồi đóng.
+  // Listener `focusin` GỐC của DOM, không phải prop onFocus: nhóm thêm hàng là PORTAL của GridTable vào .dock-slot — sự kiện React đi
+  // theo cây component (lên GridTable), không qua .actions; chỉ sự kiện DOM mới nổi bọt qua cây DOM thật. Ref callback (React 19) tự gỡ.
+  const ganThanhDay = useCallback((thanh: HTMLDivElement | null) => {
+    if (!thanh) return;
+    const hien = (e: FocusEvent) => {
+      const el = e.target as HTMLElement;
+      if (el === thanh) return;
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const ox = getComputedStyle(p).overflowX;
+        if (ox === "auto" || ox === "scroll") {
+          const r = el.getBoundingClientRect(), k = p.getBoundingClientRect(), le = 6;
+          if (r.left < k.left + le) p.scrollLeft -= k.left + le - r.left;
+          else if (r.right > k.right - le) p.scrollLeft += r.right - (k.right - le);
+          return;
+        }
+        if (p === thanh) return;
+      }
+    };
+    thanh.addEventListener("focusin", hien);
+    return () => thanh.removeEventListener("focusin", hien);
+  }, []);
   const gridVerRef = useRef(0);
   const redraw = useCallback(() => { gridVerRef.current++; setTick((t) => t + 1); }, []);
   const redrawMeta = useCallback(() => setTick((t) => t + 1), []);
@@ -280,8 +293,6 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const [thaTai, setThaTai] = useState<{ i: number; truoc: boolean } | null>(null);
   // app#11: vân tay phần NGOÀI Hà Nội của bản MÁY CHỦ gần nhất mà trang này đã nạp/lưu (xem vanTayMain).
   const vanTayMainRef = useRef<string | null>(null);
-  // X2: cùng mốc với vanTayMainRef, cho NỘI DUNG bảng Hà Nội (xem vanTayHnNoiDung).
-  const vanTayHnRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   // L61/L62: editor này CÒN GẮN không. Hộp hỏi (confirm/promptModal) là DOM tự dựng, không đóng khi
   // Back đổi hash; và PUT/POST vẫn bay sau khi Shell đã gỡ editor (đổi `key` theo route). Trả lời hộp
@@ -355,6 +366,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  // ĐỔI KHÁCH HÀNG (danh mục) ngay trong báo giá: hộp chọn + khoá dựng lại các ô "Bên nhận" (chúng UNCONTROLLED — defaultValue
+  // chỉ đọc lúc dựng, nên đổi `q.toCompany…` bằng mã mà không đổi `key` thì màn hình vẫn hiện khách CŨ). Hook ở ĐÂY, trước hai
+  // lệnh return sớm (xem ghi chú ở `dangTai`).
+  const [khOpen, setKhOpen] = useState(false);
+  const [khKey, setKhKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [othersEditing, setOthersEditing] = useState<{ id: number; name: string }[]>([]); // presence: người KHÁC đang mở báo giá này
@@ -525,12 +541,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         } else {
           q = await pQ!;
         }
-        // app#11 / X2: vân tay của bản MÁY CHỦ — lấy TRƯỚC khi bản nháp phủ lên VÀ trước bước chuẩn hoá
+        // app#11: vân tay của bản MÁY CHỦ — lấy TRƯỚC khi bản nháp phủ lên VÀ trước bước chuẩn hoá
         // ngay dưới. Mọi bản đem ra so sau này (bản GET kiểm tra, bản PUT/chốt trả về) đều là JSON thô
         // của máy chủ; tính sau ngayChoO thì báo giá CŨ có quoteDate ≥17:00 UTC ra ngày +1 (14/06 so với
         // 13/06 của bản GET) → lần nào cũng tưởng có người lưu chen, không nhận mốc, Lưu kế đâm 409 giả.
         const vanTayMay = vanTayMain(q);
-        const vanTayHnMay = vanTayHnNoiDung(q.hnTables);
         // Ngày theo lịch VN như Excel/PDF (ngayChoO) — cắt 10 ký tự là ngày UTC, lệch bản ghi cũ (excel#10).
         if (q.quoteDate && q.quoteDate.length > 10) q.quoteDate = ngayChoO(q.quoteDate) || q.quoteDate.slice(0, 10);
         if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
@@ -639,7 +654,6 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         stampKeys(q);
         qRef.current = q;
         vanTayMainRef.current = vanTayMay;
-        vanTayHnRef.current = vanTayHnMay;
         khoaNhapRef.current = khoa;
         if (alive) {
           dirtyRef.current = khoiPhuc;
@@ -750,6 +764,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
   const removeSheet = async (i: number) => {
     if (sheets.length <= 1 || dangLuuHoacDaDoi()) return;
+    // 2026-10-06: trang có hàng kế toán đã đánh dấu ĐÃ CHI (cờ của LỚP PHỦ, bảng Chi phí HCM / Phí KH) thì CHẶN trước
+    // cả hộp hỏi — như xoá bảng nội bộ (removeTableFromList). Máy chủ vốn từ chối lần Lưu làm mất hàng đó (400
+    // 'hang-da-chi'), nhưng trang đã xoá thì Ctrl+Z không cứu được: biết lúc Lưu là phải tải lại, mất phần chưa lưu khác.
+    const daChi = soHangDaChiCuaTrang(sheets[i].extraTables);
+    if (daChi > 0) { toast(loiXoaBangDaChi(daChi), "error"); return; }
     if (!(await confirmModal("Xóa sheet", `Xóa sheet "${sheets[i].name || "Sheet " + (i + 1)}"?`, { danger: true, confirmText: "Xóa" }))) return;
     if (!songRef.current) return;   // hộp treo sau khi đã rời báo giá này
     if (dangLuuHoacDaDoi()) { toast("Báo giá vừa được lưu trong lúc hỏi — chưa xoá sheet, hãy bấm xoá lại", "info"); return; }
@@ -782,6 +801,24 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const viTriTha = (tu: number, i: number, truoc: boolean) => { let den = truoc ? i : i + 1; if (den > tu) den--; return den; };
   const truocNuaTab = (e: { clientX: number; currentTarget: HTMLElement }) => { const r = e.currentTarget.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; };
   const keoDuoc = suaMain && sheets.length > 1 && !saving;
+
+  // ── ĐỔI KHÁCH HÀNG (danh mục) ─────────────────────────────────────────────────
+  // Chủ repo 2026-09-30: "trong báo giá cho chọn đổi khách hàng luôn nhé". Đổi khách là đổi CẢ khối "Bên nhận": tên, người liên
+  // hệ, email, SĐT, địa chỉ lấy theo khách MỚI — kể cả ô mà khách mới để trống (để TRỐNG, không giữ email/SĐT của khách CŨ dưới tên
+  // khách mới: báo giá gửi đi mang email của công ty khác nặng hơn nhiều một ô trống). Chưa lưu cho tới khi bấm Lưu, và các ô vẫn
+  // sửa tay được ngay sau đó. Chọn lại ĐÚNG khách đang gắn thì không đổi gì (khỏi đè phần đã sửa tay).
+  const chonKhach = (c: Customer) => {
+    setKhOpen(false);
+    if (dangLuuHoacDaDoi()) return;   // hộp chọn mở lúc PUT đang bay / editor đã gỡ: ghi vào `q` cũ là mất im lặng (app#15)
+    if (Number(q.customerId) === c.id) { toast("Báo giá đã thuộc khách hàng này", "info"); return; }
+    const chu = (v: unknown) => (typeof v === "string" ? v : "");
+    const d = q as Record<string, unknown>;
+    d.customerId = c.id; d.customerCode = c.code; d.customerName = c.name; d.customer = { code: c.code, name: c.name };
+    d.toCompany = c.name || ""; d.toContact = chu(c.contactName); d.toEmail = chu(c.email); d.toPhone = chu(c.phone); d.toAddress = chu(c.address);
+    setKhKey((k) => k + 1);
+    mark(); redrawMeta();
+    toast(`Đã đổi sang khách hàng ${c.code} — ${c.name}. Thông tin bên nhận đã điền theo khách mới; kiểm tra rồi bấm Lưu.`, "success");
+  };
 
   // ── save ───────────────────────────────────────────────────────────────────
   // Trả `true` CHỈ khi bản đang soạn đã nằm trên máy chủ VÀ editor vẫn đứng ở báo giá này. Mọi
@@ -874,7 +911,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
       else {
-        vanTayMainRef.current = vanTayMain(saved); vanTayHnRef.current = vanTayHnNoiDung(saved.hnTables);
+        vanTayMainRef.current = vanTayMain(saved);
         qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current, q, true); redraw();
         // MỐC của bản nháp phải đi theo bản máy chủ VỪA lưu. `baseNhapRef` chỉ được gán một lần
         // lúc nạp; không làm tươi ở đây thì mọi bản nháp ghi SAU lần Lưu đầu tiên đều mang
@@ -1005,7 +1042,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         if (s) { s.custStatus = r.custStatus; s.custStatusAt = r.custStatusAt; s.custNote = r.custNote; s.custStatusBy = r.custStatusBy; }
       }
       const u = await api.markConverted(q.id);
-      vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables);
+      vanTayMainRef.current = vanTayMain(u);
       qRef.current = { ...u, _activeSheet: ai } as QuoteFull;
       stampKeys(qRef.current, q);
       // Chốt ghi vào hàng Quote → updatedAt đổi. Mốc bản nháp phải theo, không thì bản nháp ghi sau
@@ -1030,7 +1067,7 @@ Lý do (không bắt buộc):`,
       { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
     );
     if (reason === null || !songRef.current) return;   // L61: markLost KHÔNG đảo lại được
-    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current, q); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
+    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current, q); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   /* ── SAU KHI GIAO / DUYỆT / TRẢ PHẦN HÀ NỘI (FE-01 b) ─────────────────────────────────────
@@ -1039,7 +1076,7 @@ Lý do (không bắt buộc):`,
      trạng thái HN + thành viên, KHÔNG đụng hnTables hay lưới.
      · Không có gì chưa lưu → thay nguyên như cũ (an toàn, và lấy luôn bảng HN mới nhất).
      · Đang có thay đổi → chỉ VÁ các trường HN. `updatedAt` + mốc bản nháp BẮT BUỘC đi theo, không
-       thì lần Lưu sau nhận 409 (hộp 409 dẫn tới reload — lại mất dữ liệu). Mẫu y hệt onQuoteTouched.
+       thì lần Lưu sau nhận 409 (hộp 409 dẫn tới reload — lại mất dữ liệu).
        NGOẠI LỆ: bảng HN trên máy chủ khác bảng HN đang có ở đây (account vừa gửi giá sau lúc mở
        trang, hoặc chính mình đang sửa dở bảng HN) — khi đó KHÔNG đẩy mốc updatedAt, để khoá lạc
        quan vẫn chặn việc lượt Lưu kế tiếp đè bảng HN cũ lên phần account vừa gửi. */
@@ -1049,13 +1086,16 @@ Lý do (không bắt buộc):`,
     try {
       const u = await api.getQuote(cur.id);
       if (!dirtyRef.current) {
-        vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables);
+        vanTayMainRef.current = vanTayMain(u);
         qRef.current = { ...u, _activeSheet: cur._activeSheet } as QuoteFull; stampKeys(qRef.current, cur);
         baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
         redraw(); return;
       }
-      // Đợt 4: bỏ MỌI khoá '_' (không chỉ `_k`) — xem boKhoaPhien.
-      const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...boKhoaPhien(t), items: ((t as { items?: unknown[] }).items || []).map(boKhoaPhien) })));
+      // Đợt 4: bỏ MỌI khoá '_' (không chỉ `_k`) — xem boKhoaPhien. 2026-10-06: bỏ cả trường kế toán của hàng
+      // (TRUONG_KE_TOAN) — kế toán vừa tích một hàng HN thì bản GET mang cờ mới, lưới đang soạn mang cờ lúc nạp, mà
+      // đó không phải ai sửa bảng HN. Mọi trường khác (giá, công thức, rid, duyệt…) vẫn so đủ.
+      const hangHn = (it: unknown) => { const r = boKhoaPhien(it); for (const k of TRUONG_KE_TOAN) delete r[k]; return r; };
+      const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...boKhoaPhien(t), items: ((t as { items?: unknown[] }).items || []).map(hangHn) })));
       const giongHn = vanTayHn(cur.hnTables) === vanTayHn(u.hnTables);
       const rec = cur as Record<string, unknown>, moi = u as Record<string, unknown>;
       for (const k of ["hnStatus", "hnRejectNote", "hnAssigneeId", "hnSubmittedAt", "hnReviewedAt", "hnReviewerId", "members"]) if (k in moi) rec[k] = moi[k];
@@ -1065,27 +1105,9 @@ Lý do (không bắt buộc):`,
       // nhận khi phần ngoài HN của `u` trùng bản máy chủ gần nhất trang này đã nạp/lưu; lệch thì giữ
       // mốc cũ → lần Lưu kế nhận 409 đúng (phần đang soạn được giữ qua khoá ":xungdot").
       const giongMain = vanTayMainRef.current != null && vanTayMainRef.current === vanTayMain(u);
-      if (giongHn && giongMain) { rec.updatedAt = moi.updatedAt; baseNhapRef.current = (moi.updatedAt as string | undefined) ?? null; vanTayHnRef.current = vanTayHnNoiDung(u.hnTables); }
+      if (giongHn && giongMain) { rec.updatedAt = moi.updatedAt; baseNhapRef.current = (moi.updatedAt as string | undefined) ?? null; }
       redrawMeta();
     } catch { /* ignore */ }
-  };
-  /* ── MỐC MỚI SAU KHI TÍCH THANH TOÁN (X2) ───────────────────────────────────────────────────────
-     Route /pay bump `Quote.updatedAt` và trả mốc mới để người tích khỏi tự đâm 409 lần Lưu kế. Nhưng
-     nhận thẳng là sai khi NGƯỜI KHÁC đã lưu chen vào giữa lần nạp và cú tích: mốc mới đã bao lượt lưu
-     đó → khoá lạc quan vô hiệu, lần Lưu kế đè im lặng bản người kia (y như app#11 ở napLaiSauHn).
-     Đọc lại bản máy chủ và chỉ nhận khi phần ngoài HN (vanTayMain) và NỘI DUNG bảng HN (vanTayHnNoiDung
-     — không tính trường thanh toán/duyệt) vẫn trùng bản gần nhất trang này đã nạp/lưu. Lệch, hoặc đọc
-     lỗi → giữ mốc cũ: lần Lưu kế nhận 409 đúng, phần đang soạn được giữ qua ":xungdot". */
-  const nhanMocThanhToan = async (moc: string) => {
-    const cur = qRef.current;
-    if (!cur || !cur.id) return;
-    try {
-      const may = await api.getQuote(cur.id);
-      if (!songRef.current || qRef.current !== cur) return;   // đã Lưu / tải lại → đường đó tự làm tươi mốc
-      const giongMain = vanTayMainRef.current != null && vanTayMainRef.current === vanTayMain(may);
-      const giongHn = vanTayHnRef.current != null && vanTayHnRef.current === vanTayHnNoiDung(may.hnTables);
-      if (giongMain && giongHn) { (cur as { updatedAt?: string }).updatedAt = moc; baseNhapRef.current = moc; }
-    } catch { /* giữ mốc cũ — an toàn */ }
   };
   // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
   const applyImport = (payload: ImportApplyPayload) => {
@@ -1221,11 +1243,25 @@ Lý do (không bắt buộc):`,
         <div className="meta-2col">
           <fieldset className="meta-col">
             <legend>Bên nhận · Khách hàng</legend>
-            <label>Tên khách hàng<input defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
-            <label>Người liên hệ<input defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Email<input type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ<input defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
+            {/* Khách hàng TRONG DANH MỤC đang gắn với báo giá (mã KH) — đổi được ngay tại đây (chủ repo 2026-09-30). Cùng cổng
+                `suaMain` với mọi ô của khối này: người chỉ được giao phần bảng nội bộ không đổi được khách (máy chủ cũng gỡ
+                `customerId` khỏi payload của họ — FIELD_VUNG_MAIN). */}
+            <div className="kh-chon">
+              <span className="kh-chon-nhan">Mã khách hàng <span className="muted" style={{ fontSize: 11 }}>(danh mục)</span></span>
+              <div className="kh-chon-hang">
+                <div className={`kh-chon-gt${q.customerId ? "" : " chua"}`} title={q.customerId ? `${String(q.customerCode || "")} ${String(q.customerName || "")}`.trim() : undefined}>
+                  {q.customerId
+                    ? <><strong>{String(q.customerCode || `#${q.customerId}`)}</strong>{q.customerName ? <span> — {String(q.customerName)}</span> : null}</>
+                    : "Chưa gắn khách hàng trong danh mục"}
+                </div>
+                {suaMain && <button type="button" className="btn btn-sm" disabled={saving} onClick={() => setKhOpen(true)}>{q.customerId ? "Đổi khách hàng" : "Chọn khách hàng"}</button>}
+              </div>
+            </div>
+            <label>Tên khách hàng<input key={`tc${khKey}`} defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
+            <label>Người liên hệ<input key={`tl${khKey}`} defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Email<input key={`te${khKey}`} type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input key={`tp${khKey}`} defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ<input key={`ta${khKey}`} defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
           </fieldset>
           <fieldset className="meta-col">
             <legend>Bên gửi · Công ty báo giá</legend>
@@ -1256,10 +1292,12 @@ Lý do (không bắt buộc):`,
             disabled={!suaMain || saving} title="Dùng đặt tên file tải về: MãKH_TiêuĐềRútGọn_MMDD.xlsx"
             onInput={(e) => setQ("shortTitle", (e.target as HTMLInputElement).value)} />
         </div>
-        {/* MÃ SẢN XUẤT CỦA SHEET ĐANG MỞ — đúng chuỗi in ra tab Excel tương ứng và đúng mã bên
-            trang Hoá đơn. Số GN vẫn hiện mờ bên dưới: nó mới là khoá tra cứu thật của hệ thống
-            (phân quyền tải file, webhook, nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
-        <div className="quote-no">(Số: {M.sheetCode(q, (q as { _danhLaiMaSheet?: boolean })._danhLaiMaSheet ? ai + 1 : M.soMa(activeSheet, ai), sheets.length) || q.quoteNumber || ""})</div>
+        {/* Dòng "(Số: …_01)" — mã sản xuất của TỪNG sheet — đã BỎ khỏi màn soạn theo yêu cầu chủ repo
+            2026-09-30 ("bỏ cái id từng sheet đi không cần nữa"). Chỉ bỏ chỗ HIỆN: mã vẫn do máy chủ
+            cấp và đánh lại theo vị trí (cờ danhLaiMaSheet), vẫn in trên tab Excel và vẫn là cột
+            "Mã sản xuất" của trang Hoá đơn / Quản lý dự án — nơi mỗi dòng chính là một sheet.
+            Số GN thì giữ (mờ): nó là khoá tra cứu thật của hệ thống (phân quyền tải file, webhook,
+            nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
         {q.quoteNumber && <div className="quote-no-gn">{q.quoteNumber}</div>}
         <textarea className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!suaMain || saving} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
 
@@ -1486,7 +1524,7 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { void nhanMocThanhToan(u); }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
+        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
@@ -1499,9 +1537,7 @@ Lý do (không bắt buộc):`,
             duyệt / trả lại nằm trong THÂN (hành động thì mở ra mới làm). */}
         <HnTables tables={hnTables} templates={templates} companyId={q.companyId}
           editable={coScope("hanoi") && !hnKhoa && !saving}
-          canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")}
-          quoteId={isNew ? undefined : q.id} onMarkDirty={mark}
-          onQuoteTouched={(u) => { void nhanMocThanhToan(u); }}
+          canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark}
           thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }}
           /* Account vừa gửi mà khối đóng thì việc chờ duyệt nằm khuất — mở sẵn cho quản lý thấy. */
           moMacDinh={q.hnStatus === "submitted" && hasPerm("quote:hn:manage")}
@@ -1516,7 +1552,7 @@ Lý do (không bắt buộc):`,
             </>
           } />
 
-        <div className="actions">
+        <div className="actions" ref={ganThanhDay}>
           {/* Nhãn NẰM TRONG thanh, không phải chú thích bên cạnh: nó là thứ cho biết nút "+ Thêm
               hàng" ngay kế bên sẽ rơi vào bảng nào. */}
           {/* ── CÂU CHỮ PHẢI CHO THẤY NÓ CHỈ CHI PHỐI NHÓM NÚT THÊM ──────────────────────────
@@ -1586,6 +1622,7 @@ Lý do (không bắt buộc):`,
       )}
       {versions && <VersionsModal quoteId={q.id} versions={versions} onClose={() => setVersions(null)} />}
       {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={q.members || []} onClose={() => setMembersOpen(false)} onSaved={(ms) => { q.members = ms; setMembersOpen(false); redraw(); }} />}
+      {khOpen && <CustomerPicker chonId={q.customerId != null ? Number(q.customerId) : null} onClose={() => setKhOpen(false)} onPick={chonKhach} />}
     </div>
   );
 }
@@ -1639,7 +1676,7 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
   );
 }
 
-const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng", hnTables: "Bảng Báo Giá Hà Nội", hnStatus: "Trạng thái phần Hà Nội" };
+const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", customerId: "Khách hàng (danh mục — mã nội bộ)", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng", hnTables: "Bảng Báo Giá Hà Nội", hnStatus: "Trạng thái phần Hà Nội" };
 const diffVal = (v: unknown) => { if (v == null) return "—"; if (typeof v === "object") { const s = JSON.stringify(v); return s.length > 80 ? s.slice(0, 80) + "…" : s; } return String(v); };
 function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versions: QuoteVersion[]; onClose: () => void }) {
   useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app

@@ -308,26 +308,28 @@ export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] 
  *                      và lưu lại nguyên (src/quoteUtils.ts) — mất là gãy lịch sử theo sản phẩm.
  *   · `internalNote` — ghi chú NỘI BỘ, KHÔNG BAO GIỜ xuất ra Excel. Chỉ mang sang khi tệp KHÔNG có cột
  *                      đó (`giuGhiChuNoiBo`); tệp có cột thì theo tệp, kể cả ô trống (người sửa cố ý xoá).
- *   · `rid` + cờ duyệt / thanh toán — chỉ hàng bảng HÀ NỘI có (AccountHnView truyền thẳng hnTables vào
- *                      modal). Máy chủ khớp dấu duyệt, cờ đã trả và ẢNH CHỨNG TỪ theo `rid`
- *                      (reconcileHnApprovals / reconcileExtraPayments, src/services/quoteService.ts);
- *                      thiếu rid là máy chủ cấp rid mới → hàng vẫn khớp đúng nội dung mất sạch trạng
- *                      thái, ảnh uỷ nhiệm chi mất VĨNH VIỄN, không một lời báo. Mang sang KHÔNG nới gì:
- *                      rid là thứ client vốn có; mỗi cặp ghép là một-một nên không nhân bản rid, và máy
- *                      chủ vẫn tự quyết cờ theo CSDL + ghim số tiền hàng đã duyệt / đã trả (đổi số tiền
- *                      → từ chối cả lần lưu, hỏng TO chứ không âm thầm). Cờ mang theo để màn hình khỏi
- *                      nói sai trước khi Lưu, và để người CÓ quyền không vô tình bỏ dấu đã trả.
+ *   · `rid` + cờ duyệt / đã chi — chỉ hàng bảng HÀ NỘI có (AccountHnView truyền thẳng hnTables vào
+ *                      modal). Máy chủ khớp dấu duyệt theo `rid` (reconcileHnApprovals) và khớp KHOẢN KẾ
+ *                      TOÁN của hàng — đã chi, ảnh chứng từ, ngày HĐ, ghi chú; kế toán ghi ở trang Hóa đơn
+ *                      đầu vào từ 2026-10-06 — theo (báo giá, phía, `rid`); thiếu rid là máy chủ cấp rid
+ *                      mới → hàng vẫn khớp đúng nội dung mất dấu duyệt, hàng ĐÃ CHI bị coi là bị xoá
+ *                      (400 'hang-da-chi', cả lần Lưu bị từ chối) và khoản chưa chi thành mồ côi. Mang sang
+ *                      KHÔNG nới gì: rid là thứ client vốn có; mỗi cặp ghép là một-một nên không nhân bản
+ *                      rid, và máy chủ vẫn tự quyết cờ theo CSDL (cờ đã chi trong payload bị cắt) + ghim số
+ *                      tiền hàng đã duyệt / đã chi (đổi số tiền → từ chối cả lần lưu, hỏng TO chứ không âm
+ *                      thầm). Cờ mang theo để màn hình khỏi nói sai trước khi Lưu.
  *   · `ns` / `luuKho` / `chungTu` — ba cột NỘI BỘ của bảng Chi phí HCM / Phí khách hàng / Hà Nội. Bảng nội
  *                      bộ không xuất ra Excel và excelImport không đọc ba cột này, nên tệp nạp vào KHÔNG
  *                      BAO GIỜ chở chúng: không mang sang là Lưu xong ba cột về rỗng ở MỌI hàng khớp
  *                      (sanitizeExtraTables ghi null/false), trong khi bảng đối chiếu vẫn ghi "Giữ nguyên".
- * `trangThaiMat` = số hàng đã duyệt / đã thanh toán KHÔNG ghép được (sẽ mất cùng dòng) — hộp xác nhận nói ra.
+ * `trangThaiMat` = số hàng đã duyệt / đã chi KHÔNG ghép được — hộp xác nhận nói ra: hàng đã duyệt mất cùng
+ *   dòng; hàng kế toán đã đánh dấu ĐÃ CHI thì máy chủ không cho xoá (400) — phải nhờ kế toán bỏ đánh dấu trước.
  * `noiBoMat` = số hàng có NS / chứng từ / lưu kho KHÔNG ghép được. Tệp không bao giờ chở ba cột đó nên hàng
  *   bị xoá thật là mất chúng vĩnh viễn — trước đây hộp xác nhận chỉ đếm ảnh và duyệt / thanh toán, im về chúng.
- * `tienDaTraDoi` = tên các hàng ĐÃ THANH TOÁN ghép được mà tệp đổi SL / Đơn Giá / Số Ngày (soát toàn diện
- *   đợt 3). rid đi theo nên máy chủ nhận ra hàng đã trả, và người không có quyền thanh toán bị TỪ CHỐI cả
- *   lần Lưu (400). KHÔNG âm thầm giữ số cũ — người nạp có thể chính là người có quyền, và nuốt thay đổi là
- *   đúng thứ reconcileExtraPayments đã chọn tránh; chỉ NÓI RA trước khi nạp.
+ * `tienDaTraDoi` = tên các hàng ĐÃ CHI ghép được mà tệp đổi SL / Đơn Giá / Số Ngày (soát toàn diện đợt 3).
+ *   rid đi theo nên máy chủ nhận ra hàng đã chi, và người không có quyền tích ĐÃ CHI (invoice:input:pay — kế toán
+ *   + admin) bị TỪ CHỐI cả lần Lưu (400). KHÔNG âm thầm giữ số cũ — người nạp có thể chính là người có quyền, và
+ *   nuốt thay đổi là đúng thứ reconcileExtraPayments đã chọn tránh; chỉ NÓI RA trước khi nạp.
  */
 const TRUONG_TRANG_THAI = ["rid", "approved", "approvedAt", "approvedBy", "paid", "paidAt", "paidById", "hasPaidProof"] as const;
 const TRUONG_NOI_BO = ["ns", "luuKho", "chungTu"] as const;
@@ -335,14 +337,14 @@ const coTrangThai = (it: Record<string, unknown>) => !!(it.approved || it.paid |
 /** Hàng có dữ liệu ở ba cột nội bộ — giá trị mặc định (null / false / chuỗi trắng) không tính, như extraTableHasData. */
 const coNoiBo = (it: Record<string, unknown>) => (typeof it.ns === "string" && it.ns.trim() !== "") || !!it.chungTu || it.luuKho === true;
 /** Dấu vân tay SỐ TIỀN của một hàng — PHẢI khớp `soTienHang` (src/services/quoteService.ts), nơi máy
- *  chủ so hàng đã trả. `null` = hàng KHÔNG ghi số tiền (bản trước chuẩn hoá) → máy chủ không so. */
+ *  chủ so hàng đã chi. `null` = hàng KHÔNG ghi số tiền (bản trước chuẩn hoá) → máy chủ không so. */
 const soTienHang = (it: Record<string, unknown>): string | null => {
   const q = it.quantity, dg = it.unitPrice;
   if (q == null && dg == null) return null;
   return `${Number(q) || 0}|${Number(dg) || 0}|${it.days != null ? Number(it.days) : ""}`;
 };
 
-export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean; giuCongThucNgayAn?: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; noiBoMat: number; tienDaTraDoi: string[]; congThucNgayAnMat: number } {
+export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean; giuCongThucNgayAn?: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; daChiMat: string[]; noiBoMat: number; tienDaTraDoi: string[]; congThucNgayAnMat: number } {
   type ItemApp = M.Item & { productId?: unknown } & Record<string, unknown>;
   const items = after.slice();
   const daGhep = new Set<number>();
@@ -371,14 +373,39 @@ export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGh
     items[j] = moi;
   }
   let anhMat = 0, trangThaiMat = 0, noiBoMat = 0, congThucNgayAnMat = 0;
+  const daChiMat: string[] = [];
   before.forEach((cu, i) => {
     if (opts.giuCongThucNgayAn && cu.formulas?.days && !ngayAnDaGiu.has(i)) congThucNgayAnMat++;
     if (daGhep.has(i)) return;
     anhMat += cu.images?.length || 0;
     if (coTrangThai(cu as ItemApp)) trangThaiMat++;
+    if ((cu as ItemApp).paid === true) daChiMat.push(String(cu.name || "").trim() || "(không tên)");
     if (coNoiBo(cu as ItemApp)) noiBoMat++;
   });
-  return { items, anhMat, trangThaiMat, noiBoMat, tienDaTraDoi, congThucNgayAnMat };
+  return { items, anhMat, trangThaiMat, daChiMat, noiBoMat, tienDaTraDoi, congThucNgayAnMat };
+}
+
+/**
+ * Hàng ĐÃ CHI nằm trong các sheet sắp bị XOÁ khi nạp (soát 2026-10-06, W1). Máy chủ không cho hàng đã chi biến mất —
+ * 400 'hang-da-chi', CẢ lần Lưu bị từ chối, với MỌI người — nên modal chặn ngay thay vì để người dùng làm tiếp trên một
+ * bản không lưu được. `paid` là trạng thái HIỆU LỰC máy chủ phủ lên mọi phản hồi báo giá (khoản kế toán ?? cờ JSON cũ).
+ * Hai hình dạng "sheet": màn soạn — hàng đã chi ở `extraTables` (Chi phí HCM / Phí KH) của trang; màn Account HN — mỗi
+ * "sheet" là một bảng Hà Nội, hàng nằm thẳng ở `items`. Hàng mà rid còn ở sheet giữ lại không tính (máy chủ so theo rid).
+ */
+export function khoanDaChiTrongSheetXoa(sheets: readonly { items?: unknown; extraTables?: unknown }[], xoa: readonly number[]): string[] {
+  type Hang = Record<string, unknown>;
+  const laObj = (x: unknown): x is Hang => !!x && typeof x === "object" && !Array.isArray(x);
+  const hangCua = (s: { items?: unknown; extraTables?: unknown } | undefined): Hang[] => [
+    ...(Array.isArray(s?.items) ? s.items : []),
+    ...(Array.isArray(s?.extraTables) ? s.extraTables : [])
+      .filter((t): t is Hang => laObj(t) && (t.category === "hcm" || t.category === "khach"))
+      .flatMap((t) => (Array.isArray(t.items) ? t.items : [])),
+  ].filter(laObj);
+  const tapXoa = new Set(xoa);
+  const ridGiu = new Set(sheets.flatMap((s, i) => (tapXoa.has(i) ? [] : hangCua(s))).map((it) => (typeof it.rid === "string" ? it.rid : "")).filter(Boolean));
+  return [...tapXoa].flatMap((i) => hangCua(sheets[i])
+    .filter((it) => it.paid === true && !(typeof it.rid === "string" && ridGiu.has(it.rid)))
+    .map((it) => String(it.name || "").trim() || "(không tên)"));
 }
 
 /** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */

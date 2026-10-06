@@ -17,13 +17,16 @@ erDiagram
     Quote ||--o{ QuoteVersion : "lịch sử phiên bản"
     Quote ||--o{ Approval : "legacy, không còn ghi"
     Quote ||--o{ QuoteMember : "members"
+    Quote ||--o| QuoteListNote : "ghi chú + màu ở danh sách"
+    Quote ||--o{ InputInvoiceEntry : "khoản chi kế toán, RESTRICT"
+    InputInvoiceEntry ||--o{ InputInvoiceProof : "ảnh chứng từ, chỉ thêm, RESTRICT"
     User ||--o{ QuoteMember : "userId"
     QuoteTemplate ||--o{ QuoteSheet : "templateId"
     QuoteSheet ||--o{ QuoteItem : "items"
     Product |o--o{ QuoteItem : "productId, tuỳ chọn"
 ```
 
-Sáu điều mà sơ đồ **không** nói ra được, và đều quan trọng:
+Tám điều mà sơ đồ **không** nói ra được, và đều quan trọng:
 
 * **`QuoteSheet.extraTables` là JSON, không phải bảng.** Bảng nội bộ theo trang
   (`category` là `"hcm"` / `"khach"`) sống trong một cột `Json?`. Đó là lý do mọi
@@ -45,6 +48,28 @@ Sáu điều mà sơ đồ **không** nói ra được, và đều quan trọng:
   **`scopes` rỗng = chỉ đọc**, không phải toàn quyền — đây là mặc-định-từ-chối,
   xem `src/permissions.ts`. Hàng chuyển từ bảng cũ được cấp **đủ bốn** phạm vi vì
   bản cũ không có khái niệm phạm vi, cấp thiếu là âm thầm tước quyền người đang dùng.
+* **`QuoteListNote` (ghi chú + màu ở dòng Danh sách báo giá) là bảng RIÊNG, không phải hai cột
+  trên `Quote`** — cố ý: `Quote.updatedAt` là mốc khoá lạc quan của màn soạn, ghi lên `Quote` làm mốc
+  nhảy và đá văng lần Lưu kế tiếp của người đang soạn. Một hàng cho mỗi báo giá (khoá chính
+  `quoteId`, xoá cứng báo giá thì hàng đi theo), tên người ghi được CHỤP (`updatedByName`, không FK).
+  Không có hàng = chưa có ghi chú; cả chữ lẫn màu rỗng thì hàng bị xoá.
+* **Khoản chi kế toán của trang Hóa đơn đầu vào (từ 2026-10-06) cũng là bảng RIÊNG**:
+  `InputInvoiceEntry` — một hàng cho mỗi hàng bảng nội bộ đã có dữ liệu kế toán (đã chi + người /
+  ngày tích, ngày HĐ, ghi chú KT, ảnh chụp hàng lúc tích, `version` khoá lạc quan riêng), định vị bằng
+  `@@unique([quoteId, side, rid])` với `side` = `sheet` (HCM + Phí KH của MỌI trang, gộp để "Chuyển
+  loại" không làm khoản mồ côi) | `hn` (`Quote.hnTables`); và `InputInvoiceProof` — ảnh ủy nhiệm chi.
+  Bốn lý do, đều là cách mất bằng chứng tài chính nếu để trong JSON hàng: (1) mọi đường Lưu viết lại
+  cả JSON — bản app cũ sau khi lùi ảnh, vốn lọc JSON theo danh sách trường được phép, sẽ xoá im trường
+  mới; (2) ghi lên `Quote` làm nhảy mốc khoá lạc quan của người đang soạn (cùng lý do với
+  `QuoteListNote`); (3) thay / gỡ ảnh trong JSON là ghi đè bản base64 DUY NHẤT; (4) "Dọn rác" xoá cứng
+  báo giá thì cascade xuống `QuoteSheet`. Nên: **FK `RESTRICT` ở cả hai tầng** (không cascade — báo
+  giá còn khoản thì "Dọn rác" bỏ qua nó, `adminService` lọc `inputInvoiceEntries: { none: {} }`, FK là
+  lưới thứ hai); **ảnh CHỈ THÊM** (mã không UPDATE `dataUrl`, không DELETE; thay / gỡ / bỏ tích chỉ đặt
+  `retiredAt`); `currentProofId` trỏ ảnh hiện tại nhưng KHÔNG có FK (tránh vòng FK hai chiều); chỉ dịch
+  vụ kế toán + công cụ `backfillKhoanChi` ghi hai bảng (chế độ `--sua-rid` của công cụ là chỗ DUY NHẤT ngoài đường Lưu ghi JSON hàng, và chỉ trường `rid`). Bốn cờ cũ `paid`/`paidAt`/`paidById`/`paidProof`
+  vẫn nằm trong JSON hàng nhưng **đóng băng** — không đường nào đổi được nữa — và chỉ còn là nguồn dự
+  phòng cho hàng chưa có khoản (`trangThaiHieuLuc`, `src/khoanChi.ts`); cắt hẳn chúng là một migration
+  HUỶ riêng, đợt sau. Ảnh nằm ở Postgres (chưa lên kho object) vì kho object production chưa có bản sao.
 * **`QuoteItem.formulas` và `QuoteItem.images` cũng là JSON.** `formulas` là siêu
   dữ liệu của trình soạn (`{"unitPrice":"=2000+3000"}`), **không** dùng để tính
   tổng. `images` là mảng data-URL base64 — nặng, nên đường lưu cố ý không đọc nó.

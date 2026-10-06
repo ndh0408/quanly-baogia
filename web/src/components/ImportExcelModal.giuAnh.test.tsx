@@ -12,14 +12,14 @@ import { createRoot, type Root } from "react-dom/client";
 import type { EditorTemplate, ImportResult } from "../lib/api";
 import type * as M from "../lib/quoteMath";
 
-const { ketQua, loiXacNhan } = vi.hoisted(() => ({ ketQua: { v: null as unknown }, loiXacNhan: [] as string[] }));
+const { ketQua, loiXacNhan, thongBao } = vi.hoisted(() => ({ ketQua: { v: null as unknown }, loiXacNhan: [] as string[], thongBao: [] as string[] }));
 vi.mock("../lib/api", async (nhapGoc) => {
   const goc = await nhapGoc<typeof import("../lib/api")>();
   return { ...goc, api: { ...goc.api, importExcel: async () => ketQua.v } };
 });
 vi.mock("../lib/ui", async (nhapGoc) => {
   const goc = await nhapGoc<typeof import("../lib/ui")>();
-  return { ...goc, toast: () => {}, confirmModal: async (_t: string, msg: string) => { loiXacNhan.push(msg); return true; } };
+  return { ...goc, toast: (msg: string) => { thongBao.push(msg); }, confirmModal: async (_t: string, msg: string) => { loiXacNhan.push(msg); return true; } };
 });
 import { ImportExcelModal, type ImportApplyPayload } from "./ImportExcelModal";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -43,15 +43,16 @@ const tep = (): ImportResult => ({
 });
 
 let thung: HTMLDivElement, goc: Root;
-beforeEach(() => { thung = document.createElement("div"); document.body.appendChild(thung); goc = createRoot(thung); loiXacNhan.length = 0; });
+beforeEach(() => { thung = document.createElement("div"); document.body.appendChild(thung); goc = createRoot(thung); loiXacNhan.length = 0; thongBao.length = 0; });
 afterEach(() => { act(() => goc.unmount()); thung.remove(); document.body.innerHTML = ""; });
 
-async function napTep(items: M.Item[]) {
+type SheetDangCo = { name: string; templateId: number; items: M.Item[]; extraTables?: unknown };
+async function napTep(items: M.Item[], them: SheetDangCo[] = [], truocKhiNap?: () => void) {
   ketQua.v = tep();
   let payload: ImportApplyPayload | null = null;
   act(() => goc.render(
     <ImportExcelModal
-      sheets={[{ name: "Décor", templateId: 1, items }]} templates={MAU}
+      sheets={[{ name: "Décor", templateId: 1, items }, ...them]} templates={MAU}
       usesDaysOf={() => false} addrDetailOf={() => true} newSheetTemplateId={() => 1}
       onApply={(p) => { payload = p; }} onClose={() => {}}
     />,
@@ -59,6 +60,7 @@ async function napTep(items: M.Item[]) {
   const input = thung.querySelector('input[type="file"]') as HTMLInputElement;
   Object.defineProperty(input, "files", { value: [new File(["x"], "khach-sua.xlsx")] });
   await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+  truocKhiNap?.();
   const nut = [...thung.querySelectorAll("button")].find((b) => b.textContent === "Nạp các thay đổi này") as HTMLButtonElement;
   expect(nut, "không thấy nút nạp — tệp chưa được đọc").toBeTruthy();
   await act(async () => { nut.click(); });
@@ -88,31 +90,78 @@ describe("L48: Thay toàn bộ không được âm thầm vứt ảnh", () => {
   });
 });
 
-// Bảng HÀ NỘI (AccountHnView truyền thẳng hnTables vào modal): hàng mang `rid` + cờ duyệt / thanh toán
-// do máy chủ giữ. Thay toàn bộ mà rơi rid là máy chủ cấp rid mới → mất dấu duyệt, cờ đã trả và ảnh
-// chứng từ của cả những hàng vẫn khớp; hàng đã duyệt / đã trả bị xoá thật thì phải được NÓI RA.
-describe("L48 (bảng HN): Thay toàn bộ không được âm thầm vứt rid / trạng thái duyệt – thanh toán", () => {
-  it("dòng khớp giữ rid + cờ đã trả; hàng đã trả bị xoá thật được báo trong hộp xác nhận", async () => {
-    const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
+// Bảng HÀ NỘI (AccountHnView truyền thẳng hnTables vào modal): hàng mang `rid` + cờ duyệt / đã chi do máy
+// chủ giữ. Thay toàn bộ mà rơi rid là máy chủ cấp rid mới → mất dấu duyệt, và hàng ĐÃ CHI (kế toán đánh dấu ở
+// trang Hóa đơn đầu vào) bị coi là bị xoá. Hàng đã chi máy chủ KHÔNG cho xoá (400 'hang-da-chi', 2026-10-06) với
+// MỌI người → modal CHẶN NGAY (soát 2026-10-06, W1) thay vì nạp rồi để lần Lưu vỡ; hàng chỉ đã duyệt thì hỏi.
+describe("L48 (bảng HN): Thay toàn bộ không được âm thầm vứt rid / trạng thái duyệt – đã chi", () => {
+  const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
+  it("hàng ĐÃ CHI không còn trong tệp → KHÔNG nạp (chặn ngay, nêu tên, chỉ đường) — xem trước cũng nói", async () => {
     const { payload, html } = await napTep([
       hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", paid: true, hasPaidProof: true }),
       hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2" }),
       hang({ kind: "item", name: "Bàn bị khách xoá", unit: "cái", quantity: 1, unitPrice: 100000, rid: "r-3", paid: true }),
     ]);
+    expect(payload, "trước bản vá: nạp vào màn hình rồi lần Lưu mới bị máy chủ từ chối").toBeNull();
+    expect(thongBao.join(" | ")).toMatch(/Không nạp được: 1 hàng kế toán đã đánh dấu ĐÃ CHI không còn trong file \(“Bàn bị khách xoá”\).*nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào/);
+    expect(loiXacNhan, "chặn TRƯỚC hộp xác nhận — không hỏi điều không làm được").toEqual([]);
+    expect(html).toMatch(/Không nạp được: 1 hàng đã chi không còn trong file.*Bàn bị khách xoá.*nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào/);
+    // Câu cũ hứa "sẽ bị xoá … mất ảnh chứng từ" — nay sai cả hai vế: máy chủ chặn xoá, ảnh nằm ở bảng riêng chỉ-thêm.
+    expect(html).not.toMatch(/mất luôn dấu duyệt, thanh toán và ảnh chứng từ/);
+  });
+
+  it("dòng khớp giữ rid + cờ đã chi; hàng chỉ ĐÃ DUYỆT không còn trong tệp → hỏi (xoá cùng dấu duyệt) rồi nạp", async () => {
+    const { payload, html } = await napTep([
+      hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", paid: true, hasPaidProof: true }),
+      hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2" }),
+      hang({ kind: "item", name: "Bàn bị khách xoá", unit: "cái", quantity: 1, unitPrice: 100000, rid: "r-3", approved: true }),
+    ]);
     expect(payload, "không nạp").toBeTruthy();
     const items = payload!.plans[0].items as unknown as Record<string, unknown>[];
     expect(items.map((x) => x.rid), "rid của dòng khớp bị vứt → máy chủ cấp rid mới").toEqual(["r-1", "r-2"]);
     expect(items[0]).toMatchObject({ paid: true, hasPaidProof: true });
-    expect(loiXacNhan.join(" | ")).toMatch(/1 hàng đã duyệt \/ đã thanh toán .*sẽ bị xoá/);
-    // Xem trước cũng nói — không đợi tới hộp xác nhận.
-    expect(html).toMatch(/1 hàng đã duyệt \/ đã thanh toán sẽ bị xoá/);
+    expect(loiXacNhan.join(" | ")).toMatch(/1 hàng đã duyệt ở sheet đích không còn trong file \(sẽ bị xoá cùng dấu duyệt\)/);
+    expect(html).toMatch(/1 hàng đã duyệt không còn trong file.*sẽ bị xoá cùng dấu duyệt/);
+    expect(thongBao).toEqual([]);
   });
 });
 
-// Soát toàn diện đợt 3: tệp đổi số tiền của hàng ĐÃ THANH TOÁN (rid đi theo dòng khớp) → người không có
-// quyền thanh toán bị máy chủ từ chối CẢ lần Lưu (400). Trước đây xem trước và hộp xác nhận im lặng.
-describe("L48 (bảng HN): hàng đã thanh toán bị tệp đổi số tiền được báo trước khi nạp", () => {
-  it("xem trước + hộp xác nhận nói tên hàng và rằng lần Lưu sẽ bị từ chối nếu không có quyền thanh toán", async () => {
+// W1 (soát 2026-10-06): chọn "Xóa khi nạp" cho một sheet đang có mà bảng nội bộ của nó còn khoản ĐÃ CHI → lần Lưu chắc chắn
+// bị từ chối (400 'hang-da-chi'). Lựa chọn đó bị KHOÁ kèm lý do; nếu vẫn lọt (gán thẳng giá trị) thì nút nạp chặn.
+describe("W1: sheet còn khoản ĐÃ CHI không xoá được khi nạp", () => {
+  const trangPhu = (paid: boolean): SheetDangCo => ({
+    name: "Trang phụ", templateId: 1, items: [],
+    extraTables: [{ category: "hcm", items: [{ kind: "item", rid: "p-1", name: "Thuê xe", quantity: 1, unitPrice: 5, paid }] }],
+  });
+  const chonXoa = () => {
+    const sel = thung.querySelector(".import-unmatched-row select") as HTMLSelectElement;
+    act(() => { sel.value = "remove"; sel.dispatchEvent(new Event("change", { bubbles: true })); });
+  };
+  const goc0: M.Item[] = [{ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000 }, { kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 320000 }];
+
+  it("lựa chọn 'Xóa khi nạp' bị KHOÁ + nêu lý do; ép chọn thì nút nạp CHẶN, nêu tên khoản", async () => {
+    const { payload, html } = await napTep(goc0, [trangPhu(true)], () => {
+      const opt = thung.querySelector('.import-unmatched-row option[value="remove"]') as HTMLOptionElement;
+      expect(opt.disabled, "trước bản vá: chọn xoá được, lần Lưu mới vỡ").toBe(true);
+      chonXoa();
+    });
+    expect(html).toContain("Có 1 khoản đã chi — không xoá được");
+    expect(payload).toBeNull();
+    expect(thongBao.join(" | ")).toMatch(/Không xoá được sheet: còn 1 khoản kế toán đã đánh dấu ĐÃ CHI \(“Thuê xe”\)/);
+  });
+
+  it("sheet không có khoản đã chi → xoá được như cũ", async () => {
+    const { payload } = await napTep(goc0, [trangPhu(false)], chonXoa);
+    expect(payload?.removeTargetIndexes).toEqual([1]);
+    expect(thongBao).toEqual([]);
+  });
+});
+
+// Soát toàn diện đợt 3: tệp đổi số tiền của hàng ĐÃ CHI (rid đi theo dòng khớp) → người không có quyền tích
+// ĐÃ CHI (invoice:input:pay — 2026-10-06, trước là "quyền thanh toán") bị máy chủ từ chối CẢ lần Lưu (400).
+// Trước đây xem trước và hộp xác nhận im lặng.
+describe("L48 (bảng HN): hàng đã chi bị tệp đổi số tiền được báo trước khi nạp", () => {
+  it("xem trước + hộp xác nhận nói tên hàng, rằng chỉ người có quyền tích ĐÃ CHI mới đổi được số tiền, và nhờ kế toán bỏ đánh dấu", async () => {
     const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
     const { payload, html } = await napTep([
       hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1" }),
@@ -121,18 +170,20 @@ describe("L48 (bảng HN): hàng đã thanh toán bị tệp đổi số tiền 
     expect(payload, "không nạp").toBeTruthy();
     // Số liệu vẫn theo TỆP — không âm thầm nuốt thay đổi; chỉ NÓI RA.
     expect(payload!.plans[0].items[1].unitPrice).toBe(320000);
-    expect(loiXacNhan.join(" | ")).toMatch(/1 hàng đã thanh toán bị đổi số tiền.*từ chối/);
-    expect(html).toMatch(/1 hàng đã thanh toán bị đổi số tiền/);
+    expect(loiXacNhan.join(" | ")).toMatch(/1 hàng đã chi bị đổi số tiền.*chỉ người có quyền tích ĐÃ CHI mới đổi được số tiền.*từ chối.*nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào/);
+    expect(html).toMatch(/1 hàng đã chi bị đổi số tiền.*Chỉ người có quyền tích ĐÃ CHI mới đổi được số tiền.*TỪ CHỐI.*nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào/);
     expect(html).toMatch(/Standee/);
+    // Không còn "người phụ trách thanh toán" / "quyền thanh toán": tài khoản chi phí (quote:internal:pay) thôi tích.
+    expect([html, ...loiXacNhan].join(" | ")).not.toMatch(/phụ trách thanh toán|quyền thanh toán/);
   });
 
-  it("hàng đã thanh toán giữ nguyên số → không cảnh báo", async () => {
+  it("hàng đã chi giữ nguyên số → không cảnh báo", async () => {
     const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
     await napTep([
       hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", paid: true }),
       hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2" }),
     ]);
-    expect(loiXacNhan.join(" | ")).not.toMatch(/đã thanh toán bị đổi/);
+    expect(loiXacNhan.join(" | ")).not.toMatch(/bị đổi số tiền/);
   });
 });
 

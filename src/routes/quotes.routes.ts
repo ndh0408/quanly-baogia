@@ -9,7 +9,10 @@ import {
   QuoteUpdateSchema,
   ListQuerySchema,
   HnSaveSchema,
-  PAYMENT_PROOF_DATA_URL_RE,
+  QuoteListNoteSchema,
+  QuoteFacetsQuerySchema,
+  KhoanChiParams,
+  KhoanChiSchema,
 } from "../validators.js";
 import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
 // Hai chốt của đường lưu — ĐẶT SAU `validate` (cần body đã parse để đếm dòng) và TRƯỚC handler.
@@ -24,13 +27,11 @@ import {
   listHnAccounts,
   getQuote,
   listProjects,
+  listInputInvoices,
+  listQuoteFacets,
   signSheet,
   setSheetCustomerDecision,
   updateSheetInvoice,
-  markExtraTableRowPayment,
-  markHnRowPayment,
-  getHnRowProof,
-  getExtraTableRowProof,
   markConverted,
   markLost,
   listVersions,
@@ -38,15 +39,22 @@ import {
   diffVersionsService,
   listApprovals,
   updateMembers,
+  setQuoteListNote,
   deleteQuote,
   duplicateQuote,
 } from "../services/quoteService.js";
 import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
+import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay } from "../services/inputInvoiceService.js";
 
 const router = Router();
 router.use(requireAuth);
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
+
+// MỌI phản hồi báo giá đầy đủ / nội bộ / account Hà Nội đi qua LỚP PHỦ trạng thái đã-chi HIỆU LỰC: khoản kế toán
+// (trang Hóa đơn đầu vào) thắng cờ JSON cũ đã đóng băng (src/khoanChi.ts). Một helper cho mọi chỗ — sót một đường là
+// màn soạn / màn chi phí hiện trạng thái cũ (máy chủ vẫn chốt đúng bằng dữ liệu tươi, nhưng hiển thị thì sai).
+const trinhBay = (q: any, opts?: Parameters<typeof presentQuote>[1]) => phuKeToanBanTrinhBay(q.id, presentQuote(q, opts));
 
 // LIST — validate → service → present rows + meta
 router.get(
@@ -69,6 +77,14 @@ router.get(
       },
     });
   })
+);
+
+// SỐ ĐẾM cho bộ lọc của danh sách (theo trạng thái / người tạo / công ty / ghi chú + "của tôi"): cùng tham số với
+// GET /, mỗi nhóm đếm theo mọi bộ lọc KHÁC. View lược bị 403 trong service. Đặt TRƯỚC "/:id".
+router.get(
+  "/facets",
+  validate({ query: QuoteFacetsQuerySchema }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await listQuoteFacets(req)))
 );
 
 // NEXT NUMBER (preview only - real allocation happens at POST time)
@@ -98,6 +114,33 @@ router.get(
 router.get(
   "/projects",
   asyncHandler(async (req: Request, res: Response) => res.json(await listProjects(req)))
+);
+
+// HÓA ĐƠN ĐẦU VÀO (kế toán) — mọi hàng bảng nội bộ ĐÃ DUYỆT, mỗi hàng là một khoản chi cần hoá đơn đầu vào, cộng
+// các hàng đã có dữ liệu kế toán mà nay "Cần chú ý" (bỏ duyệt, không còn trong báo giá, báo giá đã xoá).
+// Cổng: invoice:page (cùng trang Hoá đơn đầu ra). Đặt TRƯỚC "/:id" để không bị nuốt vào param.
+router.get(
+  "/input-invoices",
+  requirePermission(P.INVOICE_PAGE),
+  asyncHandler(async (req: Request, res: Response) => res.json(await listInputInvoices(req)))
+);
+// KHOẢN CHI của một hàng (chủ repo 2026-10-06): tích ĐÃ CHI + ảnh chứng từ (invoice:input:pay), Ngày hóa đơn + Ghi
+// chú kế toán (invoice:edit) — quyền kiểm THEO TỪNG TRƯỜNG trong service. Định vị bằng (báo giá, phía, rid), không
+// bằng sheetId (id trang đổi sau mỗi lần Lưu). Ghi vào bảng RIÊNG InputInvoiceEntry: không bump Quote.updatedAt nên
+// người đang soạn báo giá không ăn 409. Phạm vi global như GET ở trên (kế toán không có quote:read:*).
+router.put(
+  "/input-invoices/:quoteId/:side/:rid",
+  requirePermission(P.INVOICE_PAGE),
+  validate({ params: KhoanChiParams, body: KhoanChiSchema }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await ghiKhoanChi(req)))
+);
+// Ảnh ủy nhiệm chi của khoản (dữ liệu cá nhân bên thứ ba) — service đòi thêm invoice:input:pay. `?proofId=` mở một
+// ảnh cũ đã rút vào lịch sử. Mỗi lần xem ghi nhật ký.
+router.get(
+  "/input-invoices/:quoteId/:side/:rid/proof",
+  requirePermission(P.INVOICE_PAGE),
+  validate({ params: KhoanChiParams, query: z.object({ proofId: z.coerce.number().int().positive().optional() }) }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await docAnhKhoanChi(req)))
 );
 
 // SIGN documents for ONE sheet (Ký Chứng từ). Admin ký MỌI dự án; người có canSign (vd Lan Anh)
@@ -158,42 +201,9 @@ router.put(
   asyncHandler(async (req: Request, res: Response) => res.json(await updateSheetInvoice(req)))
 );
 
-// THANH TOÁN 1 HÀNG bảng nội bộ (quyền quote:internal:pay) — tích/bỏ + ảnh chứng từ. Đặt TRƯỚC /:id.
-router.post(
-  "/:id/extra/:sheetId/:rid/pay",
-  validate({
-    params: z.object({ id: z.coerce.number().int().positive(), sheetId: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }),
-    // Kiểm TOÀN CHUỖI (hằng số dùng chung ở src/validators.ts): regex tiền tố cũ cho phần đuôi
-    // `" onerror="…` đi thẳng vào CSDL, phá bất biến "chuỗi *Proof luôn là ảnh base64 hợp lệ".
-    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").optional() }),
-  }),
-  requirePermission(P.QUOTE_INTERNAL_PAY),
-  asyncHandler(async (req: Request, res: Response) => res.json(await markExtraTableRowPayment(req)))
-);
-// Ảnh chứng từ 1 hàng nội bộ (on-demand) — quyền check trong service (internal:view|pay).
-router.get(
-  "/:id/extra/:sheetId/:rid/proof",
-  validate({ params: z.object({ id: z.coerce.number().int().positive(), sheetId: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }) }),
-  asyncHandler(async (req: Request, res: Response) => res.json(await getExtraTableRowProof(req)))
-);
-
-// THANH TOÁN 1 HÀNG bảng HÀ NỘI. Bảng HN ở cấp BÁO GIÁ (không thuộc trang nào) nên đường định vị
-// không có `:sheetId` — xem markHnRowPayment. Đặt TRƯỚC /:id.
-router.post(
-  "/:id/hn/:rid/pay",
-  validate({
-    params: z.object({ id: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }),
-    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").optional() }),
-  }),
-  requirePermission(P.QUOTE_INTERNAL_PAY),
-  asyncHandler(async (req: Request, res: Response) => res.json(await markHnRowPayment(req)))
-);
-// Ảnh chứng từ 1 hàng Hà Nội (on-demand) — quyền check trong service (internal:view|pay).
-router.get(
-  "/:id/hn/:rid/proof",
-  validate({ params: z.object({ id: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }) }),
-  asyncHandler(async (req: Request, res: Response) => res.json(await getHnRowProof(req)))
-);
+// (Bốn route thanh toán cũ theo hàng — POST /:id/extra/:sheetId/:rid/pay, GET …/proof, POST /:id/hn/:rid/pay,
+// GET /:id/hn/:rid/proof — ĐÃ GỠ 2026-10-06: tích đã chi + ảnh chứng từ chuyển sang kế toán ở PUT /input-invoices/…
+// phía trên. Bundle cũ gọi vào nhận 404 và không ghi được gì.)
 
 // Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). Đặt TRƯỚC /:id.
 router.get(
@@ -212,7 +222,7 @@ router.get(
   gacNganSachDoc,
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await getQuote(req);
-    res.json(presentQuote(quote, { hnOnly: can(req.session, P.QUOTE_HN_FILL), internalOnly: can(req.session, P.QUOTE_INTERNAL_VIEW) }));
+    res.json(await trinhBay(quote, { hnOnly: can(req.session, P.QUOTE_HN_FILL), internalOnly: can(req.session, P.QUOTE_INTERNAL_VIEW) }));
   })
 );
 
@@ -221,7 +231,7 @@ router.get(
 // nhập chưa" → mọi tài khoản (kế toán/nhân sự/account HN) gõ thẳng #/rnew là tạo được báo giá thật.
 // requirePermission đọc quyền HIỆU LỰC (session.permissions ← resolveUserPermissions: admin full →
 // quyền riêng user → override vai trò từ bảng rolePermission), nên ai được cấp thêm quote:create ở
-// trang Phân quyền vẫn tạo bình thường. Đối xứng với duplicateQuote (quoteService.ts:841).
+// trang Phân quyền vẫn tạo bình thường. Đối xứng với duplicateQuote (src/services/quoteService.ts — kiểm QUOTE_CREATE).
 router.post(
   "/",
   requirePermission(P.QUOTE_CREATE),
@@ -230,7 +240,7 @@ router.post(
   gacNganSachLuu,
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await createQuote(req);
-    res.status(201).json(presentQuote(quote));
+    res.status(201).json(await trinhBay(quote));
   })
 );
 
@@ -254,23 +264,23 @@ router.put(
       return res.status(403).json({ error: "Account Hà Nội chỉ được điền phần Hà Nội, không sửa báo giá chính." });
     }
     const updated = await updateQuote(req);
-    res.json(presentQuote(updated, { hnOnly: can(req.session, P.QUOTE_HN_FILL) }));
+    res.json(await trinhBay(updated, { hnOnly: can(req.session, P.QUOTE_HN_FILL) }));
   })
 );
 
 // ===== Luồng GIÁ HÀ NỘI (role account_hn) — phân quyền + write-guard nằm TRONG service =====
 // Quản lý giao account điền bảng "hanoi"; account chỉ thấy/sửa phần đó; gửi duyệt; quản lý duyệt/trả.
 router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accountId: z.coerce.number().int().positive() }) }),
-  asyncHandler(async (req: Request, res: Response) => { const q = await assignHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await assignHn(req); res.json(await trinhBay(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 // BODY PHẢI QUA SCHEMA. Trước đây route này chỉ kiểm `:id`, còn saveHn đọc thẳng req.body →
 // sanitizeExtraTables persist nguyên trạng cờ duyệt/thanh toán do server sở hữu, và không có
 // cap nào cho số bảng / số dòng / độ dài chuỗi. Xem tests/hn-save-forgery.test.js.
 router.put("/:id/hn", validate({ params: idParam, body: HnSaveSchema }),   // account lưu phần HN (chỉ ghi bảng hanoi)
-  asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(await trinhBay(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 router.post("/:id/hn/submit", validate({ params: idParam }),
-  asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(await trinhBay(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(500).optional() }) }),
-  asyncHandler(async (req: Request, res: Response) => { const q = await reviewHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await reviewHn(req); res.json(await trinhBay(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 
 // MARK CONVERTED — chốt deal (won).
 // Segregation of duties: marking a deal WON is terminal, immutable and feeds
@@ -282,7 +292,7 @@ router.post(
   validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await markConverted(req);
-    res.json(presentQuote(quote));
+    res.json(await trinhBay(quote));
   })
 );
 
@@ -295,7 +305,7 @@ router.post(
   validate({ params: idParam, body: z.object({ reason: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await markLost(req);
-    res.json(presentQuote(quote));
+    res.json(await trinhBay(quote));
   })
 );
 
@@ -351,6 +361,15 @@ router.put(
   asyncHandler(async (req: Request, res: Response) => res.json(await updateMembers(req)))
 );
 
+// GHI CHÚ + MÀU ở dòng Danh sách báo giá (bảng riêng QuoteListNote — KHÔNG chạm Quote.updatedAt nên không
+// đá văng khoá lạc quan của người đang soạn). Quyền kiểm TRONG service: chủ / thành viên có vùng /
+// quote:update:all, và không phải view bị lược. Trường vắng = giữ nguyên.
+router.put(
+  "/:id/list-note",
+  validate({ params: idParam, body: QuoteListNoteSchema }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await setQuoteListNote(req)))
+);
+
 // SOFT DELETE
 router.delete(
   "/:id",
@@ -364,7 +383,7 @@ router.post(
   validate({ params: idParam, body: z.object({ sameProject: zbool.optional() }).default({}) }),
   asyncHandler(async (req: Request, res: Response) => {
     const created = await duplicateQuote(req);
-    res.status(201).json(presentQuote(created));
+    res.status(201).json(await trinhBay(created));
   })
 );
 

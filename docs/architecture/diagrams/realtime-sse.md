@@ -1,7 +1,8 @@
 # Đường realtime (SSE)
 
 Nguồn: `src/sse.ts`, `src/routes/stream.routes.ts`, extension realtime trong
-`src/db.ts`, phía client là `web/src/components/Shell.tsx`.
+`src/db.ts` (cộng các lời phát TAY như `src/services/inputInvoiceService.ts`), phía client là
+`web/src/components/Shell.tsx` và bảng thực thể → khoá query `KHOA_THEO_THUC_THE` ở `web/src/lib/query.tsx`.
 Vì sao SSE chứ không phải WebSocket: [ADR 0004](../../adr/0004-sse-not-websocket.md).
 Diễn giải bằng lời: [DATA_FLOW.md](../DATA_FLOW.md#2-đường-realtime-sse).
 
@@ -31,6 +32,39 @@ sequenceDiagram
     end
     T2->>T2: window realtime:changed — trang tự tải lại
 ```
+
+## Thực thể `inputInvoice` — phát TAY, một lần, SAU commit
+
+Extension trong `src/db.ts` chỉ phát cho các model trong `RT_ENTITY` (`Quote`, `Customer`, `User`,
+`QuoteListNote`), và phát **ngay sau từng câu lệnh** — kể cả khi transaction chưa commit hay sau đó
+rollback. Khoản chi kế toán của trang Hóa đơn đầu vào (`InputInvoiceEntry` / `InputInvoiceProof`, từ
+2026-10-06) cố ý **không** vào danh sách đó: một lần ghi khoản là nhiều câu trong một transaction (gieo
+khoản, khoá, ghi ảnh, rút ảnh cũ), và một lần 409 / 400 phải không làm tươi màn hình nào.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant KT as Tab kế toán — Hóa đơn đầu vào
+    participant API as PUT /api/quotes/input-invoices/…
+    participant DB as PostgreSQL
+    participant T2 as Tab khác (kế toán khác, tài khoản chi phí, danh sách báo giá)
+
+    KT->>API: khoản chi (baseVersion + trường đổi)
+    API->>DB: BEGIN · Quote FOR SHARE · khoản FOR UPDATE · ghi
+    alt 4xx (thiếu quyền, 409 khoan-chi-da-doi, hang-chua-duyet…)
+        API-->>KT: lỗi — KHÔNG phát gì
+    else 200
+        API->>DB: COMMIT
+        API->>API: emitChange inputInvoice update — đúng MỘT lần
+        API-->>T2: event changed (entity inputInvoice)
+        T2->>T2: làm tươi inputInvoices · quote-internal · quotes · audit
+    end
+```
+
+Phía web, `KHOA_THEO_THUC_THE.inputInvoice` chỉ làm tươi bốn nhóm query đó. Thiếu dòng ánh xạ thì một
+thực thể lạ làm tươi **mọi** query — đó cũng là điều xảy ra một nhịp với tab còn chạy bundle trước
+deploy: vô hại, chỉ thừa một lượt tải. Ghi khoản không chạm `Quote`, nên không có sự kiện `quote` nào
+kéo theo (màn soạn báo giá đang mở không bị đá văng).
 
 ## Vì sao publish KHÔNG tự giao cục bộ khi có Redis
 

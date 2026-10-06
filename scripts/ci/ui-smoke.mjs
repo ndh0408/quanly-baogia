@@ -6,7 +6,7 @@
 //   node scripts/ci/ui-smoke.mjs --hien     # mở cửa sổ trình duyệt (gỡ lỗi trên máy có màn hình)
 //
 // ── VÌ SAO CẦN ─────────────────────────────────────────────────────────────
-// 1616 bài vitest của web/ (146 tệp — `cd web && npx vitest run`) chạy ở environment `node` theo
+// 1903 bài vitest của web/ (164 tệp — `cd web && npx vitest run`) chạy ở environment `node` theo
 // MẶC ĐỊNH: repo
 // KHÔNG cài jsdom, `web/vite.config.ts` không khai khối `test` nên vitest lấy mặc định `node`. Tức
 // chúng kiểm HÀM và ĐỌC MÃ NGUỒN — không có `document`, không mount nổi một component nào, và dĩ
@@ -32,8 +32,9 @@
 // ── LUỒNG NGƯỜI DÙNG ĐƯỢC PHỦ ──────────────────────────────────────────────
 // đăng nhập → danh sách → mở trình soạn → sửa ô → LƯU → tải lại + kiểm số đã lưu → MẤT TAB GIỮA
 // CHỪNG: khôi phục bản nháp cục bộ → TẠO báo giá mới (wizard 3 bước) → lưu bản mới → XUẤT Excel →
+// ĐỔI 22 CỠ CỬA SỔ rồi ĐO HÌNH HỌC thanh nút đáy màn soạn (không nút đè nút) →
 // ĐĂNG XUẤT → ĐĂNG NHẬP tài khoản hạn chế → KIỂM QUYỀN → console sạch.
-// Tổng 19 bước: `grep -cE '^\s*(await )?buoc\("' scripts/ci/ui-smoke.mjs`.
+// Tổng 20 bước: `grep -cE '^\s*(await )?buoc\("' scripts/ci/ui-smoke.mjs`.
 //
 // ── DỮ LIỆU ────────────────────────────────────────────────────────────────
 // Tự tạo 2 user + công ty + mẫu + khách hàng + báo giá mang tiền tố `uismoke-<pid>`, và XOÁ CỨNG ở
@@ -454,6 +455,84 @@ async function main() {
     doi(thanXuat.length > 4 && thanXuat[0] === 0x50 && thanXuat[1] === 0x4b,
         `tệp TẢI VỀ là gói OOXML thật (${thanXuat.length} byte, mở đầu ${thanXuat.slice(0, 2).toString("latin1")})`);
     doi(!!taiXuong, `trình duyệt bắt đầu tải: ${taiXuong.suggestedFilename()}`);
+
+    buoc("[U13b] Thanh nút dính đáy màn soạn — không nút nào đè nút nào, từ điện thoại tới màn 4K");
+    // LỖI ĐÃ ĐO (2026-09-30, 1366×768): khối `@media (max-height: 820px)` ép thanh thành MỘT hàng nowrap trong khi nhóm "+ Thêm hàng…"
+    // vẫn co được và không cắt → năm nút của nhóm ấy tràn ra ngoài hộp và bị Lưu / Khách chốt vẽ đè lên (116px). Khung mặc định của smoke
+    // là 1440×900 — KHÔNG lọt vào nhánh đó — nên lỗi sống qua mọi lượt CI xanh. jsdom không dàn trang, chỉ Chromium thật đo được hình
+    // học: bước này đổi cỡ cửa sổ qua laptop (cao 720–768) · FHD · 2K · 4K · máy tính bảng · điện thoại, rồi đo từng nút.
+    // Báo giá `bg` đang ở trạng thái nháp = thanh ĐẦY ĐỦ NHẤT (Lưu · Khách chốt · Khách không chốt · ⋯ + nhóm thêm hàng).
+    // Luật CSS tương ứng được khoá bằng web/src/styles.thanhDay.test.ts; bước này là nửa còn lại (hình học thật).
+    const CO_MAN_HINH = [
+      // Mốc của các lớp: 640/641 (dải ↔ hai hàng), 1279/1280 (hai hàng ↔ một hàng), 1365/1366 · 1419/1420 · 1479/1480 · 1699/1700 (mức nén).
+      [360, 740], [390, 844], [412, 915], [600, 960], [768, 1024], [1024, 768], [1180, 820], [1279, 720], [1280, 720], [1365, 768],
+      [1366, 768], [1440, 900], [1536, 730], [1536, 864], [1600, 900], [1699, 800], [1700, 800], [1920, 1080], [2048, 1152],
+      [2560, 1440], [3440, 1440], [3840, 2160],
+    ];
+    // Chạy TRONG trình duyệt (evaluate tuần tự hoá hàm này) — không được dùng biến của Node.
+    const doThanh = () => {
+      const thanh = document.querySelector(".editor .actions");
+      if (!thanh) return { loi: ["không thấy .editor .actions"], dem: 0 };
+      // Hộp NHÌN THẤY của một phần tử: cắt theo mọi tổ tiên có overflow (khung cuộn của nhóm thêm, dải cuộn ≤640px) cho tới hết thanh —
+      // nút nằm ngoài khung cuộn thì không hiện trên màn hình nên không thể "đè" ai.
+      const hopNhin = (el) => {
+        const r = el.getBoundingClientRect();
+        const h = { x1: r.left, x2: r.right, y1: r.top, y2: r.bottom };
+        for (let p = el.parentElement; p; p = p.parentElement) {
+          const cs = window.getComputedStyle(p);
+          if (cs.overflowX !== "visible" || cs.overflowY !== "visible") {
+            const q = p.getBoundingClientRect();
+            h.x1 = Math.max(h.x1, q.left); h.x2 = Math.min(h.x2, q.right); h.y1 = Math.max(h.y1, q.top); h.y2 = Math.min(h.y2, q.bottom);
+          }
+          if (p === thanh) break;
+        }
+        return h;
+      };
+      const ten = (el) => (el.textContent || el.className || el.tagName).trim().replace(/\s+/g, " ").slice(0, 26);
+      const cac = [...thanh.querySelectorAll(".dock-nhan, .grid-add-bar > *, :scope > .btn, :scope > .kebab-wrap")]
+        .map((el) => ({ el, ...hopNhin(el) }))
+        .filter((o) => o.x2 - o.x1 > 0.5 && o.y2 - o.y1 > 0.5);
+      const loi = [];
+      for (let i = 0; i < cac.length; i++) {
+        for (let j = i + 1; j < cac.length; j++) {
+          const a = cac[i], b = cac[j];
+          const rong = Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1);
+          const cao = Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1);
+          if (rong > 1 && cao > 1) loi.push(`"${ten(a.el)}" đè "${ten(b.el)}" (${Math.round(rong)}×${Math.round(cao)}px)`);
+        }
+      }
+      // Trừ dải cuộn ≤640px (cố ý cuộn ngang), thanh không được có nút nằm NGOÀI hộp của nó.
+      const cs = window.getComputedStyle(thanh);
+      if (cs.overflowX === "visible" && thanh.scrollWidth > thanh.clientWidth + 1) loi.push(`thanh tràn ngang ${thanh.scrollWidth - thanh.clientWidth}px`);
+      // Lưu là nút quan trọng nhất: luôn nằm trọn trong màn hình, kể cả khi phần còn lại của thanh phải cuộn.
+      const luu = thanh.querySelector(":scope > .btn-primary");
+      if (!luu) loi.push("không thấy nút Lưu");
+      else {
+        const r = luu.getBoundingClientRect();
+        if (r.left < -0.5 || r.right > window.innerWidth + 0.5) loi.push(`nút Lưu nằm ngoài màn hình (${Math.round(r.left)}…${Math.round(r.right)} trên ${window.innerWidth}px)`);
+      }
+      return { loi, dem: cac.length };
+    };
+    const hongHinhHoc = [];
+    let demToiThieu = Infinity;
+    for (const [rong, cao] of CO_MAN_HINH) {
+      await trang.setViewportSize({ width: rong, height: cao });
+      await trang.waitForSelector(".editor .actions .grid-add-bar .btn", { timeout: 10_000 });
+      // Hai khung hình: đủ để các luật @media mới và mọi effect theo `resize` của React chạy xong rồi mới đo.
+      await trang.evaluate(() => new Promise((xong) => window.requestAnimationFrame(() => window.requestAnimationFrame(xong))));
+      const kq = await trang.evaluate(doThanh);
+      // CHỐNG RỖNG: ở cỡ ≥641px phải đo được cả nhãn, nhóm thêm hàng và nhóm hành động (≥6 phần tử), không xanh vì selector trượt.
+      if (rong > 640) demToiThieu = Math.min(demToiThieu, kq.dem);
+      // Mỗi cỡ chỉ in 2 lỗi đầu + số còn lại: nếu hỏng thật thì hỏng hàng loạt, in hết là một dòng dài cả nghìn ký tự.
+      if (kq.loi.length) hongHinhHoc.push(`${rong}×${cao}: ${kq.loi.slice(0, 2).join("; ")}${kq.loi.length > 2 ? ` (+${kq.loi.length - 2} lỗi nữa)` : ""}`);
+    }
+    doi(demToiThieu >= 6, `mỗi lượt đo thấy ≥6 phần tử của thanh (ít nhất ${demToiThieu}) — không xanh vì selector trượt`);
+    doi(hongHinhHoc.length === 0, hongHinhHoc.length
+      ? `thanh nút ĐÈ/TRÀN ở ${hongHinhHoc.length}/${CO_MAN_HINH.length} cỡ cửa sổ: ${hongHinhHoc.join(" | ")}`
+      : `${CO_MAN_HINH.length} cỡ cửa sổ (${CO_MAN_HINH[0][0]}px … ${CO_MAN_HINH[CO_MAN_HINH.length - 1][0]}px): không nút nào đè nhau, không nút nào tràn ra ngoài thanh, Lưu luôn trong màn hình`);
+    // Trả khung về cỡ mặc định: các bước sau ([U14] nút Đăng xuất, [U15] menu…) đã được viết cho 1440×900.
+    await trang.setViewportSize({ width: 1440, height: 900 });
+    await trang.evaluate(() => new Promise((xong) => window.requestAnimationFrame(() => window.requestAnimationFrame(xong))));
 
     buoc("[U14] Đăng xuất");
     await trang.evaluate(() => { location.hash = "#/list"; });

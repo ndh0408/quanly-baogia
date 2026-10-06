@@ -29,16 +29,30 @@ const sauGhiChu = () => { const td = tieuDe(); return td.slice(td.indexOf("GHI C
 const oLuoi = (row: number, sel: string) => thung.querySelector(`table.excel-table tr[data-row="${row}"] ${sel}`) as HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement;
 const chon = (el: HTMLSelectElement, v: string) => act(() => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); });
 
+// CỘT THANH TOÁN RỜI MÀN SOẠN (2026-10-06, chủ repo: "cái thanh toán bên đó là cho kế toán, không nằm trong kia
+// nữa"): kế toán tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào. Lưới nội bộ không còn cột, nút hay dấu nào
+// cho hàng đã chi — kể cả khi người mở giữ quyền cũ quote:internal:pay và hàng đang mang cờ đã chi từ lớp phủ.
+// `quyenThanhToanCu` là đúng hai prop màn soạn BẢN CŨ truyền cho người có quyền đó. Rải qua biến `object` để tệp
+// vẫn biên dịch khi hai component đã gỡ chúng; bản cũ nhận chúng thì vẽ cột THANH TOÁN có nút → đỏ.
+const quyenThanhToanCu: object = { canPay: true, quoteId: 21 };
+const daChi = { rid: "r1", paid: true, paidAt: "2026-10-01T03:00:00.000Z", hasPaidProof: true };
+const khongCoThanhToan = () => {
+  expect(tieuDe(), "lưới nội bộ còn cột THANH TOÁN").not.toContain("THANH TOÁN");
+  expect(thung.querySelectorAll('button[data-xl="thanh-toan"], td.col-pay'), "còn nút / ô thanh toán trên lưới").toHaveLength(0);
+  expect(thung.textContent, "còn dấu đã thanh toán trên lưới").not.toMatch(/Đã TT|📎/);
+};
+
 describe("ExtraTables (Chi phí HCM · Phí khách hàng) bật cột nội bộ thật", () => {
   const dung = (sheet: { id: number; templateId: number; extraTables: ExtraTable[]; _activeExtra?: number }, onMarkDirty = () => {}) =>
-    act(() => { goc.render(<ExtraTables sheet={sheet} templates={MAU} companyId={1} editable canApprove onMarkDirty={onMarkDirty} />); });
+    act(() => { goc.render(<ExtraTables {...quyenThanhToanCu} sheet={sheet} templates={MAU} companyId={1} editable canApprove onMarkDirty={onMarkDirty} />); });
   const moKhoi = (i: number) => act(() => { (thung.querySelectorAll(".khoi-sheet-nut")[i] as HTMLButtonElement).click(); });
 
-  it("Chi phí HCM: đủ NS · CHỨNG TỪ · LƯU KHO sau GHI CHÚ, trước DUYỆT / THANH TOÁN; ô hiện đúng giá trị đã lưu", () => {
-    const s = { id: 1, templateId: 1, extraTables: [{ category: "hcm", templateId: 1, name: "HCM", items: [hang({ ns: "Anh Tuấn", chungTu: "VAT", luuKho: true })] }] as unknown as ExtraTable[] };
+  it("Chi phí HCM: đủ NS · CHỨNG TỪ · LƯU KHO sau GHI CHÚ, rồi DUYỆT; KHÔNG còn cột THANH TOÁN; ô hiện đúng giá trị đã lưu", () => {
+    const s = { id: 1, templateId: 1, extraTables: [{ category: "hcm", templateId: 1, name: "HCM", items: [hang({ ns: "Anh Tuấn", chungTu: "VAT", luuKho: true, approved: true, ...daChi })] }] as unknown as ExtraTable[] };
     dung(s);
     moKhoi(0);
-    expect(sauGhiChu().slice(0, 6)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO", "DUYỆT", "THANH TOÁN"]);
+    expect(sauGhiChu().slice(0, 5)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO", "DUYỆT"]);
+    khongCoThanhToan();
     expect(oLuoi(0, "[data-f=\"ns\"]").value).toBe("Anh Tuấn");
     expect(oLuoi(0, "td.col-chung-tu select").value).toBe("VAT");
     expect(oLuoi(0, "td.col-luu-kho input").checked).toBe(true);
@@ -53,6 +67,7 @@ describe("ExtraTables (Chi phí HCM · Phí khách hàng) bật cột nội bộ
     dung({ id: 1, templateId: 1, extraTables: tables, _activeExtra: 1 }, danhDau);
     moKhoi(1);
     expect(sauGhiChu().slice(0, 4)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO"]);
+    khongCoThanhToan();
     chon(oLuoi(0, "td.col-chung-tu select"), "HDNS");
     act(() => { oLuoi(0, "td.col-luu-kho input").click(); });
     const kh = tables[1].items[0] as unknown as Hang;
@@ -63,13 +78,14 @@ describe("ExtraTables (Chi phí HCM · Phí khách hàng) bật cột nội bộ
 });
 
 describe("HnTables (Báo giá Hà Nội) bật cột nội bộ thật", () => {
-  it("đủ ba cột (không có DUYỆT — bảng HN duyệt theo cả phần); tích / chọn ghi vào hàng và báo 'chưa lưu'", () => {
-    const t = [{ templateId: 1, name: "HN", groupSubtotal: false, items: [hang({ name: "Nhân công", ns: "Chị Lan" })] }] as unknown as HnTable[];
+  it("đủ ba cột (không có DUYỆT — bảng HN duyệt theo cả phần; không có THANH TOÁN dù người mở có quote:internal:pay); tích / chọn ghi vào hàng và báo 'chưa lưu'", () => {
+    const t = [{ templateId: 1, name: "HN", groupSubtotal: false, items: [hang({ name: "Nhân công", ns: "Chị Lan", ...daChi })] }] as unknown as HnTable[];
     const danhDau = vi.fn();
-    act(() => { goc.render(<HnTables moMacDinh tables={t} templates={MAU} companyId={1} editable onMarkDirty={danhDau} />); });
+    act(() => { goc.render(<HnTables {...quyenThanhToanCu} moMacDinh tables={t} templates={MAU} companyId={1} editable onMarkDirty={danhDau} />); });
     const td = sauGhiChu();
     expect(td.slice(0, 4)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO"]);
     expect(td).not.toContain("DUYỆT");
+    khongCoThanhToan();
     expect(oLuoi(0, "[data-f=\"ns\"]").value).toBe("Chị Lan");
     chon(oLuoi(0, "td.col-chung-tu select"), "TM");
     act(() => { oLuoi(0, "td.col-luu-kho input").click(); });

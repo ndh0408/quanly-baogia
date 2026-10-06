@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { api, ApiError, type EditorTemplate, type ImportResult, type ImportedSheet } from "../lib/api";
 import { confirmModal, toast, useEscClose } from "../lib/ui";
 import * as M from "../lib/quoteMath";
-import { addrFields, autoTargetIndexes, doiChieuNhapExcel, giuTruongChiApp, khacTien, letterOfField, NEW_IMPORT_SHEET, toGridItems, diffItems, diffCounts, kindLabel, type DiffRow } from "../lib/importApply";
+import { addrFields, autoTargetIndexes, doiChieuNhapExcel, giuTruongChiApp, khacTien, khoanDaChiTrongSheetXoa, letterOfField, NEW_IMPORT_SHEET, toGridItems, diffItems, diffCounts, kindLabel, type DiffRow } from "../lib/importApply";
 import { extraTableSum } from "./ExtraTables";
 
 // Modal "Nhập từ Excel": chọn file khách gửi lại → app đọc file (server) → cho XEM app hiểu gì
@@ -45,8 +45,9 @@ export function ImportExcelModal({
   quoteId, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId, onApply, onClose, khongCoTongTien, thayGiuCoNhomCuaDich, tongKhongNhanNhom,
 }: {
   quoteId?: number;
-  /** Các sheet ĐANG CÓ trong báo giá (để chọn nạp vào đâu + đối chiếu trước/sau). */
-  sheets: { name?: string | null; templateId?: number; groupSubtotal?: boolean; items: M.Item[] }[];
+  /** Các sheet ĐANG CÓ trong báo giá (để chọn nạp vào đâu + đối chiếu trước/sau). `extraTables`: bảng nội bộ của trang
+   *  (màn soạn) — chỉ để biết trang sắp xoá có hàng ĐÃ CHI không (khoanDaChiTrongSheetXoa). */
+  sheets: { name?: string | null; templateId?: number; groupSubtotal?: boolean; items: M.Item[]; extraTables?: unknown }[];
   templates: EditorTemplate[];
   usesDaysOf: (templateId?: number) => boolean;
   addrDetailOf: (templateId?: number) => boolean;
@@ -139,6 +140,7 @@ export function ImportExcelModal({
     const giu = plan.mode !== "append" && target ? giuTruongChiApp(before, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote, giuCongThucNgayAn: !usesDays }) : null;
     const after = plan.mode === "append" ? [...before, ...conv.items] : (giu?.items ?? conv.items);
     const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0, noiBoMat = giu?.noiBoMat ?? 0, tienDaTraDoi = giu?.tienDaTraDoi ?? [];
+    const daChiMat = giu?.daChiMat ?? [];
     const tongBang = tongBangCua(tongKhongNhanNhom, usesDays);
     const beforeTotal = tongBang ? tongBang(before) : M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
     // Cờ "Hiện Thành Tiền nhóm" SAU nạp: theo đường nạp, và TỰ BẬT khi bảng kết quả còn nhóm SL > 1 (nhập Số Lượng nhóm mà
@@ -167,7 +169,7 @@ export function ImportExcelModal({
     return {
       fs, plan, target, targetTemplate, templateMismatch, isNew, usesDays, addrDetail, showDetail, detailDropped, columnMoves,
       before, after, beforeTotal, afterTotal, importedTotal, tongHangTep, fileTotal, moneyDelta, moneyMismatch, lechThat, lechSauNap, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nhanSauNap, tuBatNhom, nguonNhom,
-      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat, noiBoMat, tienDaTraDoi,
+      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat, daChiMat, noiBoMat, tienDaTraDoi,
     };
   }, [usable, plans, active, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId, thayGiuCoNhomCuaDich, tongKhongNhanNhom]);
 
@@ -197,7 +199,15 @@ export function ImportExcelModal({
   const apply = async () => {
     if (dupTargets.size) { toast("Hai sheet của file đang nạp vào cùng một sheet — hãy chọn sheet đích khác nhau", "error"); return; }
     const effectiveRemovals = removeTargets.filter((i) => unmatchedTargets.includes(i));
+    // Hàng ĐÃ CHI sẽ biến mất (xoá sheet, hoặc "Thay toàn bộ" mà dòng không còn trong file) → máy chủ từ chối CẢ lần
+    // Lưu với mọi người (400 'hang-da-chi'). Chặn ngay — để nạp rồi mới vỡ lúc Lưu là bắt người dùng làm lại từ đầu.
+    const daChiXoaSheet = khoanDaChiTrongSheetXoa(sheets, effectiveRemovals);
+    if (daChiXoaSheet.length) {
+      toast(`Không xoá được sheet: còn ${daChiXoaSheet.length} khoản kế toán đã đánh dấu ĐÃ CHI (${tenVaiHang(daChiXoaSheet)}). Giữ lại sheet đó, hoặc nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước.`, "error");
+      return;
+    }
     const out: ImportApplyPayload["plans"] = [];
+    const daChiMatRisk: string[] = [];
     let totals: ImportApplyPayload["totals"];
     let moneyRisk = 0, tepTuLechRisk = 0, formulaRisk = 0, templateRisk = 0, rowRisk = 0, sheetRisk = 0, anhRisk = 0, trangThaiRisk = 0, noiBoRisk = 0;
     const tienDaTraRisk: string[] = [];
@@ -215,16 +225,18 @@ export function ImportExcelModal({
       const baseRow = !isNew && plan.mode === "append" ? (target?.items || []).length : 0;
       const conv = toGridItems(fs.items, { usesDays, addrDetail, showDetail, baseRow });
       // Thay toàn bộ: dòng khớp giữ ảnh (+ productId, ghi chú nội bộ khi tệp không có cột đó; bảng HN:
-      // rid + cờ duyệt / thanh toán) — tệp Excel không chở được chúng. Ảnh của dòng bị xoá thật thì
+      // rid + cờ duyệt / đã chi) — tệp Excel không chở được chúng. Ảnh của dòng bị xoá thật thì
       // đếm để NÓI RA ở hộp xác nhận (L48).
       const giu = plan.mode === "replace" && target ? giuTruongChiApp(target.items, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote, giuCongThucNgayAn: !usesDays }) : null;
       anhRisk += giu?.anhMat ?? 0;
-      // Bảng HN: hàng đã duyệt / đã thanh toán không còn trong tệp → mất dấu duyệt, cờ đã trả, ảnh chứng từ.
+      // Bảng HN: hàng đã duyệt không còn trong tệp → xoá cùng dấu duyệt (hỏi); hàng kế toán đã đánh dấu ĐÃ CHI thì máy
+      // chủ KHÔNG cho xoá (400 'hang-da-chi' — cả lần Lưu bị từ chối) → CHẶN ngay bên dưới (daChiMatRisk).
       trangThaiRisk += giu?.trangThaiMat ?? 0;
+      daChiMatRisk.push(...(giu?.daChiMat ?? []));
       // Bảng nội bộ: hàng có NS / chứng từ / lưu kho không còn trong tệp → mất cả ba (tệp không chở chúng).
       noiBoRisk += giu?.noiBoMat ?? 0;
-      // Bảng HN: hàng đã thanh toán bị tệp đổi số tiền → máy chủ từ chối CẢ lần Lưu nếu người dùng không có
-      // quyền thanh toán (reconcileExtraPayments). Modal không biết quyền → nói điều kiện ra, không đoán.
+      // Bảng HN: hàng ĐÃ CHI bị tệp đổi số tiền → máy chủ từ chối CẢ lần Lưu nếu người dùng không có quyền tích
+      // ĐÃ CHI (invoice:input:pay — reconcileExtraPayments). Modal không biết quyền → nói điều kiện ra, không đoán.
       tienDaTraRisk.push(...(giu?.tienDaTraDoi ?? []));
       out.push({
         file: fs, targetIndex: plan.targetIndex, mode: plan.mode, templateId: tplId, items: giu?.items ?? conv.items,
@@ -256,6 +268,10 @@ export function ImportExcelModal({
       if (!totals && applyTotals && fs.totals) totals = { vatPercent: fs.totals.vatPercent ?? null };
     });
     if (!out.length) { toast("Chưa chọn sheet nào để nạp", "info"); return; }
+    if (daChiMatRisk.length) {
+      toast(`Không nạp được: ${daChiMatRisk.length} hàng kế toán đã đánh dấu ĐÃ CHI không còn trong file (${tenVaiHang(daChiMatRisk)}) — Lưu sẽ bị từ chối. Thêm lại các dòng đó vào file, chọn "Nối vào cuối", hoặc nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước.`, "error");
+      return;
+    }
     // Trần lưu của app (khớp sheetSchema server) — báo TRƯỚC khi nạp thay vì để lỗi lúc bấm Lưu.
     const over = out.find((p) => ((p.mode === "append" && p.targetIndex !== NEW_SHEET ? (sheets[p.targetIndex]?.items.length || 0) : 0) + p.items.length) > MAX_ROWS_PER_SHEET);
     if (over) { toast(`Sheet “${over.file.name}” vượt ${MAX_ROWS_PER_SHEET} dòng/sheet (giới hạn lưu của hệ thống) — hãy tách bớt sang sheet khác rồi nạp lại`, "error"); return; }
@@ -268,9 +284,10 @@ export function ImportExcelModal({
       sheetRisk ? `${sheetRisk} cảnh báo chung của sheet` : "",
       effectiveRemovals.length ? `${effectiveRemovals.length} sheet hiện có sẽ bị xóa` : "",
       anhRisk ? `${anhRisk} ảnh hạng mục ở sheet đích sẽ bị xoá (dòng có ảnh không còn trong file)` : "",
-      trangThaiRisk ? `${trangThaiRisk} hàng đã duyệt / đã thanh toán ở sheet đích sẽ bị xoá (mất dấu duyệt, thanh toán và ảnh chứng từ)` : "",
+      // Hàng ĐÃ CHI không ghép được đã bị chặn ở trên — tới đây chỉ còn hàng đã DUYỆT.
+      trangThaiRisk ? `${trangThaiRisk} hàng đã duyệt ở sheet đích không còn trong file (sẽ bị xoá cùng dấu duyệt)` : "",
       noiBoRisk ? `${noiBoRisk} hàng có NS / chứng từ / lưu kho ở sheet đích sẽ bị xoá (dòng không còn trong file — tệp Excel không chở ba cột này)` : "",
-      tienDaTraRisk.length ? `${tienDaTraRisk.length} hàng đã thanh toán bị đổi số tiền (${tenVaiHang(tienDaTraRisk)}) — nếu bạn không có quyền thanh toán, lần Lưu sẽ bị từ chối` : "",
+      tienDaTraRisk.length ? `${tienDaTraRisk.length} hàng đã chi bị đổi số tiền (${tenVaiHang(tienDaTraRisk)}) — chỉ người có quyền tích ĐÃ CHI mới đổi được số tiền, không thì lần Lưu sẽ bị từ chối: nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước` : "",
     ].filter(Boolean);
     if (risks.length && !(await confirmModal(
       "Nạp khi vẫn còn điểm cần kiểm tra?",
@@ -386,11 +403,13 @@ export function ImportExcelModal({
                 {unmatchedTargets.map((i) => {
                   const sh = sheets[i]; const tpl = templates.find((t) => t.id === sh.templateId);
                   const remove = removeTargets.includes(i);
+                  const daChi = khoanDaChiTrongSheetXoa(sheets, [i]);
                   return <div className="import-unmatched-row" key={i}>
-                    <span><strong>{sh.name || `Sheet ${i + 1}`}</strong>{tpl?.name && <small>{tpl.name}</small>}</span>
+                    <span><strong>{sh.name || `Sheet ${i + 1}`}</strong>{tpl?.name && <small>{tpl.name}</small>}
+                      {daChi.length > 0 && <small className="field-err">Có {daChi.length} khoản đã chi — không xoá được</small>}</span>
                     <select value={remove ? "remove" : "keep"} onChange={(e) => setRemoveTargets((cur) => e.target.value === "remove" ? [...new Set([...cur, i])] : cur.filter((x) => x !== i))}>
                       <option value="keep">Giữ lại trong báo giá</option>
-                      <option value="remove">Xóa khi nạp</option>
+                      <option value="remove" disabled={daChi.length > 0}>Xóa khi nạp</option>
                     </select>
                   </div>;
                 })}
@@ -437,6 +456,9 @@ export function ImportExcelModal({
                   </div>
                   {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0 || view.trangThaiMat > 0 || view.noiBoMat > 0 || view.tienDaTraDoi.length > 0 || view.tuBatNhom || !!view.nhomCuoiNhan || !!view.hangSanCoDoi) && (
                     <ul className="import-warn">
+                      {view.daChiMat.length > 0 && <li>
+                        <strong>Không nạp được: {view.daChiMat.length} hàng đã chi không còn trong file</strong> ({tenVaiHang(view.daChiMat)}) — hàng kế toán đã đánh dấu ĐÃ CHI không được xoá, lần Lưu sẽ bị từ chối. Thêm lại các dòng đó vào file, chọn “Nối vào cuối”, hoặc nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước.
+                      </li>}
                       {view.templateMismatch && <li>
                         Bạn đang đưa file dạng <strong>{view.fs.templateName || view.fs.templateCode}</strong> vào sheet dùng <strong>{view.targetTemplate?.name}</strong>. Hãy chọn đúng sheet đích để nhóm và số thứ tự không đổi kiểu.
                       </li>}
@@ -488,14 +510,14 @@ export function ImportExcelModal({
                       {view.anhMat > 0 && <li>
                         <strong>{view.anhMat} ảnh hạng mục sẽ bị xoá</strong> cùng các dòng không còn trong file. Dòng còn khớp thì giữ nguyên ảnh đang có.
                       </li>}
-                      {view.trangThaiMat > 0 && <li>
-                        <strong>{view.trangThaiMat} hàng đã duyệt / đã thanh toán sẽ bị xoá</strong> cùng các dòng không còn trong file — mất luôn dấu duyệt, thanh toán và ảnh chứng từ. Dòng còn khớp thì giữ nguyên trạng thái.
+                      {view.trangThaiMat > view.daChiMat.length && <li>
+                        <strong>{view.trangThaiMat - view.daChiMat.length} hàng đã duyệt không còn trong file</strong> — sẽ bị xoá cùng dấu duyệt. Dòng còn khớp thì giữ nguyên trạng thái.
                       </li>}
                       {view.noiBoMat > 0 && <li>
                         <strong>{view.noiBoMat} hàng có NS / chứng từ / lưu kho sẽ bị xoá</strong> cùng các dòng không còn trong file — tệp Excel không chở ba cột này nên chúng mất hẳn. Dòng còn khớp thì giữ nguyên.
                       </li>}
                       {view.tienDaTraDoi.length > 0 && <li>
-                        <strong>{view.tienDaTraDoi.length} hàng đã thanh toán bị đổi số tiền</strong> ({tenVaiHang(view.tienDaTraDoi)}) — file sửa số lượng / đơn giá / số ngày của hàng đã đánh dấu ĐÃ TRẢ. Nếu bạn không có quyền thanh toán, lần Lưu sẽ bị TỪ CHỐI: nhờ người phụ trách thanh toán bỏ đánh dấu trước, hoặc sửa lại số trong file.
+                        <strong>{view.tienDaTraDoi.length} hàng đã chi bị đổi số tiền</strong> ({tenVaiHang(view.tienDaTraDoi)}) — file sửa số lượng / đơn giá / số ngày của hàng đã được kế toán đánh dấu ĐÃ CHI. Chỉ người có quyền tích ĐÃ CHI mới đổi được số tiền, người khác Lưu sẽ bị TỪ CHỐI: nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước, hoặc sửa lại số trong file.
                       </li>}
                       {view.detailDropped > 0 && <li>
                         <strong>{view.detailDropped} dòng trong file có cột “Chi Tiết”</strong>, nhưng mẫu <strong>{view.targetTemplate?.name || "của sheet đích"}</strong> không có cột đó — phần nội dung ấy sẽ KHÔNG được nạp. Muốn giữ thì chọn sheet đích dùng mẫu có cột Chi Tiết (các mẫu Colorfull).

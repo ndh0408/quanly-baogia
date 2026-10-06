@@ -10,7 +10,7 @@ trực lúc sự cố phải biết mình đang có gì THẬT, không phải re
 | Dump CSDL hằng đêm (`quanly-backup`, 02:00 UTC) | có | ✅ chạy, ghi `/opt/quanly-backups` **trên cùng máy** |
 | Restore-test hằng tuần (`quanly-restore-test`) | có | ✅ chạy thành công (chỉ CSDL, nạp vào chính instance Postgres đó) |
 | Bản sao **ngoài máy** (NAS hoặc rclone crypt) | có (tuỳ chọn) | ❌ **KHÔNG CÓ** — `/etc/quanly-backup.env` không có `NAS_*` |
-| Sao lưu **kho object** (`quanly-backup-objects`) | có | ❌ **KHÔNG CÓ timer** — ảnh chứng từ thanh toán **không có bản sao nào** |
+| Sao lưu **kho object** (`quanly-backup-objects`) | có | ❌ **KHÔNG CÓ timer** — ảnh chứng từ thanh toán nhân sự **không có bản sao nào** |
 | Diễn tập đầy đủ (`quanly-restore-drill`) | có | ❌ không có timer |
 | Watchdog độ tươi (`quanly-backup-watchdog`) | có | ❌ không có timer |
 | Script trên host = script trong repo | — | ❌ `/opt/quanly/backup-db.sh` **khác md5** với repo |
@@ -53,16 +53,28 @@ ls -lt /opt/quanly-backups/quanly-*.sql.gz ~/quanly-backups/predeploy-*.sql.gz
 docker exec quanly-postgres pg_dump -U quanly -d quanly --no-owner --clean --if-exists | gzip > /opt/quanly-backups/before-restore-$(date +%F-%H%M%S).sql.gz
 # 3. Nạp lại. Kiểm dump có --clean không (có DROP ở đầu tệp):
 gunzip -c <TỆP>.sql.gz | head -200 | grep -c '^DROP '
-#   3a. > 0 (dump hằng đêm; dump trước-deploy từ 2026-09-23) → nạp thẳng:
-gunzip -c <TỆP>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1
-#   3b. = 0 (dump trước-deploy CŨ, không --clean) → tạo lại CSDL rỗng rồi nạp (bước 2 đã chụp hiện trạng):
+#   3a. > 0 (dump hằng đêm; dump trước-deploy từ 2026-09-23) VÀ dump tạo SAU migration mới nhất đang chạy → nạp thẳng,
+#       trong MỘT giao dịch (lỗi giữa chừng thì rollback sạch, không để lại CSDL mất nửa khoá / index):
+gunzip -c <TỆP>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1 --single-transaction
+#   3b. = 0 (dump trước-deploy CŨ, không --clean), HOẶC dump tạo TRƯỚC một migration thêm khoá ngoại trỏ vào bảng có sẵn
+#       (xem chú thích dưới khối lệnh) → tạo lại CSDL rỗng rồi nạp (bước 2 đã chụp hiện trạng):
 docker exec quanly-postgres psql -U quanly -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE quanly;' -c 'CREATE DATABASE quanly OWNER quanly;'
-gunzip -c <TỆP>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1
+gunzip -c <TỆP>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1 --single-transaction
 # 4. Kiểm
 docker exec quanly-postgres psql -U quanly -d quanly -tAc 'SELECT count(*) FROM "User";'
+# 4b. Dump CŨ hơn bản app đang chạy → nâng schema TRƯỚC khi dựng app (app mới cần bảng mà dump chưa có):
+docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate deploy
 # 5. Dựng lại app + worker (--force-recreate: xem DEPLOYMENT.md#rollback vì sao `up -d` trần không đủ)
 docker compose -f docker-compose.prod.yml up -d --force-recreate app worker
 ```
+
+> **Dump tạo TRƯỚC `20261006090000_input_invoice_entries` (hoặc `20260930120000_quote_list_note`) — gồm cả dump
+> trước-deploy của chính lượt deploy đó: KHÔNG dùng 3a.** `--clean` gỡ đối tượng theo thứ tự nó biết lúc dump:
+> mọi khoá ngoại, rồi index, rồi khoá chính. Dump cũ không biết `InputInvoiceEntry_quoteId_fkey` /
+> `QuoteListNote_quoteId_fkey`, nên tới `DROP CONSTRAINT "Quote_pkey"` thì lỗi vì khoá ngoại mới còn trỏ vào —
+> thiếu `--single-transaction` là khoảng 160 câu trước đó ĐÃ commit (mất FK, index unique, khoá chính của
+> `user_sessions`, `User`…; đăng nhập hỏng). Dùng 3b. Và nhớ: nạp dump trước-deploy là **mất mọi khoản kế toán
+> ghi từ lúc deploy** — chỉ làm khi sự cố thật sự đòi; muốn "lùi bản" thì xem mục "Khoản chi kế toán → 2. Lùi ảnh".
 
 ## Dựng lại toàn bộ (mất host)
 Thứ tự: (nếu Proxmox thật sự có backup VM — xem bảng đầu tài liệu, **chưa kiểm chứng**) restore VM coolify **→** (hoặc) dựng VM mới + cài Docker **→** `git clone` repo (GitHub là nơi lưu trữ mã — mọi commit đang chạy phải đã được push) **→** điền `.env` từ **kho khoá của chủ repo** — khoá cần để dựng lại server được giữ NGOÀI repo, ở kho khoá riêng của chủ repo, và không bao giờ vào git (không lấy từ máy cũ, vì mất máy là mất luôn `.env` trên đó): `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `S3_*`, `PII_ENC_KEY`, `MFA_ENC_KEY`, `SESSION_SECRET`, `JWT_SECRET`… **→** `docker compose -f docker-compose.prod.yml up -d postgres redis minio` (ảnh MinIO kéo từ **quay.io** — Docker Hub đã gỡ `minio/*`) **→** kéo bản off-host về (BACKUP_RESTORE.md) **→** restore DB (mục trên) **→** khôi phục kho object (mục "Thứ tự khôi phục" bên dưới, bước 3) **→** `prisma migrate deploy` **→** `up -d app worker` **→** verify `/livez` + `/readyz` **→** cài lại cloudflared tunnel **→** `install-backup.sh`.
@@ -72,7 +84,172 @@ Thứ tự: (nếu Proxmox thật sự có backup VM — xem bảng đầu tài 
 ## Lưu ý
 - Backup `pg_dump` KHÔNG đụng app đang chạy (read-only, có advisory-lock của Postgres).
 - File backup chứa **toàn bộ PII** → NAS/thư mục backup phải hạn chế quyền (chmod 600, share riêng).
+  Từ 2026-10-06 nó chứa cả ảnh ủy nhiệm chi của khoản chi hàng nội bộ (`InputInvoiceProof`, base64 thô).
 - Kiểm `systemctl list-timers quanly-*` để chắc lịch đang chạy.
+
+## Khoản chi kế toán (trang Hóa đơn đầu vào) — tiền kiểm, chuyển dữ liệu sau deploy, lùi ảnh
+
+Áp cho bản phát hành có migration `20261006090000_input_invoice_entries` (đợt 2026-10-06). Từ bản đó "đã
+chi" + ảnh chứng từ + ngày HĐ + ghi chú KT của từng hàng bảng nội bộ nằm ở bảng `InputInvoiceEntry` /
+`InputInvoiceProof`; bốn cờ cũ `paid/paidAt/paidById/paidProof` trong JSON hàng **đóng băng** và chỉ còn
+là nguồn dự phòng cho hàng chưa có khoản. Ảnh nằm TRONG Postgres — dump CSDL mang theo, không phụ thuộc
+kho object. Migration chỉ THÊM bảng (xem `prisma/migrations/README.md`).
+
+### 0. Tiền kiểm CHỈ ĐỌC — trước deploy, trên dev rồi production
+
+Chạy trên host (`ssh staging-ts` cho dev, `ssh coolify-ts` cho production). Phiên đặt
+`default_transaction_read_only` nên không câu nào ghi được. Mọi phép duyệt JSON bọc `CASE jsonb_typeof`
+như mã (`src/bangNoiBoSql.ts`) — gặp phần tử không phải mảng / object thì bỏ qua thay vì vỡ câu truy vấn.
+
+```bash
+docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1 <<'SQL'
+SET default_transaction_read_only = on;
+-- (a1) phía "sheet" (Chi phí HCM + Phí KH mọi trang): đã trả · có ảnh · dấu vết mà thiếu rid · đã trả mà chưa duyệt · đã trả ở báo giá đã xoá mềm
+WITH h AS (
+  SELECT q."deletedAt" IS NOT NULL AS da_xoa, it.v AS it
+    FROM "QuoteSheet" s JOIN "Quote" q ON q.id = s."quoteId",
+         jsonb_array_elements(CASE WHEN jsonb_typeof(s."extraTables") = 'array' THEN s."extraTables" ELSE '[]'::jsonb END) t(v),
+         jsonb_array_elements(CASE WHEN jsonb_typeof(t.v) = 'object' AND jsonb_typeof(t.v->'items') = 'array' THEN t.v->'items' ELSE '[]'::jsonb END) it(v)
+   WHERE t.v->>'category' IN ('hcm', 'khach') AND jsonb_typeof(it.v) = 'object')
+SELECT count(*) FILTER (WHERE it->>'paid' = 'true') AS da_tra,
+       count(*) FILTER (WHERE coalesce(it->>'paidProof', '') <> '') AS co_anh,
+       count(*) FILTER (WHERE (it->>'paid' = 'true' OR coalesce(it->>'paidProof', '') <> '') AND coalesce(trim(it->>'rid'), '') = '') AS vet_thieu_rid,
+       count(*) FILTER (WHERE it->>'paid' = 'true' AND it->>'approved' IS DISTINCT FROM 'true') AS da_tra_chua_duyet,
+       count(*) FILTER (WHERE it->>'paid' = 'true' AND da_xoa) AS da_tra_bao_gia_da_xoa
+  FROM h;
+-- (a2) rid TRÙNG trong phía "sheet" của một báo giá (so sau khi cắt khoảng trắng — đường Lưu coi "w1 " là "w1")
+SELECT s."quoteId", trim(it.v->>'rid') AS rid, count(*) AS so_lan
+  FROM "QuoteSheet" s,
+       jsonb_array_elements(CASE WHEN jsonb_typeof(s."extraTables") = 'array' THEN s."extraTables" ELSE '[]'::jsonb END) t(v),
+       jsonb_array_elements(CASE WHEN jsonb_typeof(t.v) = 'object' AND jsonb_typeof(t.v->'items') = 'array' THEN t.v->'items' ELSE '[]'::jsonb END) it(v)
+ WHERE t.v->>'category' IN ('hcm', 'khach') AND jsonb_typeof(it.v) = 'object' AND coalesce(trim(it.v->>'rid'), '') <> ''
+ GROUP BY s."quoteId", trim(it.v->>'rid') HAVING count(*) > 1;
+-- (a3) phía "hn" (Quote.hnTables): cùng các số như (a1), "chưa duyệt" = hnStatus khác approved
+WITH h AS (
+  SELECT q."hnStatus", q."deletedAt" IS NOT NULL AS da_xoa, it.v AS it
+    FROM "Quote" q,
+         jsonb_array_elements(CASE WHEN jsonb_typeof(q."hnTables") = 'array' THEN q."hnTables" ELSE '[]'::jsonb END) t(v),
+         jsonb_array_elements(CASE WHEN jsonb_typeof(t.v) = 'object' AND jsonb_typeof(t.v->'items') = 'array' THEN t.v->'items' ELSE '[]'::jsonb END) it(v)
+   WHERE jsonb_typeof(it.v) = 'object')
+SELECT count(*) FILTER (WHERE it->>'paid' = 'true') AS da_tra,
+       count(*) FILTER (WHERE coalesce(it->>'paidProof', '') <> '') AS co_anh,
+       count(*) FILTER (WHERE (it->>'paid' = 'true' OR coalesce(it->>'paidProof', '') <> '') AND coalesce(trim(it->>'rid'), '') = '') AS vet_thieu_rid,
+       count(*) FILTER (WHERE it->>'paid' = 'true' AND "hnStatus" IS DISTINCT FROM 'approved') AS da_tra_hn_chua_duyet,
+       count(*) FILTER (WHERE it->>'paid' = 'true' AND da_xoa) AS da_tra_bao_gia_da_xoa
+  FROM h;
+-- (a4) rid TRÙNG trong phía "hn"
+SELECT q.id AS "quoteId", trim(it.v->>'rid') AS rid, count(*) AS so_lan
+  FROM "Quote" q,
+       jsonb_array_elements(CASE WHEN jsonb_typeof(q."hnTables") = 'array' THEN q."hnTables" ELSE '[]'::jsonb END) t(v),
+       jsonb_array_elements(CASE WHEN jsonb_typeof(t.v) = 'object' AND jsonb_typeof(t.v->'items') = 'array' THEN t.v->'items' ELSE '[]'::jsonb END) it(v)
+ WHERE jsonb_typeof(it.v) = 'object' AND coalesce(trim(it.v->>'rid'), '') <> ''
+ GROUP BY q.id, trim(it.v->>'rid') HAVING count(*) > 1;
+-- (a5) bản CŨ của bảng Hà Nội còn trong TRANG (category hanoi) mang cờ trả / ảnh
+SELECT s."quoteId", s.id AS "sheetId", it.v->>'rid' AS rid, it.v->>'name' AS ten
+  FROM "QuoteSheet" s,
+       jsonb_array_elements(CASE WHEN jsonb_typeof(s."extraTables") = 'array' THEN s."extraTables" ELSE '[]'::jsonb END) t(v),
+       jsonb_array_elements(CASE WHEN jsonb_typeof(t.v) = 'object' AND jsonb_typeof(t.v->'items') = 'array' THEN t.v->'items' ELSE '[]'::jsonb END) it(v)
+ WHERE t.v->>'category' = 'hanoi' AND jsonb_typeof(it.v) = 'object'
+   AND (it.v->>'paid' = 'true' OR coalesce(it.v->>'paidProof', '') <> '');
+-- (b) ghi đè quyền theo vai + tài khoản có tập quyền riêng đụng tới trang hoá đơn / bảng nội bộ
+SELECT role, permissions FROM "RolePermission";
+SELECT id, role, active, permissions FROM "User"
+ WHERE "deletedAt" IS NULL AND cardinality(permissions) > 0
+   AND (role = 'accountant' OR permissions && ARRAY['invoice:page','invoice:pay','invoice:edit','invoice:manage','quote:internal:pay','quote:internal:view']);
+-- (c) cỡ cột JSON nội bộ
+SELECT max(octet_length("extraTables"::text)) AS max_byte, sum(octet_length("extraTables"::text)) AS tong_byte FROM "QuoteSheet";
+SELECT max(octet_length("hnTables"::text))    AS max_byte, sum(octet_length("hnTables"::text))    AS tong_byte FROM "Quote";
+SQL
+```
+
+Ghi số vào mô tả PR. Hai tình huống phải báo chủ repo TRƯỚC khi lên production:
+
+* (a) có hàng **ĐÃ TRẢ** thiếu / trùng `rid` (`vet_thieu_rid` > 0, hoặc (a2)/(a4) có dòng) → các hàng đó chỉ hiện,
+  chỉ đọc ở trang Hóa đơn đầu vào cho tới khi chuẩn hoá mã bằng `--sua-rid` ở bước 1 (sau pg_dump). Hàng THIẾU rid
+  mà còn cờ / ảnh cũ: đường Lưu **từ chối** cả báo giá đó (400 `hang-da-chi-thieu-ma`) — lưu lúc đó sẽ cấp rid mới
+  và xoá im cờ + bản ảnh DUY NHẤT; đừng tìm cách lách. Hàng TRÙNG rid thì lần Lưu kế tự tách (mỗi hàng giữ cờ của
+  chính nó), nhưng `--sua-rid` làm ngay cho cả loạt, khỏi chờ người soạn.
+* (b) có hàng `RolePermission` cho `accountant`, hoặc kế toán có tập quyền riêng → khoá mới
+  `invoice:input:pay` KHÔNG tự tới (ghi đè thay hẳn bộ mặc định). Admin phải tích ô "Hóa đơn đầu vào: tích
+  ĐÃ CHI + ảnh chứng từ" ở trang Phân quyền / Quản lý nhân viên NGAY sau deploy — qua giao diện, không
+  sửa bằng SQL.
+
+### 1. Ngay sau deploy — chép cờ cũ sang bảng: khô → (`--sua-rid`) → `--ghi` → `--kiem`
+
+`deploy.sh` đã dump CSDL ở bước [1/6] (`~/quanly-backups/predeploy-*.sql.gz`). Ngay sau bước [5/6]
+(recreate), trên host, **từ trong container app** (công cụ đã biên dịch vào `dist/`, có sẵn trong image —
+`scripts/` thì không):
+
+```bash
+cd /opt/stacks/quanly/quanly
+# dev: thay docker-compose.prod.yml bằng docker-compose.staging.yml
+docker compose -f docker-compose.prod.yml exec app node dist/tools/backfillKhoanChi.js          # 1) KHÔ: chỉ in kế hoạch + chỗ lệch, không ghi
+# 1b) CHỈ khi bước 1 in dòng thieu-rid / trung-rid: chuẩn hoá mã — xem trước, rồi ghi (chỉ trường rid; cờ + ảnh giữ nguyên)
+docker compose -f docker-compose.prod.yml exec app node dist/tools/backfillKhoanChi.js --sua-rid --kho
+docker compose -f docker-compose.prod.yml exec app node dist/tools/backfillKhoanChi.js --sua-rid
+docker compose -f docker-compose.prod.yml exec app node dist/tools/backfillKhoanChi.js --ghi    # 2) chỉ THÊM khoản (+ ảnh nguồn json-cu); không đụng một byte JSON
+docker compose -f docker-compose.prod.yml exec app node dist/tools/backfillKhoanChi.js --kiem   # 3) PHẢI thoát 0
+echo "backfillKhoanChi --kiem thoát $?"
+```
+
+Mỗi dòng in ra là một JSON có trường `loai`. `--ghi` chạy lại bao nhiêu lần cũng được (`ON CONFLICT DO
+NOTHING`, không bao giờ ghi đè khoản đã có). `--sua-rid` là chế độ DUY NHẤT ghi JSON hàng, và chỉ ghi trường
+`rid`: hàng thiếu rid và bản thứ 2 trở đi của rid trùng (theo thứ tự hiển thị — bản đầu giữ rid, là chủ của
+khoản) nhận rid mới, rid dính khoảng trắng được cắt; mỗi báo giá đổi một dòng nhật ký `quote.internal.ke-toan`
+(`nguon: "sua-rid"`) và bump `updatedAt` (ai đang mở bản cũ sẽ nhận 409 khi Lưu thay vì gửi lại rid cũ). Chạy lại
+không đổi gì. `--kiem` khác 0 thì:
+
+| `loai` | Nghĩa | Làm gì |
+|---|---|---|
+| `can-chep` | hàng JSON đã trả / có ảnh mà chưa có khoản | chạy lại `--ghi` |
+| `thieu-rid` | hàng có dấu vết mà THIẾU rid — không định vị được khoản; đường Lưu từ chối báo giá đó (400 `hang-da-chi-thieu-ma`) | `--sua-rid --kho` → `--sua-rid` → `--ghi` → `--kiem`. **Không** nhờ ai bấm Lưu thay |
+| `trung-rid` | rid trùng trong một phía, ít nhất một bản có dấu vết — chỉ bản ĐẦU được chép | `--sua-rid` → `--ghi` → `--kiem` (lần Lưu kế của người soạn cũng tự tách, mỗi hàng giữ cờ của chính nó) |
+| `lech-legacySeed` | cờ JSON hiện tại khác cờ lúc tạo khoản — bản app CŨ đã ghi JSON sau khi khoản có (khe migrate → recreate, hoặc lúc lùi ảnh) | rà tay ở trang Hóa đơn đầu vào (mục 3), rồi `--xac-nhan quoteId:side:rid,…` |
+| `hanoi-cu-trong-trang` | bản cũ của bảng HN còn trong trang mang cờ trả mà `Quote.hnTables` không có | rà tay, báo chủ repo |
+
+Rồi: báo người dùng bấm "Tải bản mới" (hoặc Ctrl+Shift+R) để rời bundle cũ — bundle cũ gọi route thanh
+toán đã gỡ thì nhận 404, không ghi được gì. Thử trên dev phải gỡ service worker trước, không thì đang thử
+bundle cũ.
+
+**Theo dõi một–hai tuần sau production:** Nhật ký lọc `quote.internal.*` (pay · unpay · ke-toan ·
+proof-view); log cảnh báo 4xx mang mã `hang-da-chi` / `bao-gia-co-khoan-da-chi` (chốt có làm vướng người
+soạn không); `--kiem` mỗi tuần; cỡ bảng ảnh:
+
+```bash
+docker exec quanly-postgres psql -U quanly -d quanly -tAc 'SELECT count(*), pg_size_pretty(sum(octet_length("dataUrl"))::bigint) FROM "InputInvoiceProof";'
+```
+
+### 2. Lùi ảnh
+
+`bash deploy.sh rollback prod` chỉ lùi **ảnh**, không lùi schema — và thế là đủ: migration chỉ thêm bảng,
+app cũ không biết hai bảng nên không xoá chúng; "Dọn rác" của app cũ gặp FK `RESTRICT` thì hỏng ồn ào
+(409) chứ không xoá.
+
+Trong lúc app cũ chạy, phải biết trước:
+
+* **Mọi khoản ghi SAU ngày chuyển VÔ HÌNH với app cũ.** App cũ chỉ đọc cờ JSON (đã đóng băng từ ngày
+  chuyển): khoản tích sau đó hiện "chưa trả", khoản đã bỏ tích có thể vẫn hiện "đã trả". Dữ liệu không mất
+  — nó nằm nguyên trong bảng, chờ bản mới.
+* App cũ có lại cột / nút Thanh toán ở màn soạn và route `/pay`. Mỗi lần ai tích ở đó là một dòng phải rà
+  tay khi tiến lại — dặn mọi người tránh tích trong lúc lùi nếu không bắt buộc.
+* **KHÔNG DROP** hai bảng khi đã có dữ liệu, và **KHÔNG** khôi phục dump trước-deploy để "lùi": làm vậy là
+  mất mọi khoản ghi từ lúc deploy. Lùi schema chỉ khi cả hai bảng RỖNG — `prisma/migrations/README.md`.
+
+### 3. Tiến lại sau khi đã lùi
+
+Deploy lại bản mới, rồi ngay sau recreate chạy `--ghi` (bắt hàng mà app cũ vừa tích, chưa có khoản) và
+`--kiem`. Dòng `lech-legacySeed` = app cũ đã đổi cờ JSON của hàng ĐÃ có khoản: mở trang Hóa đơn đầu vào,
+đối chiếu với nhật ký `quote.internal.pay` / `unpay` mà app cũ ghi trong lúc lùi, rồi sửa khoản bằng tay
+(tích / bỏ tích / đính ảnh). `legacySeed` là ảnh chụp lúc tạo khoản và cờ JSON đã bị app cũ đổi, nên các
+dòng đó **không tự biến mất** sau khi rà xong — rà xong dòng nào thì đánh dấu đã rà:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app node dist/tools/backfillKhoanChi.js --xac-nhan 12:sheet:abc,12:hn:def
+```
+
+Lệnh chỉ ghi `legacySeed` = cờ JSON hiện tại của đúng các dòng đó — KHÔNG đổi khoản (đã chi, ảnh, ngày HĐ,
+ghi chú), không đụng JSON; mỗi dòng một nhật ký `quote.internal.ke-toan` (`nguon: "xac-nhan"`, trước / sau là
+hạt giống). Khoá sai dạng hoặc không thấy hàng / khoản thì in "bỏ qua" và thoát 1. Xong thì `--kiem` về 0.
 
 ---
 
@@ -84,6 +261,10 @@ Trước đây bản dump Postgres chứa đủ mọi thứ. Nay **không còn �
 |---|---|---|
 | CCCD · số tài khoản · lương | vẫn trong CSDL nhưng **đã mã hoá** bằng `PII_ENC_KEY` | dump khôi phục xong nhưng ba trường này **không đọc được vĩnh viễn** |
 | Ảnh chứng từ thanh toán | **kho object** (`payment-proofs/…`), CSDL chỉ giữ khoá + hash | hàng dữ liệu trỏ vào object không tồn tại |
+
+Ngoại lệ CÓ CHỦ Ý (từ 2026-10-06): ảnh ủy nhiệm chi của **khoản chi hàng bảng nội bộ** (trang Hóa đơn đầu
+vào, bảng `InputInvoiceProof`) nằm **trong** CSDL, không ở kho object — vì kho object production chưa có bản
+sao nào (bảng đầu tài liệu). Dump CSDL mang theo chúng; mục "Khoản chi kế toán" ở trên.
 
 **Khôi phục đầy đủ cần ĐỦ BA THỨ:**
 

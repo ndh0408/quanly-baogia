@@ -20,7 +20,7 @@
 // ── CÁCH VÁ ─────────────────────────────────────────────────────────────────
 // Lược `paidProof` khỏi extraTables trong snapshot, giữ cờ `hasPaidProof` (đúng hình dạng
 // `stripExtraProofs` đã dùng khi gửi client). Ảnh vẫn sống ở bản HIỆN TẠI của báo giá và tải
-// được qua GET /:id/extra/:sheetId/:rid/proof — snapshot chỉ để đối chiếu cấu trúc/giá.
+// được qua GET /input-invoices/:quoteId/:side/:rid/proof (từ 2026-10-06; cần invoice:input:pay) — snapshot chỉ để đối chiếu.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../src/db.js";
 import { snapshotQuoteVersion } from "../src/quoteVersion.js";

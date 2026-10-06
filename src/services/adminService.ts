@@ -38,8 +38,23 @@ export async function purgeSoftDeleted(req: Request) {
   // a blocked purge looked successful. Quotes cascade (sheets/items/versions/
   // approvals) so they go first and free up the downstream references.
   const result: Record<string, any> = {};
+  // Báo giá đã xoá mềm mà JSON hàng còn cờ "đã trả" / ảnh chứng từ CŨ (chưa chép sang bảng khoản — trước khi chạy
+  // backfillKhoanChi --ghi, hoặc ghi bởi bản app cũ): cũng là chứng từ tài chính, xoá cứng là mất bản ảnh DUY NHẤT.
+  // Phép chứa @? của jsonpath đọc cả hai cột; phần tử không phải object bị bỏ qua tự nhiên (soát 2026-10-06, ATDL-4).
+  const coVetCu = (await prisma.$queryRaw<{ id: number }[]>`
+    SELECT q.id FROM "Quote" q
+     WHERE q."deletedAt" IS NOT NULL
+       AND ((jsonb_typeof(q."hnTables") = 'array'
+             AND q."hnTables" @? '$[*].items[*] ? (@.paid == true || (@.paidProof != null && @.paidProof != ""))')
+            OR EXISTS (SELECT 1 FROM "QuoteSheet" s
+                        WHERE s."quoteId" = q.id AND jsonb_typeof(s."extraTables") = 'array'
+                          AND s."extraTables" @? '$[*].items[*] ? (@.paid == true || (@.paidProof != null && @.paidProof != ""))'))`).map((r) => r.id);
   const steps: [string, any][] = [
-    ["quote", base],
+    // Báo giá còn KHOẢN KẾ TOÁN (trang Hóa đơn đầu vào: đã chi + ảnh chứng từ, ngày HĐ, ghi chú) — hoặc còn cờ "đã trả"
+    // JSON cũ (coVetCu) — nằm lại thùng rác: chứng từ tài chính không đi theo báo giá. FK InputInvoiceEntry_quoteId_fkey
+    // là RESTRICT — cửa này để purge bỏ qua êm thay vì P2003 → 409 cho cả lượt (FK vẫn là lưới thứ hai, kể cả với bản app
+    // cũ khi lùi ảnh).
+    ["quote", { ...base, inputInvoiceEntries: { none: {} }, ...(coVetCu.length ? { id: { notIn: coVetCu } } : {}) }],
     ["quoteTemplate", { ...base, sheets: { none: {} } }],
     ["customer", { ...base, quotes: { none: {} } }],
     ["company", { ...base, quotes: { none: {} }, templates: { none: {} } }],

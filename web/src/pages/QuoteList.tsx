@@ -1,21 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { api, type Me, type QuoteRow } from "../lib/api";
+import { api, type Me, type QuoteRow, type QuoteListNote, type QuoteListResult } from "../lib/api";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
 import { statusLabel, fmtMoney, fmtDate, codeLabel, tieuDeHienThi, errMsg, dash } from "../lib/format";
 import { xuatBaoGia } from "../lib/exportQuote";
 import { useTrangAnToan } from "../lib/phienBan";
+import { QuoteNote, type GhiChuThayDoi } from "../components/QuoteNote";
+import { BoLocBaoGia } from "../components/BoLocBaoGia";
+import { LOC_RONG, demBoLoc, docTuUrl, ghiLenUrl, thamSoApi, type BoLocDS } from "../lib/locDanhSach";
 
-// Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
-// + phân trang + LƯU filter vào URL (#/list?q=&status=&sort=&page=) + thao tác (mở→editor ·
+// Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm thông minh (debounce) + bộ lọc (trạng thái, người tạo, công ty,
+// ngày, tổng tiền, ghi chú/màu — components/BoLocBaoGia) + SORT mọi cột + phân trang + LƯU bộ lọc vào URL
+// (#/list?q=&status=&company=&creator=&from=&to=&min=&max=&note=&color=&sort=&page=) + thao tác (mở→editor ·
 // Excel · Nhân bản · Bản mới · Xóa) + cột theo vai trò (admin: Người tạo; account_hn: rút gọn HN)
 // + empty/error. "Tạo báo giá" → wizard (#/new iframe); mở/nhân-bản → editor (#/quotes/:id iframe).
 // Định dạng chung (tiền/ngày/mã/tiêu đề/trạng thái) dùng ../lib/format — KHÔNG tự chế lại ở đây.
 const HN_LIST_STATUS: Record<string, { label: string; cls: string }> = { assigned: { label: "Đang làm", cls: "sent" }, submitted: { label: "Chờ duyệt", cls: "pending" }, approved: { label: "Đã duyệt", cls: "approved" }, rejected: { label: "Bị trả", cls: "rejected" } };
 const hnBadge = (st?: string | null) => HN_LIST_STATUS[st || ""] || { label: "Chưa giao", cls: "draft" };
-const QUOTE_SORTS = ["createdAt", "quoteDate", "total", "quoteNumber"];
+// Cột sắp xếp — KHỚP COT_SAP_XEP_CU / COT_SAP_XEP_MOI ở src/quoteListFilter.ts. Bốn cột CŨ là thứ duy nhất view lược
+// (account HN / tài khoản chi phí) được sắp theo; các cột MỚI máy chủ chỉ cho view đầy đủ (sắp theo thứ người ta không
+// thấy là cách dò nó), nên view lược không vẽ mũi tên ở đó.
+const SORT_CU = ["createdAt", "quoteDate", "total", "quoteNumber"];
+const SORT_MOI = ["title", "toCompany", "status", "company", "creator", "customerCode"];
 const PAGE_SIZE = 20;
 
 export function QuoteListPage({ me }: { me: Me }) {
@@ -39,21 +47,56 @@ export function QuoteListPage({ me }: { me: Me }) {
   // "Người tạo" riêng nên không dán nhãn cho họ.
   const laPhu = (r: QuoteRow) => !isAdmin && !isInternalViewer && !isAccountHn && r.createdById != null && r.createdById !== me.id;
 
+  // GHI CHÚ + MÀU ở dòng (chủ repo 2026-09-30). Chỉ view đầy đủ thấy cột này (hai view lược không được máy chủ
+  // trả trường `listNote`). Sửa được khi có quote:update:* — KHỚP cổng `canOnQuote(update)` ở máy chủ; dòng của
+  // người khác mà mình chỉ là thành viên chỉ-xem thì máy chủ từ chối (403) và ô báo lỗi + trả về bản thật.
+  const choSuaGhiChu = can("quote:update:own");
+  // Cập nhật TẠM (optimistic) mọi trang đã nạp trong cache rồi mới gọi máy chủ: gõ xong Enter là thấy ngay,
+  // không chờ một vòng mạng. Lỗi → nạp lại từ máy chủ (không tự đoán "bản trước" vì hai lần lưu chồng nhau
+  // — đổi màu rồi gõ chữ — có thể về không đúng thứ tự). Thành công chỉ bồi thêm người ghi/giờ ghi: chữ và màu
+  // đã đúng ở lần cập nhật tạm, và máy chủ trộn theo từng trường nên không có gì để sửa lại.
+  const luuGhiChu = async (r: QuoteRow, p: GhiChuThayDoi) => {
+    const ghi = (fn: (x: QuoteListNote | null) => QuoteListNote | null) =>
+      qc.setQueriesData<QuoteListResult>({ queryKey: ["quotes"] }, (cu) => cu && { ...cu, data: cu.data.map((x) => (x.id === r.id ? { ...x, listNote: fn(x.listNote ?? null) } : x)) });
+    ghi((x) => {
+      const note = p.note !== undefined ? p.note.trim() : (x?.note ?? "");
+      const color = p.color !== undefined ? p.color : (x?.color ?? null);
+      return note || color ? { note, color, updatedByName: me.displayName, updatedAt: new Date().toISOString() } : null;
+    });
+    try {
+      const kq = await api.setQuoteListNote(r.id, p);
+      ghi((x) => (x ? { ...x, updatedByName: kq.updatedByName, updatedAt: kq.updatedAt } : x));
+      // Số đếm "Có ghi chú / Chưa có / từng màu" đổi theo. Chỉ làm tươi SỐ ĐẾM, không nạp lại danh sách: dòng vừa sửa
+      // phải ở yên (đang lọc "Chưa có" mà gõ ghi chú xong, dòng biến mất ngay dưới tay người dùng là rất khó chịu).
+      qc.invalidateQueries({ queryKey: ["quoteFacets"] });
+    } catch (ex) {
+      toast(errMsg(ex, "Không lưu được ghi chú"), "error");
+      reload();
+    }
+  };
+
   const sp0 = new URLSearchParams((location.hash.split("?")[1]) || "");
-  const [q, setQ] = useState(sp0.get("q") || "");
-  const [status, setStatus] = useState(sp0.get("status") || "");
-  const [sort, setSort] = useState(QUOTE_SORTS.includes(sp0.get("sort") || "") ? sp0.get("sort")! : "createdAt");
+  // BỘ LỌC (components/BoLocBaoGia). View lược chỉ có ô tìm + trạng thái + ngày (xem thanh lọc bên dưới): giá trị khác
+  // trên URL (gõ tay / link cũ) bị bỏ, thay vì áp NGẦM một bộ lọc mà màn hình không hề hiện ra.
+  const [loc, setLoc] = useState<BoLocDS>(() => { const l = docTuUrl(sp0); return stripped ? { ...LOC_RONG, q: l.q, status: l.status, tu: l.tu, den: l.den } : l; });
+  const datLoc = (p: Partial<BoLocDS>) => setLoc((c) => ({ ...c, ...p }));
+  const xoaLoc = () => setLoc(LOC_RONG);
+  const dangLoc = demBoLoc(loc) > 0;
+  const sortHopLe = (s: string | null): s is string => !!s && (SORT_CU.includes(s) || (!stripped && SORT_MOI.includes(s)));
+  const [sort, setSort] = useState(sortHopLe(sp0.get("sort")) ? sp0.get("sort")! : "createdAt");
   const [order, setOrder] = useState<"asc" | "desc">(sp0.get("order") === "asc" ? "asc" : "desc");
   const busy = useRef(false);
 
-  // Tải qua TanStack Query. Ô tìm debounce 300ms như cũ (chỉ debounce theo q).
-  const debouncedQ = useDebouncedValue(q, q ? 300 : 0);
+  // Tải qua TanStack Query. Ô tìm debounce 300ms như cũ (chỉ debounce theo q; các bộ lọc khác áp ngay — ô tiền chỉ
+  // báo thay đổi khi rời ô / Enter nên không cần).
+  const debouncedQ = useDebouncedValue(loc.q, loc.q ? 300 : 0);
+  const tham = thamSoApi({ ...loc, q: debouncedQ });   // tham số gửi máy chủ: chỉ khoá có giá trị
   // TRANG GẮN VỚI BỘ LỌC NÓ THUỘC VỀ (L75). Trước đây `useEffect(() => setPage(1), [debouncedQ, status,
   // sort, order])` chạy cả lúc MOUNT: F5 / Back về #/list?page=3 luôn nhảy về trang 1 (kèm một request
   // page=3 bỏ phí); còn đổi bộ lọc thì lượt dựng đầu vẫn mang trang CŨ → hai request (page=2 với từ khoá
   // mới rồi page=1). Nay trang đi cùng khoá bộ lọc: khoá đổi thì NGAY lượt dựng đó trang là 1 — một
   // request; lúc mount khoá khớp nên giữ trang đọc từ URL.
-  const boLoc = JSON.stringify([debouncedQ, status, sort, order]);
+  const boLoc = JSON.stringify([tham, sort, order]);
   const [trang, setTrang] = useState(() => ({ boLoc, so: Math.max(1, parseInt(sp0.get("page") || "1", 10) || 1) }));
   if (trang.boLoc !== boLoc) setTrang({ boLoc, so: 1 });   // đồng bộ ngay trong lượt dựng: đổi lọc rồi đổi LẠI vẫn ở trang 1
   const page = trang.boLoc === boLoc ? trang.so : 1;
@@ -61,20 +104,29 @@ export function QuoteListPage({ me }: { me: Me }) {
 
   // Ghi filter lên URL bằng replaceState (không bắn hashchange → React shell không re-route).
   useEffect(() => {
-    const p = new URLSearchParams();
-    if (q) p.set("q", q);
-    if (status) p.set("status", status);
+    const p = ghiLenUrl(loc);
     if (sort !== "createdAt") p.set("sort", sort);
     if (order !== "desc") p.set("order", order);
     if (page > 1) p.set("page", String(page));
-    const qs = p.toString();
+    // Dấu phẩy ngăn các giá trị ("status=draft,converted") để NGUYÊN: URLSearchParams mã hoá nó thành %2C — hợp lệ nhưng
+    // khó đọc khi người dùng dán link cho nhau; docTuUrl đọc cả hai dạng như nhau.
+    const qs = p.toString().replace(/%2C/gi, ",");
     try { history.replaceState(null, "", "#/list" + (qs ? "?" + qs : "")); } catch { /* ignore */ }
-  }, [q, status, sort, order, page]);
+  }, [loc, sort, order, page]);
 
   const { data, isPending, isPlaceholderData, error, refetch } = useQuery({
-    queryKey: ["quotes", { q: debouncedQ, status, sort, order, page }],
-    queryFn: () => api.listQuotes({ q: debouncedQ, status, sort, order, page, size: PAGE_SIZE }),
+    queryKey: ["quotes", { ...tham, sort, order, page }],
+    queryFn: () => api.listQuotes({ ...tham, sort, order, page, size: PAGE_SIZE }),
     placeholderData: keepPreviousData,
+  });
+  // SỐ ĐẾM trên từng ô lọc (mỗi nhóm đếm theo mọi bộ lọc KHÁC của nó). Chỉ view đầy đủ: view lược bị máy chủ từ chối (403)
+  // vì số đếm theo người tạo / ghi chú là cách dò thứ họ không được thấy. Lỗi / đang tải → bộ lọc vẫn dùng, chỉ thiếu số.
+  const { data: facets } = useQuery({
+    queryKey: ["quoteFacets", tham],
+    queryFn: () => api.quoteFacets(tham),
+    enabled: !stripped,
+    placeholderData: keepPreviousData,
+    retry: false,
   });
   const rows = data?.data ?? [];
   const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
@@ -84,7 +136,7 @@ export function QuoteListPage({ me }: { me: Me }) {
   useEffect(() => { if (soTrangThat !== undefined && page > Math.max(1, soTrangThat)) setTrang({ boLoc, so: Math.max(1, soTrangThat) }); }, [soTrangThat, page, boLoc]);
   const loading = isPending;
   const err = error ? errMsg(error) : "";
-  const reload = () => { qc.invalidateQueries({ queryKey: ["quotes"] }); };
+  const reload = () => { qc.invalidateQueries({ queryKey: ["quotes"] }); qc.invalidateQueries({ queryKey: ["quoteFacets"] }); };
 
   const toggleSort = (f: string) => {
     if (sort === f) setOrder((o) => (o === "asc" ? "desc" : "asc"));
@@ -115,9 +167,14 @@ export function QuoteListPage({ me }: { me: Me }) {
     finally { busy.current = false; }
   };
 
-  const arrow = (f: string) => sort === f ? (order === "asc" ? " ▲" : " ▼") : "";
+  // Dấu cách KHÔNG NGẮT trước mũi tên: ở laptop tiêu đề cột được xuống 2 dòng (styles.css, vùng đặc ≤1700px) — dấu cách thường
+  // để mũi tên rơi xuống dòng một mình.
+  const arrow = (f: string) => sort === f ? (order === "asc" ? " ▲" : " ▼") : "";
   const aria = (f: string): "ascending" | "descending" | "none" => sort === f ? (order === "asc" ? "ascending" : "descending") : "none";
-  const SortTh = ({ f, label, right }: { f: string; label: string; right?: boolean }) => (
+  // Cột nào cũng bấm được để sắp xếp — trừ view lược ở các cột máy chủ không cho họ sắp (xem SORT_MOI): ở đó chỉ là chữ.
+  const SortTh = ({ f, label, right }: { f: string; label: string; right?: boolean }) => stripped && !SORT_CU.includes(f) ? (
+    <th scope="col" className={right ? "num" : undefined}>{label}</th>
+  ) : (
     <th scope="col" className={`sortable${right ? " num" : ""}`} aria-sort={aria(f)} title="Bấm để sắp xếp" tabIndex={0}
         onClick={() => toggleSort(f)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(f); } }}>{label}{arrow(f)}</th>
@@ -127,18 +184,34 @@ export function QuoteListPage({ me }: { me: Me }) {
     <div>
       <h1>Danh sách báo giá</h1>
       <p className="muted page-sub">Tìm, lọc và mở báo giá — báo giá Đã chốt sẽ chuyển sang Quản lý dự án.</p>
-      <div className="toolbar">
-        <input type="search" className="grow" placeholder="Tìm theo số, tiêu đề, khách…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm báo giá" />
-        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Lọc theo trạng thái">
-          <option value="">— Tất cả trạng thái —</option>
-          <option value="draft">Nháp</option><option value="converted">Đã chốt</option><option value="lost">Không chốt</option>
-          {/* Deep-link từ Pipeline Dashboard (#/list?status=pending…): trạng thái ngoài bộ chuẩn vẫn phải
-              hiện trong select — không thì ô trống, user không biết đang lọc gì. */}
-          {status && !["draft", "converted", "lost"].includes(status) && <option value={status}>{statusLabel(status)}</option>}
-        </select>
-        <button className="btn btn-sm btn-ghost" type="button" onClick={() => { setQ(""); setStatus(""); }} disabled={!q && !status}>Xóa lọc</button>
-        {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
-      </div>
+      {stripped ? (
+        // VIEW LƯỢC (account HN / tài khoản chi phí): ô tìm + trạng thái + ngày — những thứ họ thấy trên dòng. Không người tạo /
+        // tổng tiền / ghi chú / số đếm: lọc theo thứ người ta không được thấy là cách dò nó (máy chủ cũng bỏ các bộ lọc đó).
+        <div className="toolbar">
+          <input type="search" className="grow" placeholder="Tìm theo số, tiêu đề, khách…" value={loc.q} onChange={(e) => datLoc({ q: e.target.value })} aria-label="Tìm báo giá" />
+          <select value={loc.status.join(",")} onChange={(e) => datLoc({ status: e.target.value ? e.target.value.split(",") : [] })} aria-label="Lọc theo trạng thái">
+            <option value="">— Tất cả trạng thái —</option>
+            <option value="draft">Nháp</option><option value="converted">Đã chốt</option><option value="lost">Không chốt</option>
+            {/* Deep-link từ Pipeline Dashboard (#/list?status=pending…): trạng thái ngoài bộ chuẩn vẫn phải
+                hiện trong select — không thì ô trống, user không biết đang lọc gì. */}
+            {loc.status.length > 0 && !["draft", "converted", "lost"].includes(loc.status.join(",")) && <option value={loc.status.join(",")}>{loc.status.map(statusLabel).join(", ")}</option>}
+          </select>
+          <label className="inv-date-filter"><span>Từ</span><input type="date" aria-label="Ngày báo giá từ" value={loc.tu} max={loc.den || undefined} onChange={(e) => datLoc({ tu: e.target.value })} /></label>
+          <label className="inv-date-filter"><span>Đến</span><input type="date" aria-label="Ngày báo giá đến" value={loc.den} min={loc.tu || undefined} onChange={(e) => datLoc({ den: e.target.value })} /></label>
+          <button className="btn btn-sm btn-ghost" type="button" onClick={xoaLoc} disabled={!dangLoc}>Xóa lọc</button>
+          {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
+        </div>
+      ) : (
+        <>
+          <div className="toolbar">
+            {/* Tìm THÔNG MINH: nhiều từ, không dấu, không cần đúng thứ tự; mỗi từ khớp mã / tiêu đề / khách (cả trong danh mục) /
+                người tạo / công ty / ghi chú — luật ở src/quoteListFilter.ts. */}
+            <input type="search" className="grow" placeholder="Tìm theo mã, tiêu đề, khách, người tạo, ghi chú…" title="Gõ nhiều từ, không cần dấu, không cần đúng thứ tự — ví dụ: sao mai hcm" value={loc.q} onChange={(e) => datLoc({ q: e.target.value })} aria-label="Tìm báo giá" />
+            {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
+          </div>
+          <BoLocBaoGia loc={loc} dat={datLoc} xoa={xoaLoc} facets={facets} meId={me.id} />
+        </>
+      )}
 
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
 
@@ -146,8 +219,9 @@ export function QuoteListPage({ me }: { me: Me }) {
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
         <div className="empty">
-          {q || status ? "Không tìm thấy báo giá phù hợp." : "Chưa có báo giá nào."}
-          {!q && !status && can("quote:create") && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button></div>}
+          {dangLoc ? "Không tìm thấy báo giá phù hợp." : "Chưa có báo giá nào."}
+          {dangLoc && <div style={{ marginTop: 12 }}><button className="btn btn-sm" onClick={xoaLoc}>Xóa tất cả bộ lọc</button></div>}
+          {!dangLoc && can("quote:create") && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button></div>}
         </div>
       ) : isMobile ? (
         /* MOBILE: thẻ React (không cuộn bảng rộng) — giữ nguyên cột/nút theo ROLE. */
@@ -156,13 +230,14 @@ export function QuoteListPage({ me }: { me: Me }) {
             // Bàn phím: bản bảng có <a href> nên mở được; bản thẻ trước đây chỉ nghe onClick → Tab chạy
             // qua cả danh sách không dừng ở báo giá nào (chỉ dừng ở nút Xoá!). Cùng mẫu Projects.tsx.
             <div className="ql-card" key={r.id} role="link" tabIndex={0} aria-label={`Mở báo giá ${codeLabel(r)}`}
-              onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("button,a")) open(r.id); }}>
+              onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,textarea")) return; open(r.id); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("button,a,input,textarea")) open(r.id); }}>
               <div className="ql-card-head">
                 <strong>{codeLabel(r)}</strong>
                 {isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}
               </div>
               {(r.shortTitle || r.title) && <div className="ql-card-title">{tieuDeHienThi(r)}</div>}
+              {!stripped && <div className="ql-card-note"><QuoteNote ghiChu={r.listNote} choSua={choSuaGhiChu} nhan={codeLabel(r)} onLuu={(p) => luuGhiChu(r, p)} /></div>}
               <dl className="ql-card-body">
                 {(isAdmin || isInternalViewer) && <div className="ql-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName || dash}</dd></div>}
                 {isAccountHn && <div className="ql-crow"><dt>Người giao</dt><dd>{r.createdBy?.displayName || dash}</dd></div>}
@@ -191,25 +266,26 @@ export function QuoteListPage({ me }: { me: Me }) {
         </div>
       ) : (
         <div className="list-wrap">
-          <table className="list-table">
+          <table className="list-table ql-table">
             <thead>
               <tr>
                 <SortTh f="quoteNumber" label="Mã dự án" />
-                {(isAdmin || isInternalViewer) && <th scope="col">Người tạo</th>}{isAccountHn && <th scope="col">Người giao</th>}
-                <th scope="col">Tiêu đề</th>
+                {(isAdmin || isInternalViewer) && <SortTh f="creator" label="Người tạo" />}{isAccountHn && <SortTh f="creator" label="Người giao" />}
+                <SortTh f="title" label="Tiêu đề" />
                 <SortTh f="quoteDate" label="Ngày" />
                 <th scope="col" className="num">Sheet</th>
                 {!stripped && <SortTh f="total" label="Tổng (VNĐ)" right />}
-                <th scope="col">Công ty</th>
-                {isAccountHn ? <th scope="col" className="num">Tổng HN</th> : isInternalViewer ? <th scope="col" className="num">Đã TT</th> : <><th scope="col">Khách</th><th scope="col">Mã KH</th></>}
-                <th scope="col">Trạng thái</th>
+                <SortTh f="company" label="Công ty" />
+                {isAccountHn ? <th scope="col" className="num">Tổng HN</th> : isInternalViewer ? <th scope="col" className="num">Đã TT</th> : <><SortTh f="toCompany" label="Khách" /><SortTh f="customerCode" label="Mã KH" /></>}
+                <SortTh f="status" label="Trạng thái" />
+                {!stripped && <th scope="col" className="ql-note-th">Ghi chú</th>}
                 {!stripped && <th scope="col" className="actions" aria-label="Thao tác" />}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="qrow" title="Bấm để mở báo giá"
-                    onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
+                    onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,textarea")) return; open(r.id); }}>
                   <td><a href={`#/quotes/${r.id}`}><strong>{codeLabel(r)}</strong></a>{laPhu(r) && <span className="muted" title="Bạn được thêm vào làm cùng — báo giá này của người khác" style={{ marginLeft: 6, fontSize: 11 }}>· phụ</span>}</td>
                   {(isAdmin || isInternalViewer) && <td>{r.createdBy?.displayName || dash}</td>}{isAccountHn && <td>{r.createdBy?.displayName || dash}</td>}
                   <td title={r.title}>{tieuDeHienThi(r)}</td>
@@ -219,6 +295,8 @@ export function QuoteListPage({ me }: { me: Me }) {
                   <td>{r.company?.shortName || r.company?.name || dash}</td>
                   {isAccountHn ? <td className="num">{r.hnTotal == null ? dash : fmtMoney(r.hnTotal)}</td> : isInternalViewer ? <td className="num">{payProg(r)} hàng</td> : <><td>{r.toCompany || dash}</td><td>{r.customerCode ? <strong>{r.customerCode}</strong> : dash}</td></>}
                   <td>{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
+                  {/* Cuối hàng, TRƯỚC cột nút thao tác (yêu cầu chủ repo). */}
+                  {!stripped && <td className="ql-note-cell"><QuoteNote ghiChu={r.listNote} choSua={choSuaGhiChu} nhan={codeLabel(r)} onLuu={(p) => luuGhiChu(r, p)} /></td>}
                   {!stripped && (
                     <td className="row-actions qa-cell">
                       <RowMenu r={r} act={act} canDelete={canDelete(r)} canDuplicate={!laPhu(r)} />
@@ -252,7 +330,18 @@ export function QuoteListPage({ me }: { me: Me }) {
 function RowMenu({ r, act, canDelete, canDuplicate }: { r: QuoteRow; act: (a: string, qr: QuoteRow, e?: { stopPropagation: () => void }) => void; canDelete: boolean; canDuplicate: boolean }) {
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const open = pos != null;
+  // Gần đáy màn thì LẬT LÊN trên nút: đo chiều cao thật của menu trước khi trình duyệt vẽ. Bản trước luôn mở xuống — nút ⋯ cách
+  // đáy dưới ~125px thì cả 3 mục rơi khỏi màn (đo 2026-10-06, 1366×768), mà cuộn trang để thấy thì menu tự đóng.
+  // Không lặp: sau khi lật, top + cao = đỉnh nút − 3 ≤ đáy màn → điều kiện dưới sai; nút sát đáy hẳn thì top tính lại y hệt → bỏ qua.
+  useLayoutEffect(() => {
+    if (!pos || !menuRef.current || !btnRef.current) return;
+    const cao = menuRef.current.offsetHeight;
+    if (!cao || pos.top + cao <= window.innerHeight - 8) return;
+    const top = Math.max(8, btnRef.current.getBoundingClientRect().top - 3 - cao);
+    if (top !== pos.top) setPos({ ...pos, top });
+  }, [pos]);
   // Escape → đóng menu + TRẢ FOCUS về nút "⋯" (a11y — role=menu chuẩn).
   useEscClose(() => { setPos(null); btnRef.current?.focus(); }, open);
   useEffect(() => {
@@ -275,7 +364,7 @@ function RowMenu({ r, act, canDelete, canDuplicate }: { r: QuoteRow; act: (a: st
       <button className="qa-btn" title="Tải file Excel" aria-label="Tải Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
       <button ref={btnRef} className="qa-btn" title="Thao tác khác" aria-label="Thao tác khác" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><span className="qa-ico" aria-hidden="true">⋯</span></button>
       {open && pos && createPortal(
-        <div className="qa-menu" role="menu" style={{ top: pos.top, right: pos.right }}
+        <div ref={menuRef} className="qa-menu" role="menu" style={{ top: pos.top, right: pos.right }}
              onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
           {canDuplicate && <button role="menuitem" onClick={run("dup")}>📋 Nhân bản</button>}
           {canDuplicate && <button role="menuitem" onClick={run("revise")}>➕ Bản mới cùng mã dự án</button>}

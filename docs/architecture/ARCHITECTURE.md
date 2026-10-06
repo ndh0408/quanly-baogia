@@ -126,12 +126,15 @@ Postgres](#phiên-nằm-ở-postgres--có-chủ-ý-không-phải-thiếu-sót) b
 | PostgreSQL | toàn bộ dữ liệu nghiệp vụ; tiền dùng `Decimal`, không dùng float |
 | PostgreSQL (đã mã hoá) | CCCD, số tài khoản, lương — AES-256-GCM bằng `PII_ENC_KEY` |
 | PostgreSQL, bảng `user_sessions` | **phiên đăng nhập** — `connect-pg-simple`, KHÔNG phải Redis |
-| Kho object | ảnh chứng từ thanh toán, tệp đính kèm, bản xuất |
+| PostgreSQL, bảng `InputInvoiceProof` | ảnh ủy nhiệm chi của **khoản chi hàng nội bộ** (trang Hóa đơn đầu vào, từ 2026-10-06) — CỐ Ý ở CSDL, chỉ thêm |
+| Kho object | ảnh chứng từ thanh toán nhân sự, tệp đính kèm, bản xuất |
 | Redis | hàng đợi BullMQ, bộ đếm rate-limit, kênh Pub/Sub của SSE — **không giữ phiên** |
 
-CSDL chỉ giữ **khoá object + SHA-256**, không giữ nội dung file. Hệ quả trực
-tiếp: bản dump CSDL một mình **không** khôi phục được — xem
-[operations/BACKUP_RESTORE.md](../operations/BACKUP_RESTORE.md).
+Với những gì nằm ở kho object, CSDL chỉ giữ **khoá object + SHA-256**, không giữ nội
+dung file. Hệ quả trực tiếp: bản dump CSDL một mình **không** khôi phục được — xem
+[operations/BACKUP_RESTORE.md](../operations/BACKUP_RESTORE.md). Ngoại lệ là ảnh khoản
+chi hàng nội bộ: nằm trong CSDL vì kho object production chưa có bản sao nào, nên dump
+mang theo chúng (chuyển kho khi có sao lưu off-host — `docs/REMAINING_RISKS.md`).
 
 ### Phiên nằm ở Postgres — CÓ CHỦ Ý, không phải thiếu sót
 

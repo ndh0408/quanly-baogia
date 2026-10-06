@@ -5,7 +5,9 @@
 //
 // Kiểm: kéo tab bằng chuột (HTML5 drag & drop), Alt+←/→ bằng bàn phím, sheet đang mở giữ nguyên theo
 // đối tượng, payload Lưu mang thứ tự mới + id cũ (máy chủ ghép trạng thái theo id) + cờ danhLaiMaSheet,
-// mã "Số: …" hiện theo vị trí mới, và báo khi máy chủ giữ nguyên mã. Cùng giàn dựng với
+// và báo khi máy chủ giữ nguyên mã. Từ 2026-09-30 (chủ repo: "bỏ cái id từng sheet đi không cần nữa")
+// trình soạn KHÔNG còn in dòng "(Số: …_01)" của sheet đang mở — mã vẫn đánh lại theo vị trí ở máy chủ
+// (cờ danhLaiMaSheet ở trên), chỉ không hiện ra trên màn soạn. Cùng giàn dựng với
 // QuoteEditor.xoaSheet.test.tsx.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
@@ -90,7 +92,6 @@ const bam = async (el: HTMLElement) => { await act(async () => { el.click(); });
 const tenTab = () => [...hop!.querySelectorAll(".sheet-tab > span:first-child")].map((x) => (x.textContent || "").trim());
 const tab = (i: number) => hop!.querySelectorAll(".sheet-tab")[i] as HTMLElement;
 const tabDangMo = () => (hop!.querySelector(".sheet-tab.active span") as HTMLElement).textContent || "";
-const soMa = () => (hop!.querySelector(".quote-no") as HTMLElement).textContent || "";
 
 /** Giả lập kéo tab `tu` thả lên nửa trái/phải của tab `vao`. jsdom không có DataTransfer, và mọi
  *  getBoundingClientRect đều 0 — gán khung giả cho tab đích để phép chia nửa trái/phải có nghĩa. */
@@ -185,14 +186,18 @@ describe("Kéo đổi thứ tự sheet", () => {
     expect(p.danhLaiMaSheet).toBeUndefined();
   });
 
-  it("mã 'Số: …' hiện theo vị trí mới ngay sau khi kéo (sheet đang mở A thành _02)", async () => {
+  it("trình soạn KHÔNG in mã 'Số: …' của từng sheet (bỏ id sheet 2026-09-30) — kể cả sau khi kéo đổi chỗ", async () => {
     h.getQuote.mockImplementationOnce(async () => baoGia({ projectCode: "FP_A26_018", sheets: [
       trang(101, "A", "Backdrop A", 1000, { codeNo: 1 }), trang(102, "B", "Banner B", 5000, { codeNo: 2 }), trang(103, "C", "Standee C", 7000, { codeNo: 3 }),
     ] }));
     await moEditor();
-    expect(soMa()).toContain("FP_A26_018_01");
+    expect(hop!.querySelector(".quote-no"), "dòng mã từng sheet vẫn còn trên màn soạn").toBeNull();
+    expect(hop!.textContent).not.toMatch(/FP_A26_018_0\d/);
     await keo(1, 0, "trai");   // B lên đầu, A (đang mở) thành vị trí 2
-    expect(soMa()).toContain("FP_A26_018_02");
+    expect(hop!.querySelector(".quote-no")).toBeNull();
+    expect(hop!.textContent).not.toMatch(/FP_A26_018_0\d/);
+    // Số GN (khoá tra cứu thật: phân quyền tải file, webhook, nhật ký) vẫn hiện — chỉ id TỪNG SHEET bị bỏ.
+    expect(hop!.querySelector(".quote-no-gn")?.textContent).toBe("GN26011");
   });
 
   it("máy chủ GIỮ NGUYÊN mã (đã dùng trên hoá đơn) → báo cho người dùng biết", async () => {

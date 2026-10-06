@@ -2,6 +2,9 @@ import { z } from "zod";
 import type { Request, Response, NextFunction } from "express";
 import { config } from "./config.js";
 import { viZodErrorMap } from "./zodErrorMap.js";
+import { MAU_GHI_CHU, GHI_CHU_TOI_DA } from "./quoteListNote.js";
+import { COT_SAP_XEP, TRANG_THAI_BAO_GIA, docCsv } from "./quoteListFilter.js";
+import { laNgayLich } from "./vnTime.js";
 
 // Global Vietnamese fallback for any rule without its own message. Runs here (module
 // body, after imports) so config.js env parsing above keeps its operator-facing text,
@@ -320,24 +323,16 @@ const itemSchema = z.object({
   ).max(10).optional().nullable(),
   // Duyệt theo HÀNG cho bảng nội bộ HCM/Khách. Khai báo để Zod KHÔNG strip; quyền đổi (chỉ
   // admin) + đóng dấu ngày/người do server (reconcileExtraApprovals) quyết định, không tin client.
-  rid: z.string().max(64).optional().nullable(),
+  rid: z.string().trim().max(64).optional().nullable(),   // trim: "w1 " không được là hàng KHÁC "w1" (lách chốt hàng đã chi)
   approved: z.boolean().optional(),
   approvedAt: z.string().max(40).optional().nullable(),
   approvedBy: z.coerce.number().int().positive().optional().nullable(),
-  // THANH TOÁN theo HÀNG — phải khai vì ĐÚNG LÝ DO như `approved` ở trên: Zod v4 loại bỏ khoá lạ,
-  // và validate() THAY LUÔN req.body bằng object đã lọc. Thiếu ba dòng này thì tới
-  // reconcileExtraPayments mọi hàng đều có `paid === undefined`, `!!undefined` là false, và người
-  // CÓ quyền quote:internal:pay bấm Lưu là XOÁ SẠCH cờ đã-thanh-toán của mọi hàng nội bộ — mất luôn
-  // paidAt/paidById, không cảnh báo gì. Nhánh không-có-quyền thì khôi phục từ CSDL nên vẫn đúng,
-  // tức lỗi đánh trúng đúng những người quản lý thanh toán. Xem tests/extra-paid-preserved.test.js.
-  //
-  // Khai ở đây KHÔNG phải là tin client: reconcileExtraPayments vẫn quyết định giá trị cuối
-  // (không quyền → lấy theo CSDL; có quyền → đóng dấu thời gian + người trả ở phía server).
-  paid: z.boolean().optional(),
-  paidAt: z.string().max(40).optional().nullable(),
-  paidById: z.coerce.number().int().positive().optional().nullable(),
-  // CỐ Ý KHÔNG khai `paidProof`: ảnh chứng từ chỉ đi qua route /pay, không đi qua đường lưu báo
-  // giá (chống base64 chảy qua payload + chống giả mạo). reconcileExtraPayments luôn lấy ảnh từ CSDL.
+  // THANH TOÁN theo HÀNG — CỐ Ý KHÔNG khai `paid`/`paidAt`/`paidById`/`paidProof` (từ 2026-10-06): Zod v4 loại bỏ
+  // khoá lạ, nên payload Lưu KHÔNG mang được cờ thanh toán nào. Việc "đã chi" + ảnh chứng từ nay do kế toán ghi ở
+  // trang Hóa đơn đầu vào, vào bảng RIÊNG InputInvoiceEntry (src/services/inputInvoiceService.ts). Bốn cờ cũ còn
+  // nằm trong JSON hàng là ĐÓNG BĂNG: reconcileExtraPayments luôn chép lại chúng từ CSDL cho MỌI người
+  // (src/services/quoteService.ts), không còn đọc payload — nên gỡ khai báo ở đây không xoá cờ nào (rủi ro mà
+  // tests/extra-paid-preserved.test.js từng bắt chỉ tồn tại khi reconcile còn tin payload của người có quyền).
 });
 
 // Bảng nội bộ CỦA MỘT TRANG (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.
@@ -453,6 +448,48 @@ export const HnSaveSchema = z.object({
     .max(MAX_HN_TABLES, `Tối đa ${MAX_HN_TABLES} bảng Hà Nội trong một báo giá`)
     .optional(),
 });
+
+// GHI CHÚ + MÀU ở dòng Danh sách báo giá: `PUT /api/quotes/:id/list-note`. Trường VẮNG = giữ nguyên
+// (gõ chữ không được xoá màu và ngược lại); `color: null` = gỡ màu; `note: ""` = xoá chữ. Không có trường
+// nào → 400. Trim trước max để "  …200 ký tự  " không bị từ chối oan vì khoảng trắng hai đầu.
+export const QuoteListNoteSchema = z
+  .object({
+    note: z.string("Ghi chú phải là chữ").trim().max(GHI_CHU_TOI_DA, `Ghi chú tối đa ${GHI_CHU_TOI_DA} ký tự`).optional(),
+    color: z.enum(MAU_GHI_CHU, "Màu không nằm trong bảng 5 màu").nullable().optional(),
+  })
+  .refine((b) => b.note !== undefined || b.color !== undefined, "Không có gì để đổi: cần gửi ghi chú hoặc màu");
+
+// KHOẢN CHI của trang Hóa đơn đầu vào — `PUT /api/quotes/input-invoices/:quoteId/:side/:rid`
+// (src/services/inputInvoiceService.ts ghiKhoanChi). Khoản định vị bằng (báo giá, PHÍA, rid) chứ không bằng
+// `sheetId`: lưu báo giá là xoá trang rồi tạo lại nên id trang đổi sau mỗi lần Lưu, còn `rid` của hàng thì bền.
+// `rid` tối đa 64 — khớp `itemSchema.rid` ở trên.
+export const KhoanChiParams = z.object({
+  quoteId: z.coerce.number().int().positive(),
+  side: z.enum(["sheet", "hn"], "Phía bảng phải là 'sheet' hoặc 'hn'"),
+  rid: z.string().min(1).max(64),
+});
+export const GHI_CHU_KE_TOAN_TOI_DA = 1000;
+// Trường VẮNG = giữ nguyên. `baseVersion` BẮT BUỘC (0 khi khoản chưa có): hai kế toán cùng sửa một khoản thì người
+// lưu sau nhận 409 thay vì ghi đè im lặng. `paid` là boolean THẬT (không coerce — chuỗi "false" thành true là tích
+// nhầm). Ảnh: chuỗi data-URL = đính ảnh mới (ảnh cũ RÚT vào lịch sử, không xoá); `null` = gỡ ảnh hiện tại. Chuỗi
+// RỖNG không phải cách gỡ ảnh (lỗi đã gặp: client cũ gửi "" → 400) — một ý nghĩa, một cách viết. Ngày HĐ / ghi chú:
+// `null` hoặc "" = xoá. Trim trước max để khoảng trắng hai đầu không làm từ chối oan.
+export const KhoanChiSchema = z
+  .object({
+    baseVersion: z.number("Thiếu mốc phiên bản của khoản (baseVersion)").int().min(0),
+    paid: z.boolean("'Đã chi' phải là true hoặc false").optional(),
+    paidProof: z.string().max(900_000, "Ảnh chứng từ quá lớn").regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").nullable().optional(),
+    invoiceDate: z
+      .union([z.literal(""), z.string().refine(laNgayLich, "Ngày hóa đơn phải là ngày có thật, dạng YYYY-MM-DD")])
+      .nullable()
+      .optional(),
+    accountingNote: z.string("Ghi chú kế toán phải là chữ").trim().max(GHI_CHU_KE_TOAN_TOI_DA, `Ghi chú kế toán tối đa ${GHI_CHU_KE_TOAN_TOI_DA} ký tự`).nullable().optional(),
+  })
+  .refine(
+    (b) => b.paid !== undefined || b.paidProof !== undefined || b.invoiceDate !== undefined || b.accountingNote !== undefined,
+    "Không có gì để đổi: cần gửi 'đã chi', ảnh chứng từ, ngày hóa đơn hoặc ghi chú kế toán",
+  )
+  .refine((b) => !(b.paid === false && typeof b.paidProof === "string"), "Bỏ đánh dấu đã chi thì không đính ảnh chứng từ được");
 
 const sheetSchema = z.object({
   // id của sheet ĐANG CÓ trong DB (client gửi lại khi sửa). Lưu = xoá-tạo-lại sheet nên server dùng
@@ -676,17 +713,36 @@ export const QuoteUpdateSchema = z.object({
   baseUpdatedAt: z.coerce.date().optional(),
 });
 
-export const ListQuerySchema = z.object({
+// Tham số lọc dạng "a,b" HOẶC khoá lặp (?x=a&x=b): zod chỉ KIỂM từng phần tử (không đổi giá trị) — `docBoLoc`
+// (src/quoteListFilter.ts) tách lại khi dựng điều kiện. Kiểm ở đây để rác thành 400 thay vì âm thầm bị bỏ.
+const csvHopLe = (hopLe: (x: string) => boolean, msg: string) =>
+  z.union([z.string(), z.array(z.string())]).optional().refine((v) => v === undefined || docCsv(v).every(hopLe), msg);
+const laSoDuong = (x: string) => /^\d+$/.test(x) && Number(x) > 0;
+
+// Bộ lọc của Danh sách báo giá (chủ repo 2026-09-30). `status` và `companyId` từng là MỘT giá trị — vẫn hợp lệ.
+const LocDanhSachShape = {
   q: z.string().max(200).optional(),
-  status: z.enum(QUOTE_STATUSES).optional(),
-  companyId: z.coerce.number().int().positive().optional(),
+  status: csvHopLe((x) => (TRANG_THAI_BAO_GIA as readonly string[]).includes(x), "Trạng thái không hợp lệ"),
+  companyId: csvHopLe(laSoDuong, "Mã công ty phải là số nguyên dương"),
+  creator: csvHopLe(laSoDuong, "Mã người tạo phải là số nguyên dương"),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  minTotal: z.coerce.number().min(0, "Tổng tiền không được âm").optional(),
+  maxTotal: z.coerce.number().min(0, "Tổng tiền không được âm").optional(),
+  note: z.enum(["has", "none"]).optional(),
+  noteColor: csvHopLe((x) => (MAU_GHI_CHU as readonly string[]).includes(x), "Màu không nằm trong bảng 5 màu"),
+};
+
+export const ListQuerySchema = z.object({
+  ...LocDanhSachShape,
   page: z.coerce.number().int().min(1).default(1),
   size: z.coerce.number().int().min(1).max(config.MAX_PAGE_SIZE).default(config.DEFAULT_PAGE_SIZE),
-  sort: z.enum(["createdAt", "quoteDate", "total", "quoteNumber"]).default("createdAt"),
+  sort: z.enum(COT_SAP_XEP).default("createdAt"),
   order: z.enum(["asc", "desc"]).default("desc"),
 });
+
+/** `GET /api/quotes/facets`: cùng bộ lọc với danh sách, không phân trang / sắp xếp. */
+export const QuoteFacetsQuerySchema = z.object(LocDanhSachShape);
 
 /**
  * Express middleware: parse body/query/params against a zod schema and replace

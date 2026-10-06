@@ -61,6 +61,14 @@ describe("roleCan — role × permission matrix", () => {
     ["accountant", P.PERSONNEL_CREATE, false],
     ["accountant", P.PERSONNEL_EDIT_OWN, false],
     ["accountant", P.QUOTE_READ_ALL, false],
+    // Hóa đơn ĐẦU VÀO (2026-10-06): tích ĐÃ CHI + ảnh chứng từ — Kế toán + Admin; không ai khác mặc định có.
+    ["accountant", P.INVOICE_INPUT_PAY, true],
+    ["admin", P.INVOICE_INPUT_PAY, true],
+    ["manager", P.INVOICE_INPUT_PAY, false],
+    ["hr", P.INVOICE_INPUT_PAY, false],
+    ["account_hn", P.INVOICE_INPUT_PAY, false],
+    // quote:internal:pay nghỉ hưu — admin cũng thôi giữ (hằng số còn để dữ liệu quyền đã lưu không vỡ).
+    ["admin", P.QUOTE_INTERNAL_PAY, false],
   ])("roleCan(%s, %s) → %s", (role, perm, want) => {
     expect(roleCan(role, perm)).toBe(want);
   });

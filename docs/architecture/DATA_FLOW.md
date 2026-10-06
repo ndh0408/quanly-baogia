@@ -80,7 +80,7 @@ Hai lớp phân quyền, và **không lớp nào thay được lớp kia**:
 | Năng lực | `requirePermission(...)` ở route | "Tài khoản này được phép làm hành động này không?" |
 | Phạm vi bản ghi | `canOnQuote` / `canScoped` / `quoteScopeWhereOrThrow` trong service | "Được phép làm nó **trên bản ghi cụ thể này** không?" |
 
-Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 142 endpoint:
+Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 143 endpoint:
 [ROLES_PERMISSIONS.md](../product/ROLES_PERMISSIONS.md).
 
 ### 1.4 Prisma → Postgres
@@ -95,8 +95,11 @@ cho MỌI truy vấn:
 2. **Lọc ngầm** — mọi `find*`/`count`/`aggregate`/`groupBy` tự thêm
    `where.deletedAt = null` (trừ khi truyền `includeDeleted`). `findUnique` bị
    đổi thành `findFirst` để gắn được filter đó.
-3. **Bắn realtime** — sau mỗi lần GHI vào `Quote`/`Customer`/`User`, gọi
-   `emitChange` để client đang mở danh sách tự tải lại.
+3. **Bắn realtime** — sau mỗi lần GHI vào `Quote`/`Customer`/`User`/`QuoteListNote`
+   (`RT_ENTITY`), gọi `emitChange` để client đang mở danh sách tự tải lại. Hai bảng khoản chi
+   kế toán (`InputInvoiceEntry`/`InputInvoiceProof`) **cố ý không** nằm trong danh sách đó:
+   extension phát ngay sau từng câu lệnh, kể cả trước commit và khi transaction rollback — nên
+   dịch vụ kế toán phát tay `inputInvoice` đúng một lần SAU commit (mục 3.5).
 
 Kết nối đi qua driver adapter `@prisma/adapter-pg` trên một `pg.Pool`
 (`DB_POOL_MAX`, mặc định 20 kết nối). `connectionTimeoutMillis` được đặt bằng
@@ -203,18 +206,46 @@ chữ ký, im lặng, vẫn trả 200**.
 (không xác định). Thiếu câu này thì nó và `saveHn` có thể lấy khoá ngược chiều
 nhau trên cùng một báo giá → deadlock 40P01 → Prisma P2034.
 
+Ngay sau đó (từ 2026-10-06) **khoá luôn hàng `Quote`** rồi mới đọc khoản kế toán của báo giá:
+
+```sql
+SELECT "hnStatus", "hnTables" FROM "Quote" WHERE id = $1 FOR NO KEY UPDATE
+-- rồi: đọc InputInvoiceEntry của báo giá (đã chi + ảnh + ngày HĐ + ghi chú — trang Hóa đơn đầu vào)
+```
+
+Thứ tự vẫn là `QuoteSheet → Quote`. Kế toán ghi khoản dưới `Quote FOR SHARE` (mục 3.5), nên từ
+đây tới lúc commit không ai tích "đã chi" chen vào được — chốt "hàng đã chi không được biến mất"
+bên dưới đọc bản TƯƠI. Đọc khoản TRƯỚC khi khoá `Quote` là có khe đua: kế toán tích đúng hàng
+đang bị xoá, cả hai cùng thắng, và khoản thành mồ côi. Bảng HN cũng đọc tươi tại đây (không
+dùng bản đọc ngoài transaction). `FOR NO KEY UPDATE` chứ không `FOR UPDATE`: vẫn xung đột với `FOR SHARE`
+của kế toán và với đường Lưu khác, nhưng tương thích với `FOR KEY SHARE` mà kiểm khoá ngoại xin khi ai đó
+thêm ghi chú danh sách (`QuoteListNote`) / thành viên cho CHÍNH báo giá này — `FOR UPDATE` bắt họ treo suốt
+lần Lưu (vài giây với báo giá lớn; soát 2026-10-06 DT-1).
+
 Sau khi đã giữ khoá:
 
 | Bước | Làm gì | Chống cái gì |
 |---|---|---|
+| `chuanHoaRidTrung` | trên bản CSDL đọc tươi (theo thứ tự hiển thị: trang `order` → `id`): `rid` dính khoảng trắng → cắt; bản thứ 2 trở đi của `rid` TRÙNG nhận `rid` mới (bản đầu giữ — chủ của khoản kế toán); bản ở payload ghép theo THỨ TỰ với bản CSDL mà nó thay, nhận đúng `rid` của bản đó | dữ liệu cũ có hai hàng cùng `rid`: mọi luật kế thừa khoá theo `rid` nên cờ duyệt / đã chi / ảnh dời sang hàng kia hoặc rơi im, và chốt "hàng đã chi biến mất" (so tập `rid`) không thấy (soát 2026-10-06 ATDL-1/2) |
+| `hangVetThieuRid` | hàng CSDL đã trả / có ảnh (cờ JSON cũ) mà THIẾU `rid` → **400** `hang-da-chi-thieu-ma`, cả lần Lưu | `sanitizeExtraTables` cấp `rid` mới SAU reconcile → lần Lưu xoá im cờ + bản ảnh duy nhất. Chữa bằng `backfillKhoanChi --sua-rid` (DISASTER_RECOVERY.md) |
+| `tachRidTrung` | hàng thứ hai trở đi cùng `rid` trong một phía (`sheet` = HCM + Phí KH mọi trang · `hn`) nhận `rid` mới; hàng đầu giữ | hai hàng tranh một khoản kế toán |
 | `reconcileExtraApprovals` | không có `quote:internal:approve` → lấy lại cờ duyệt từ CSDL theo `rid` | tự đóng dấu duyệt cho hàng của chính mình |
-| `reconcileExtraPayments` | không có `quote:internal:pay` → lấy lại `paid`/`paidAt`/`paidById`/`paidProof` | tự đánh dấu đã thanh toán, tự nhét ảnh chứng từ |
+| `reconcileExtraPayments` | bốn cờ cũ `paid`/`paidAt`/`paidById`/`paidProof` trong JSON hàng **đóng băng**: luôn chép lại từ CSDL theo `rid`, cho MỌI người (zod cũng đã cắt); hàng mới / bản sao `rid` luôn chưa chi · đổi số lượng / đơn giá / số ngày của hàng ĐÃ CHI (trạng thái hiệu lực: khoản thắng cờ JSON) mà không có `invoice:input:pay` → 400 | tự đánh dấu đã chi, tự nhét ảnh chứng từ, chép `rid` của hàng đã chi sang hàng bịa 50 triệu |
 | `carrySheetState` | bê trạng thái mức sheet sang bản mới | Lưu = XOÁ sheet + TẠO LẠI; không bê là mất sạch mỗi lần bấm Lưu |
-| `reconcileHanoiTables` | không có `quote:hn:manage` → lấy lại bảng "hanoi" đã chốt | quản lý lưu đè lên giá Hà Nội đã duyệt |
+| `hangDaChiBiMat` | hàng ĐÃ CHI có ở bản CSDL mà vắng ở payload → **400** `hang-da-chi` nêu tên. So TẬP `rid` của cả phía, nên chuyển bảng / "Chuyển loại" / chuyển trang vẫn hợp lệ | xoá hàng / bảng / trang có tiền đã chi; client cũ gửi `extraTables: []` |
+| `hnTablesDeGhi` (payload có `hnTables`) | trên bản `Quote.hnTables` đọc TƯƠI (Quote đã khoá): `chotHnTables` — phần HN đã gửi duyệt / đã duyệt mà khác CSDL → 409, trừ người có `quote:hn:manage`; rồi tách `rid` trùng, đóng băng cờ đã chi, `reconcileHnApprovals`, chốt hàng đã chi như trên | quản lý lưu đè lên giá Hà Nội đã duyệt; reconcile trên bản đọc NGOÀI transaction (một lần ghi HN chen giữa bị đè bằng cờ cũ) |
 | ghi tăng dần (tuỳ chọn) | `INCREMENTAL_QUOTE_SAVE` bật → trang **không đổi một byte** thì giữ nguyên, không xoá-tạo-lại | số đo ở [QUOTE_SAVE_PERFORMANCE.md](QUOTE_SAVE_PERFORMANCE.md) |
 | `chotKhoaLacQuan` | `UPDATE "Quote" SET "updatedAt"="updatedAt" WHERE id=$1 AND "updatedAt"=$2` | hai người bấm Lưu chồng nhau: lần kiểm NGOÀI transaction lọt cả hai |
 | `tx.quote.update(... sheets.create)` | ghi bản mới | |
 | `snapshotQuoteVersion` | chụp `QuoteVersion` | lịch sử phiên bản + diff |
+
+Các chốt "hàng đã chi" ném **400** chứ không 409: 409 ở màn soạn mở hộp "người khác vừa lưu" và
+gợi ý tải lại (mất phần chưa lưu), còn 400 chỉ toast và **giữ** phần đang soạn — xoá DÒNG thì
+Ctrl+Z cứu được; xoá bảng / trang có hàng đã chi thì trình duyệt chặn ngay từ đầu (cờ `paid` của
+lớp phủ khoản kế toán). Cùng luật áp ở `ghiVungNoiBoDuocGiao` (account phụ không có vùng `main`),
+`saveHn` (mục 3.4) và `deleteQuote` (báo giá có khoản đã chi — xét MỌI bản của `rid` trùng và cả hàng
+thiếu `rid` — → 400 `bao-gia-co-khoan-da-chi`; đọc lại trạng thái, kiểm và xoá mềm trong CÙNG transaction
+dưới `Quote FOR NO KEY UPDATE`).
 
 Câu chốt khoá lạc quan dùng `$executeRaw` chứ **không** dùng
 `tx.quote.updateMany`: extension realtime coi `updateMany` là WRITE nên mỗi lần
@@ -243,7 +274,11 @@ chỉ ghi **một cột**: `Quote.hnTables` (cấp báo giá). Nó **không** c�
 
 Khoá: chỉ `SELECT id FROM "Quote" … FOR UPDATE`, và **không** lấy khoá
 `QuoteSheet` sau đó. Mọi đường ghi khác lấy khoá theo thứ tự `QuoteSheet → Quote`
-(`updateQuote`, `markExtraTableRowPayment`), nên lấy ngược chiều là deadlock.
+(`updateQuote`, `ghiVungNoiBoDuocGiao`), còn dịch vụ kế toán chỉ xin `Quote FOR SHARE` và
+không bao giờ khoá `QuoteSheet` (mục 3.5) — nên lấy ngược chiều là deadlock. Sau khi giữ khoá,
+`saveHn` mới đọc khoản kế toán của báo giá, chuẩn hoá `rid` trùng (`chuanHoaRidTrung`, như mục 3.2), từ
+chối hàng đã trả thiếu `rid` (400 `hang-da-chi-thieu-ma`), đóng băng cờ đã chi (không còn nhánh "ai có quyền
+thanh toán thì được đổi cờ") và chặn làm mất hàng ĐÃ CHI (400 `hang-da-chi`).
 Dùng `$queryRaw` chứ không `updateMany`: extension realtime ở `src/db.ts` coi
 `updateMany` là WRITE nên bắn thêm một sự kiện SSE, mà SSE đã bắn thì rollback
 không rút lại được.
@@ -259,6 +294,51 @@ Tab mở trước lần deploy này chỉ gửi `baseUpdatedAt`; đường đó 
 khi thiếu `baseHnRev`.
 
 Chi tiết vòng đời và ai làm được gì: [QUOTE_WORKFLOW.md](../product/QUOTE_WORKFLOW.md).
+
+### 3.5 Ghi khoản chi kế toán — KHÔNG phải đường Lưu báo giá
+
+`PUT /api/quotes/input-invoices/:quoteId/:side/:rid` → `ghiKhoanChi` trong
+`src/services/inputInvoiceService.ts` (trang Hóa đơn đầu vào, từ 2026-10-06). Kế toán tích "đã chi"
++ ảnh chứng từ, ghi ngày HĐ + ghi chú cho MỘT hàng bảng nội bộ. Dữ liệu ở bảng riêng
+`InputInvoiceEntry` / `InputInvoiceProof` — vì sao bảng riêng: [diagrams/data-model.md](diagrams/data-model.md).
+
+```
+quyền theo TỪNG TRƯỜNG (invoice:input:pay · invoice:edit) → thiếu là 403, chưa đụng CSDL
+soát ảnh (regex + giải base64 + magic bytes + sha256) TRƯỚC transaction — không giữ khoá lúc làm việc CPU
+BEGIN
+  SELECT … FROM "Quote" WHERE id = $q FOR SHARE        ← SQL thô: không qua extension, không phát SSE, không bump
+  đọc hàng của phía bằng SQL đã cắt ảnh → tìm theo rid (0 → mồ côi / 404 · >1 → 409 hang-trung-ma)
+  chưa có khoản → INSERT … ON CONFLICT DO NOTHING (gieo từ cờ JSON cũ nếu có)
+  SELECT … FROM "InputInvoiceEntry" … FOR UPDATE      ← hai kế toán cùng khoản xếp hàng ở đây
+  version ≠ baseVersion → 409 khoan-chi-da-doi
+  áp thay đổi · ảnh mới INSERT, ảnh cũ chỉ đặt retiredAt · version + 1
+COMMIT
+emitChange("inputInvoice") đúng một lần · audit quote.internal.pay / unpay / ke-toan (không chép ảnh)
+```
+
+Không ghi `Quote` hay `QuoteSheet`: `Quote.updatedAt` (mốc khoá lạc quan của màn soạn) không đổi nên
+người đang soạn báo giá không ăn 409; không sinh `QuoteVersion`.
+
+**Thứ tự khoá (KT-5)** là thứ làm hai đường này không bao giờ deadlock và không bao giờ mất khoản:
+
+| Đường | Thứ tự |
+|---|---|
+| Lưu báo giá (`updateQuote`, `ghiVungNoiBoDuocGiao`) | `QuoteSheet` FOR UPDATE → `Quote` FOR NO KEY UPDATE → **rồi mới** đọc khoản |
+| `saveHn` · `deleteQuote` | `Quote` FOR UPDATE · `Quote` FOR NO KEY UPDATE → rồi mới đọc khoản |
+| Dịch vụ kế toán, công cụ `backfillKhoanChi` (`--ghi`, `--xac-nhan`) | `Quote` FOR SHARE → đọc hàng → khoản FOR UPDATE; **không bao giờ** khoá `QuoteSheet` |
+| `backfillKhoanChi --sua-rid` (ghi trường `rid` của JSON hàng) | như đường Lưu: `QuoteSheet` FOR UPDATE → `Quote` FOR NO KEY UPDATE |
+
+`FOR SHARE` không chặn kế toán khác (tương thích nhau) nhưng xung đột với `FOR UPDATE` / `FOR NO KEY UPDATE` của đường Lưu:
+Lưu đang giữ `Quote` thì kế toán chờ rồi đọc bản đã commit (hàng vừa bị xoá → 404, không tạo khoản);
+kế toán đang giữ thì Lưu chờ rồi đọc thấy khoản vừa tích (xoá đúng hàng đó → 400). Đường Lưu chỉ ĐỌC
+hai bảng, nên quên thứ tự này ở một đường Lưu viết mới thì có khe đua — vẫn không mất bằng chứng (đường
+Lưu không ghi bảng) nhưng hàng đã chi có thể biến khỏi báo giá. Chốt bằng `tests/hddv-dong-thoi.test.js`.
+
+**Đọc:** `GET /input-invoices` hợp các hàng đủ điều kiện với các hàng đã có dữ liệu kế toán mà nay "Cần
+chú ý"; mọi phản hồi báo giá đầy đủ (`GET /:id`, `PUT /:id`, luồng HN…) và danh sách của tài khoản chi
+phí đi qua **lớp phủ** (`phuKeToan`) — hàng có khoản mang `paid` / `paidAt` / `paidById` /
+`hasPaidProof` theo khoản, hàng chưa có khoản giữ cờ JSON cũ (luật duy nhất: `trangThaiHieuLuc`,
+`src/khoanChi.ts`). Không phản hồi nào mang ảnh — ảnh chỉ ra qua `GET …/proof`.
 
 ---
 

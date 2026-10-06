@@ -60,7 +60,7 @@ không ai đi sửa nhầm:
 
 * `hanoi-tables-unprotected-on-main-save` — cần một tác nhân có `quote:update` mà
   **không** có `quote:hn:fill`; nhưng ai có `quote:hn:fill` đã bị chặn 403 ở
-  `PUT /api/quotes/:id` (`src/routes/quotes.routes.ts:223`). Người chủ báo giá xoá
+  `PUT /api/quotes/:id` (`src/routes/quotes.routes.ts`, nhánh `can(req.session, P.QUOTE_HN_FILL)` của route `router.put("/:id"`). Người chủ báo giá xoá
   một sheet là thao tác họ vốn được phép, không phải phá vòng duyệt.
 * `logout-leaves-refresh-tokens-alive` — đã đo bằng request thật: `POST
   /api/auth/logout` chỉ với `Authorization: Bearer` trả **200** và
@@ -323,10 +323,10 @@ xem `src/retention.ts`) là điểm khởi đầu tự nhiên cho WEBHOOK; EMAIL
 | `neutralize-apostrophe-visible` | neutralizeFormula để lọt dấu nháy ' vào file gửi khách với mọi hạng mục bắt đầu bằng "-" hoặc "+"; đồng thời bỏ sót khoảng trắng đứng trước = | Tên hạng mục tiếng Việt rất hay bắt đầu bằng gạch đầu dòng ("- Banner mặt tiền", "+ Phụ kiện") — mọi dòng như vậy in ra file .xlsx gửi khách hàng kèm một dấu nháy lạ ở đầu. Đây là tài liệu c… | **còn mở** · mức thật: nho |
 | `quote-counter-lock-across-heavy-tx` | Khoá hàng QuoteCounter được giữ suốt transaction tạo báo giá (gồm ghi 60k dòng + snapshot) | Toàn công ty dùng chung một prefix (`Company.quotePrefix`, mặc định "GN" — `prisma/schema.prisma:328`), nên MỌI lượt tạo báo giá tranh cùng một hàng QuoteCounter. Hai người bấm "Tạo báo giá"… | **còn mở** · mức thật: trung-binh |
 | `merge-venue-n-plus-1-in-tx` | Gộp rạp: 1 UPDATE/DELETE cho MỖI hạng mục bên trong interactive transaction 5s | Gộp một rạp có 200 hạng mục trùng tên khác cách gọi (đúng ca mà chú thích ở dòng 169-170 mô tả: "sheet gốc gọi cùng một rạp bằng nhiều tên") phát sinh tới 400 round-trip tuần tự trong một tr… | **vá một phần** · mức thật: nho |
-| `gdpr-export-unbounded-memory` | Xuất dữ liệu GDPR kéo 1000 báo giá KÈM toàn bộ items/ảnh base64 rồi JSON.stringify + JSON.parse | Giới hạn ảnh mỗi item là 10 ảnh × 2.800.000 ký tự (`src/validators.ts:147-149`). Một tài khoản kỳ cựu có 1000 báo giá; chỉ cần trung bình 200KB ảnh/báo giá là 200MB rows. `JSON.stringify` dự… | **còn mở** · mức thật: trung-binh |
+| `gdpr-export-unbounded-memory` | Xuất dữ liệu GDPR kéo 1000 báo giá KÈM toàn bộ items/ảnh base64 rồi JSON.stringify + JSON.parse | Giới hạn ảnh mỗi item là 10 ảnh × 2.800.000 ký tự (`itemSchema.images` trong `src/validators.ts`). Một tài khoản kỳ cựu có 1000 báo giá; chỉ cần trung bình 200KB ảnh/báo giá là 200MB rows. `JSON.stringify` dự… | **còn mở** · mức thật: trung-binh |
 | `hn-internal-list-pulls-base64-proofs` | Danh sách báo giá cho tài khoản HN/nội bộ select nguyên extraTables — kéo cả ảnh chứng từ base64 của cả trang | Một tài khoản kế toán chi phí có `quote:read:all` + `quote:internal:view` mở trang danh sách với size=100: server SELECT jsonb extraTables của mọi sheet thuộc 100 báo giá, trong đó có ảnh ch… | **vá một phần** · mức thật: khong-dang-ke |
 | `projectref-recomputes-from-items` | buildProjectRef kéo TOÀN BỘ QuoteItem của tới 1000 báo giá để tính lại subtotal đã được materialize | Mở trang Nhân sự (mặc định size=50 — `src/routes/personnel.routes.ts:51`) sinh tới ~200 mã ứng viên (`projectRef.ts:38-46` nhân 4 biến thể mỗi mã) → truy vấn kéo về tới 1000 báo giá kèm MỌI … | **vá một phần** · mức thật: khong-dang-ke |
-| `update-quote-triple-full-read` | Một lần Lưu báo giá đọc toàn bộ sheets+items (kèm ảnh base64) BA lần | Với báo giá có cột "Hình ảnh" bật (`QuoteSheet.showImages`), mỗi item mang tới 10 ảnh base64 × 2.8MB (`src/validators.ts:147-149`). Một lần bấm Lưu kéo khối đó qua dây DB ba lượt, hai trong … | **vá một phần** · mức thật: trung-binh |
+| `update-quote-triple-full-read` | Một lần Lưu báo giá đọc toàn bộ sheets+items (kèm ảnh base64) BA lần | Với báo giá có cột "Hình ảnh" bật (`QuoteSheet.showImages`), mỗi item mang tới 10 ảnh base64 × 2.8MB (`itemSchema.images` trong `src/validators.ts`). Một lần bấm Lưu kéo khối đó qua dây DB ba lượt, hai trong … | **vá một phần** · mức thật: trung-binh |
 | `no-bullmq-metrics-worker-unscraped` | Zero metrics on the BullMQ queues, and the worker process exposes no /metrics endpoint at all so its counters are never scraped | Every metric the worker produces — `export_jobs_total{status="error"}`, default process metrics, memory — is written to a registry no one ever reads and discarded when the pod restarts. Comb… | **vá một phần** · mức thật: trung-binh |
 | `sse-backplane-silent-degradation` | SSE Redis backplane can be absent or broken with no signal, and its publisher uses the infinite-retry options the codebase elsewhere documents as dangerous | With replicaCount 2, a failed or not-yet-ready backplane means a notification created on pod-1 (src/notifications.ts:71 `publish(userId, "notification", ...)`) and, more seriously, a `sessio… | **vá một phần** · mức thật: khong-dang-ke |
 | `no-job-idempotency-no-async-export-limit` | (mô tả cũ lỗi thời: nay ĐÃ có `deduplication` key theo quote+format+user+`updatedAt` VÀ `asyncExportLimiter` riêng 10/phút — `src/routes/jobs.routes.ts:26-30,85-109`) async export route vẫn KHÔNG có trần số dòng/sheet trước khi xếp việc vào hàng đợi | (ĐÃ LỖI THỜI — nay có `asyncExportLimiter` riêng 10/phút/IP, không chỉ limiter chung) A user double-clicking "xuất nền", or the SPA retrying a POST whose response was lost, pr… | **vá một phần** · mức thật: nho |
@@ -392,7 +392,7 @@ Mỗi dòng đều kiểm bằng file thật, không kiểm bằng trí nhớ.
 | 6 · Performance | **xong** | 92 lệnh `CREATE INDEX` · bench frontend · lưu báo giá ghép sheet thay vì xoá-tạo |
 | 7 · Architecture Cleanup | **xong** | tách service/route, `quoteUtils`/`money`/`permissions` tách bạch, ADR ghi ranh giới |
 | 8 · Repository Cleanup | **xong** | gỡ SPA cũ, dọn gốc repo, `docs/` tái cấu trúc, `repo-stats --check` canh số |
-| 9 · Final QA | **xong** (2026-08-27) | `npm run verify` nay **13 bước**, gồm cả quét bảo mật thật, dựng+smoke image Docker, smoke giao diện Chromium 19 bước, EXPLAIN ANALYZE, và cổng ranh giới tầng |
+| 9 · Final QA | **xong** (2026-08-27) | `npm run verify` nay **13 bước**, gồm cả quét bảo mật thật, dựng+smoke image Docker, smoke giao diện Chromium 20 bước, EXPLAIN ANALYZE, và cổng ranh giới tầng |
 
 ### PHASE 4 — đã đóng (2026-08-27)
 
@@ -401,7 +401,7 @@ bảng để thấy đã đóng bằng cái gì.
 
 | Đòi | Trước | Nay |
 |---|---|---|
-| Playwright smoke | không có | `scripts/ci/ui-smoke.mjs` — Chromium thật, **19 bước** đi hết luồng người dùng (đăng nhập → sửa ô → Lưu → mất tab & khôi phục bản nháp → wizard tạo mới → xuất Excel → đăng xuất → kiểm quyền → account HN gõ giá rồi Lưu MỘT lần), 0 lỗi console |
+| Playwright smoke | không có | `scripts/ci/ui-smoke.mjs` — Chromium thật, **20 bước** đi hết luồng người dùng (đăng nhập → sửa ô → Lưu → mất tab & khôi phục bản nháp → wizard tạo mới → xuất Excel → đo hình học thanh nút đáy màn soạn ở 22 cỡ cửa sổ → đăng xuất → kiểm quyền → account HN gõ giá rồi Lưu MỘT lần), 0 lỗi console |
 | Helm checks | chỉ `helm lint` | `scripts/ci/check-helm.mjs` — render đầy đủ + kubeconform + 4 bất biến |
 | Docker smoke | không có | `scripts/ci/docker-smoke.sh` dựng image, `smoke-image.sh` giữ MỌI khẳng định về image (kể cả **0 dòng stack trong log khởi động**) |
 | SBOM | chỉ là văn bản | `scripts/ci/security-scan.sh` sinh thật, cùng gitleaks (cả lịch sử git) · trivy · semgrep |
@@ -891,10 +891,10 @@ Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải p
 - **Chưa có Prometheus/Grafana chạy production** — nên mọi mục tiêu độ trễ trong
   [operations/SLO.md](operations/SLO.md) còn là giả định, chưa phải số đo.
 - **E2E trình duyệt CÓ, nhưng KHÔNG chạy trong CI** — `scripts/ci/ui-smoke.mjs`
-  lái Chromium THẬT qua 19 bước trên bundle ĐÃ BUILD, và nó là bước `[12/13]` của
+  lái Chromium THẬT qua 20 bước trên bundle ĐÃ BUILD, và nó là bước `[12/13]` của
   `scripts/verify-local.sh`. `.github/workflows/ci.yml` không có bước nào gọi nó,
   nên một thay đổi làm trắng màn hình vẫn xanh trên GitHub và chỉ bị bắt khi có
-  người gõ `npm run verify` trên máy mình. Chi tiết 19 bước:
+  người gõ `npm run verify` trên máy mình. Chi tiết 20 bước:
   [development/TESTING.md](development/TESTING.md).
 - **Ba đường của lưới mà `ui-smoke` KHÔNG đi qua** — smoke chỉ gõ phím thường
   (`keyboard.type` + `Enter`); không dán, không gõ Telex, không bấm Ctrl+Z. Cả ba
@@ -1134,8 +1134,10 @@ giữ lại nguyên văn kèm lý do vì nó là một ca sai kiểu mẫu (xem 
 migration `20260811200000_payment_proof_object`, nhưng migration đó **chỉ thêm cột** —
 việc chuyển dữ liệu nằm ở script chạy tay `scripts/migration/payment-proof-migrate.mjs`.
 
-Đợt này đã vá phần **mã**: hai route ghi (`/api/quotes/:id/extra/:sheetId/:rid/pay`,
-`/api/personnel/:id/payment`) nay kiểm data-URL **toàn chuỗi** thay vì chỉ tiền tố, và
+Đợt này đã vá phần **mã**: hai đường ghi ảnh — `/api/personnel/:id/payment` và đường ghi ảnh
+hàng bảng nội bộ (lúc vá là `/api/quotes/:id/extra/:sheetId/:rid/pay`; route đó ĐÃ GỠ 2026-10-06,
+thay bằng `PUT /api/quotes/input-invoices/:quoteId/:side/:rid` của kế toán, cùng phép kiểm cộng thêm
+giải base64 + soát magic bytes) — nay kiểm data-URL **toàn chuỗi** thay vì chỉ tiền tố, và
 `readProofDataUrl` (`src/paymentProof.ts`) trả `null` + ghi log cảnh báo nếu giá trị di
 sản không phải data-URL ảnh hợp lệ. Đo được bằng `tests/qua-proof-dataurl.test.js`.
 
@@ -1158,6 +1160,61 @@ SELECT id FROM "PersonnelRecord"
 
 Chạy `scripts/migration/payment-proof-migrate.mjs`, xác minh truy vấn (1) trả về 0, rồi
 mới bỏ cột cũ ở một migration riêng.
+
+## Khoản chi kế toán ở trang Hóa đơn đầu vào (2026-10-06) — nợ còn lại, phần lớn CÓ CHỦ Ý
+
+Đợt chuyển "đã chi + ảnh chứng từ" từ màn soạn báo giá sang kế toán (bảng `InputInvoiceEntry` /
+`InputInvoiceProof`, migration `20261006090000_input_invoice_entries`) cố ý chỉ làm phần **expand**.
+Những việc dưới đây để lại, ghi ra để không ai tưởng đã xong — và không ai "dọn" nhầm:
+
+- **Giai đoạn hợp đồng: bỏ đọc dự phòng JSON khi `--kiem` = 0.** Mã đọc "khoản ?? cờ JSON cũ"
+  (`trangThaiHieuLuc`, `src/khoanChi.ts`) và gieo khoản từ JSON ở lần ghi đầu. Chỉ gỡ nhánh dự phòng ở
+  một bản phát hành SAU, khi `node dist/tools/backfillKhoanChi.js --kiem` đã thoát 0 ổn định trên
+  production và không còn ai tính lùi ảnh về bản trước đợt này. Gỡ sớm hơn là hàng chưa có khoản mất
+  trạng thái "đã chi". Runbook: `docs/operations/DISASTER_RECOVERY.md`, mục khoản chi kế toán.
+- **Cờ JSON cũ + ảnh base64 cũ vẫn nằm trong JSON hàng** (`QuoteSheet.extraTables`, `Quote.hnTables`):
+  `paid` / `paidAt` / `paidById` / `paidProof` đóng băng (không đường nào đổi được) nhưng chưa cắt. Sau
+  `backfillKhoanChi --ghi`, ảnh cũ tồn tại HAI bản (JSON + dòng `InputInvoiceProof` nguồn `json-cu`);
+  mọi đường đọc vẫn cắt `paidProof` ở SQL. Cắt hẳn bốn trường là một migration HUỶ riêng, có khai báo
+  (`scripts/ci/check-destructive-sql.mjs`, bước [3c/6] của `deploy.sh`) — không làm trong đợt này.
+- **Ảnh chứng từ nằm trong Postgres, chưa ở kho object.** Cố ý: kho object production **chưa có bản
+  sao nào** (`docs/operations/DISASTER_RECOVERY.md`, bảng đầu), còn Postgres có dump trước mỗi deploy và
+  hằng đêm. Giá phải trả: dump phình theo số ảnh (mỗi ảnh tới 900.000 ký tự base64, tối đa 20 ảnh một
+  khoản, ảnh CHỈ THÊM), cột `dataUrl` không mã hoá. Theo dõi cỡ bảng; chuyển sang kho object khi có sao
+  lưu off-host — bảng đã có `sha256` / `size` / `mime` nên đó là việc cơ học theo khuôn đọc-song-song
+  của `src/paymentProof.ts`.
+  `SELECT count(*), pg_size_pretty(sum(octet_length("dataUrl"))::bigint) FROM "InputInvoiceProof";`
+- **GDPR / phiên bản báo giá không mang khoản kế toán — CỐ Ý.** Bản xuất dữ liệu cá nhân không có khoản
+  hay ảnh (sổ nghiệp vụ của công ty; ảnh là PII của người NHẬN tiền, không phải của chủ thể yêu cầu);
+  `QuoteVersion` không chụp hai bảng; Nhân bản / Bản mới không mang khoản theo. Cần lịch sử chi thì đọc
+  nhật ký `quote.internal.*` cộng `version` / `updatedBy*` / `retired*` của chính hai bảng.
+- **`GridTable` còn khả năng vẽ cột THANH TOÁN** (`payCol` / `canPay` / `onPayRow` trong
+  `web/src/components/GridTable.tsx`) mà không ai dùng: cột biến khỏi màn soạn chỉ vì không còn chỗ nào
+  truyền `payCol`. Lưới cố ý không sửa đợt này (rủi ro hồi quy engine lưới — AGENTS.md "TUYỆT ĐỐI không
+  phá"); dọn ở đợt sau cùng `web/src/lib/b6-gridMemo.test.ts`.
+- **`web/src/pages/Users.tsx` — `PAGE_PERMS` thiếu hai trang hoá đơn** (lỗ có sẵn): khung "Cấp xong, tài
+  khoản này sẽ: Thấy menu…" không liệt kê Hóa đơn đầu ra / đầu vào, nên người cấp quyền không thấy kế
+  toán mở được trang nào. Không ảnh hưởng phân quyền thật — `Shell` gác `#/invoices-in` bằng
+  `invoice:page`, máy chủ gác từng route.
+- **Hàng thiếu `rid` / trùng `rid` (dữ liệu cũ) bị khoá tới khi chuẩn hoá mã.** Trang hiện chúng chỉ xem
+  (`coTheGhi = false`), máy chủ trả 409 `hang-trung-ma`. Rid TRÙNG: lần Lưu kế tự tách (`chuanHoaRidTrung` ghép
+  từng bản CSDL ↔ payload theo thứ tự hiển thị, mỗi hàng giữ cờ của chính nó — soát 2026-10-06 ATDL-1). Hàng
+  THIẾU rid mà còn cờ / ảnh cũ: đường Lưu TỪ CHỐI cả báo giá (400 `hang-da-chi-thieu-ma`), vì cấp rid mới sau
+  reconcile là xoá im cờ + bản ảnh DUY NHẤT — người soạn kẹt tới khi quản trị chạy `backfillKhoanChi --sua-rid`
+  (DISASTER_RECOVERY.md "Khoản chi kế toán", bước 1b). Hàng thiếu rid KHÔNG có dấu vết thì Lưu được, nhưng rid cấp
+  SAU reconcile nên nó mất dấu duyệt (người không có quyền duyệt) hoặc bị đóng dấu duyệt lại — trang cũng chỉ đường
+  sang `--sua-rid` cho loại này. Số thật trên production: truy vấn tiền kiểm (a) và dòng
+  `thieu-rid` / `trung-rid` của `backfillKhoanChi`. Route `/pay` cũ luôn đòi rid nên loại thiếu rid gần như
+  không có.
+- **Chặn muộn khi màn soạn đã mở từ TRƯỚC lần tích.** Màn soạn không nghe SSE của báo giá đang mở, nên
+  không biết hàng vừa được kế toán tích; xoá cả BẢNG / TRANG chứa hàng đó thì chỉ biết lúc Lưu (400
+  `hang-da-chi`) và phải tải lại — mất phần chưa lưu khác. Hiếm, và không mất dữ liệu kế toán.
+- **Báo giá trong thùng rác có khoản kế toán không bao giờ bị "Dọn rác"** (`purgeSoftDeleted` lọc
+  `inputInvoiceEntries: { none: {} }`, FK `RESTRICT` là lưới thứ hai), và khoản mồ côi (hàng đã rời báo
+  giá) cộng dồn ở mục "Cần chú ý". Cố ý: không mất bằng chứng tài chính; chưa có đường "lưu trữ" khoản cũ.
+- **Kế toán bị ghi đè quyền theo vai / có tập quyền riêng thì không nhận `invoice:input:pay`** — hỏng
+  theo hướng đóng (không mất dữ liệu, kế toán chưa tích được). Admin tích tay ở trang Phân quyền; truy vấn
+  tiền kiểm (b) cho biết trước có ai bị không.
 
 ## Lưu được 60.000 dòng nhưng xuất đồng bộ chỉ tới 20.000 — ĐÃ NỐI đường nền (2026-08-27)
 
@@ -1214,7 +1271,7 @@ chung rồi báo trong `src/services/quoteService.ts`.
 
 ## Logo khách hàng định dạng .webp vẫn KHÔNG hiện trong file Excel
 
-`src/validators.ts:278` và `web/src/pages/NewQuoteWizard.tsx:15` đều chấp nhận
+`customerLogoSchema` (`src/validators.ts`) và `web/src/pages/NewQuoteWizard.tsx:15` đều chấp nhận
 `data:image/webp`, còn `insertCustomerLogo` (`src/excel.ts`) chỉ nhúng được
 png/jpeg/gif. Đợt này **chỉ vá phần tệ nhất**: ô C3 nay được xoá trước khi hàm
 `return`, nên file gửi khách không còn in dòng hướng dẫn "logo cty khách hàng"

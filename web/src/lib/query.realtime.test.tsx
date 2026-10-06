@@ -46,6 +46,31 @@ describe("FE-18 — RealtimeBridge làm tươi theo thực thể", () => {
     expect(ds).toContain("personnel");
     expect(ds).not.toContain("*TẤT CẢ*");
   });
+  // Ghi chú + màu ở dòng Danh sách báo giá có thực thể RIÊNG. Gộp vào "quote" thì mỗi lần ai đó gõ một dòng
+  // ghi chú là kế toán đang mở Hóa đơn tải lại cả /quotes/projects (≤2000 báo giá) và Dashboard chạy lại 4 lệnh.
+  it("entity=quoteNote → CHỈ làm tươi danh sách báo giá + số đếm bộ lọc của nó, không đụng /quotes/projects, Dashboard, Nhân sự", async () => {
+    const spy = await mo();
+    act(() => { window.dispatchEvent(new CustomEvent("realtime:changed", { detail: { entity: "quoteNote", action: "upsert" } })); });
+    // Số đếm "Có ghi chú / Chưa có / từng màu" của bộ lọc (quoteFacets) đổi theo từng dòng ghi chú — không làm tươi thì hiện số cũ.
+    expect(khoa(spy as unknown as ReturnType<typeof vi.fn>)).toEqual(["quotes", "quoteFacets"]);
+  });
+  // Khoản chi (Hóa đơn đầu vào, 2026-10-06) có thực thể RIÊNG. Thiếu dòng trong KHOA_THEO_THUC_THE thì thực thể lạ làm
+  // tươi MỌI query (hành vi "không rõ thực thể") — mỗi lần kế toán tích một ô là cả công ty tải lại Dashboard, Dự án…
+  it("entity=inputInvoice → CHỈ trang Hóa đơn đầu vào, màn nội bộ, danh sách báo giá ('Đã TT x/y') và Nhật ký", async () => {
+    const spy = await mo();
+    act(() => { window.dispatchEvent(new CustomEvent("realtime:changed", { detail: { entity: "inputInvoice", action: "update" } })); });
+    expect(khoa(spy as unknown as ReturnType<typeof vi.fn>).sort()).toEqual(["audit", "inputInvoices", "quote-internal", "quotes"]);
+  });
+  it("số đếm bộ lọc (quoteFacets) đi cùng danh sách báo giá ở MỌI thực thể làm đổi danh sách đó (quote, customer, user)", async () => {
+    for (const entity of ["quote", "customer", "user"]) {
+      const spy = await mo();
+      act(() => { window.dispatchEvent(new CustomEvent("realtime:changed", { detail: { entity, action: "update" } })); });
+      const ds = khoa(spy as unknown as ReturnType<typeof vi.fn>);
+      expect(ds, entity).toContain("quotes");
+      expect(ds, entity).toContain("quoteFacets");
+      act(() => root!.unmount()); root = null;   // gỡ cầu nối của vòng này trước khi dựng vòng sau (khỏi nghe chồng sự kiện)
+    }
+  });
   it("không rõ thực thể (payload lạ / bản Shell cũ) → làm tươi tất cả như trước", async () => {
     const spy = await mo();
     act(() => { window.dispatchEvent(new Event("realtime:changed")); });

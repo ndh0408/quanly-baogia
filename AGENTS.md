@@ -66,6 +66,17 @@ quy là làm hỏng công việc của người khác.
 - **Công thức**: `=5x3`, `=SUM(H3:H8)`, tham chiếu ô, `$` tuyệt đối.
 - **Bảng nội bộ** (chi phí HCM / báo giá HN / phí khách) **không được** lọt vào
   file Excel gửi khách.
+- **Dữ liệu kế toán hàng nội bộ** (trang Hóa đơn đầu vào: đã chi + ảnh chứng từ, ngày HĐ, ghi chú
+  KT) nằm ở bảng `InputInvoiceEntry` / `InputInvoiceProof`: **đường Lưu báo giá không ghi** hai bảng
+  đó (chỉ `src/services/inputInvoiceService.ts` và công cụ `src/khoanChiBackfill.ts` ghi); hàng
+  **ĐÃ CHI không xoá được qua đường Lưu** (xoá hàng / bảng / trang → 400 `hang-da-chi`); ảnh chứng
+  từ **không bao giờ bị xoá** — thay / gỡ / bỏ tích chỉ RÚT (`retiredAt`), FK `RESTRICT`; đường Lưu
+  viết mới phải **khoá `Quote` (FOR NO KEY UPDATE) trước khi đọc khoản** — kế toán ghi dưới `Quote FOR
+  SHARE`, đọc trước khi khoá là có khe đua — và gọi **`chuanHoaRidTrung` trên bản CSDL TRƯỚC mọi
+  reconcile** (rid trùng / dính khoảng trắng trong dữ liệu cũ làm cờ + ảnh dời hàng hoặc rơi im) cùng
+  chốt `hangVetThieuRid` (hàng đã trả thiếu rid → 400 `hang-da-chi-thieu-ma`). Bản đồ `prior` của
+  reconcile lấy bản ĐẦU khi trùng. Bất biến KT-1…KT-8: chú thích đầu `src/khoanChi.ts` và
+  `src/services/inputInvoiceService.ts`.
 
 ## Chốt chặn — đừng vô hiệu hoá
 
@@ -94,7 +105,7 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 | `scripts/ci/check-runtime-command.sh` | Docker/Compose/Helm/k8s khởi động lệch nhau (đã từng làm mọi pod chết vòng lặp) |
 | `scripts/ci/smoke-dist.sh` | Artifact production không boot được, hoặc đường dẫn tài nguyên sai sau khi biên dịch. Chạy `node dist/server.js` + `node dist/worker.js` THẬT ở `NODE_ENV=production`, không cần docker (bước `[10b/13]`, vài giây, nên chạy cả ở `--nhanh`). Năm khẳng định KHÔNG có ở `smoke-image.sh`: `/api/health`, `/style.css` trả `200` (đúng thứ vỡ khi `rootDir`/`outDir` sai), `/metrics` đòi token, `/api/auth/login` trả `401` chứ không phải `5xx`, worker thoát êm khi nhận `SIGTERM` |
 | `scripts/ci/smoke-image.sh` | Image production: boot, `/livez` + `/readyz`, SPA phục vụ được, phông PDF, prisma CLI, không có mã nguồn/đồ nghề test, **0 dòng stack trong log khởi động**. `scripts/ci/docker-smoke.sh` dựng image từ cây làm việc rồi gọi nó — **mọi khẳng định về image nằm ở `smoke-image.sh`**, đừng nhân đôi |
-| `scripts/ci/ui-smoke.mjs` | Chromium thật, 19 bước đi hết luồng người dùng: đăng nhập → danh sách → sửa ô → **Lưu** → tải lại + đọc lại số đã lưu → **mất tab giữa chừng: khôi phục bản nháp cục bộ** → **tạo báo giá qua wizard 3 bước** → lưu bản mới → **xuất Excel** (kiểm cả byte "PK" của gói OOXML) → **đăng xuất** → **kiểm quyền** bằng tài khoản `account_hn` (menu, hash gõ thẳng, và 403 ở MÁY CHỦ) → **account HN gõ giá rồi bấm Lưu MỘT lần, đòi CSDL phải đổi** (bắt lớp lỗi mà chỉ layout THẬT mới lộ: nút xê 28px khi ô mất focus → `mouseup` trượt khỏi nút → không có `click`) → 0 lỗi console. Không tầng nào dưới nó thấy lớp lỗi này: tầng component chạy jsdom (dựng lại DOM trong tiến trình, không tải asset, không thi hành CSP, không có mạng), chỉ E2E mới nạp bundle ĐÃ BUILD qua Express thật |
+| `scripts/ci/ui-smoke.mjs` | Chromium thật, 20 bước đi hết luồng người dùng: đăng nhập → danh sách → sửa ô → **Lưu** → tải lại + đọc lại số đã lưu → **mất tab giữa chừng: khôi phục bản nháp cục bộ** → **tạo báo giá qua wizard 3 bước** → lưu bản mới → **xuất Excel** (kiểm cả byte "PK" của gói OOXML) → **đăng xuất** → **kiểm quyền** bằng tài khoản `account_hn` (menu, hash gõ thẳng, và 403 ở MÁY CHỦ) → **account HN gõ giá rồi bấm Lưu MỘT lần, đòi CSDL phải đổi** (bắt lớp lỗi mà chỉ layout THẬT mới lộ: nút xê 28px khi ô mất focus → `mouseup` trượt khỏi nút → không có `click`) → **đổi 22 cỡ cửa sổ (360px … 3840px) rồi đo hình học thanh nút dưới đáy màn soạn: không nút nào đè nhau, không nút nào tràn ra ngoài thanh, Lưu luôn nằm trong màn hình** (CI chạy 1440×900 nên lỗi chỉ lộ ở laptop thấp 720–768px phải tự dựng các cỡ đó) → 0 lỗi console. Không tầng nào dưới nó thấy lớp lỗi này: tầng component chạy jsdom (dựng lại DOM trong tiến trình, không tải asset, không thi hành CSP, không có mạng), chỉ E2E mới nạp bundle ĐÃ BUILD qua Express thật |
 | `scripts/ci/check-web-bundle.mjs` | Bundle giao cho người dùng là **bản DEV của React**. Vite quyết dev-hay-prod theo `NODE_ENV` của máy đang build, mà chính `verify-local.sh` export `NODE_ENV=test` — nên trước 2026-08-27 `npm run verify` đẻ ra bundle dev (984.802 byte thay vì 630.482) rồi đem đi smoke |
 | `scripts/ci/check-helm.mjs` | Chart render ra manifest hỏng: tag di động, mật khẩu rỗng, `secretKeyRef` trỏ khoá không tồn tại. `helm lint` KHÔNG render nên không thấy gì |
 | `scripts/ci/check-alerts.mjs` | Quy tắc cảnh báo sai **logic** (`promtool test rules`) hoặc trỏ vào metric đã đổi tên. Bước `[A4]` soi luôn PromQL trong bảng điều khiển Grafana — panel trỏ vào metric đã chết vẽ đường 0 và người trực đọc thành "hệ thống đang yên" |

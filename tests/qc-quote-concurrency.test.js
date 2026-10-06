@@ -23,11 +23,11 @@
 //
 // ══ LỖI 3: saveHn ghi lại bảng hcm/khách từ ẢNH CHỤP CŨ ═════════════════════
 // `saveHn` (src/hnWorkflow.ts) đọc sheet NGOÀI transaction rồi trong transaction ghi
-// `[...others, ...hanoi]`, với `others` lấy từ ảnh chụp cũ đó. Route /pay (markExtraTableRowPayment)
-// có khoá hàng sheet FOR UPDATE đàng hoàng, nhưng saveHn KHÔNG lấy khoá nào — nó chỉ chờ ở lệnh
-// UPDATE cuối rồi đè nguyên khối JSON cũ lên.
-// TÁI HIỆN (tất định): kế toán đánh dấu ĐÃ TRẢ một hàng bảng "hcm" (giữ khoá, chưa commit), account
-// Hà Nội bấm Lưu phần HN xen vào, commit sau.
+// `[...others, ...hanoi]`, với `others` lấy từ ảnh chụp cũ đó. Route /pay thời đó (markExtraTableRowPayment —
+// ĐÃ GỠ 2026-10-06, "đã chi" nay ở bảng InputInvoiceEntry của trang Hóa đơn đầu vào) có khoá hàng sheet FOR
+// UPDATE đàng hoàng, nhưng saveHn KHÔNG lấy khoá nào — nó chỉ chờ ở lệnh UPDATE cuối rồi đè nguyên khối JSON cũ lên.
+// TÁI HIỆN (tất định): một lượt ghi khác đánh dấu ĐÃ TRẢ một hàng bảng "hcm" ngay trong JSON (giữ khoá, chưa
+// commit), account Hà Nội bấm Lưu phần HN xen vào, commit sau.
 // HẬU QUẢ: cờ đã-thanh-toán + ngày + người trả + ảnh chứng từ của kế toán BIẾN MẤT, dù account Hà
 // Nội không hề được phép đụng bảng hcm.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -235,14 +235,17 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
 
     const keToan = await moKhoa();
     try {
-      // Kế toán đang đánh dấu ĐÃ TRẢ hàng hcm1 (route /pay khoá hàng sheet y như thế) — chưa commit.
+      // Một lượt ghi KHÁC đang sửa cờ ĐÃ TRẢ của hàng hcm1 ngay trong JSON và giữ khoá hàng sheet — chưa commit. Trước
+      // 2026-10-06 đó là route /pay; nay route đã gỡ và kế toán ghi bảng InputInvoiceEntry (không đụng QuoteSheet), nhưng
+      // đường ghi QuoteSheet thì vẫn còn (bản app CŨ trong khe lùi ảnh, chủ báo giá Lưu) — bất biến cần giữ y nguyên.
       await keToan.query('SELECT id FROM "QuoteSheet" WHERE id = $1 FOR UPDATE', [sheetId]);
       const daTra = [{ ...hcm, items: [{ ...hcm.items[0], paid: true, paidAt: "2026-08-01T00:00:00.000Z", paidById: adminU.id, paidProof: "data:image/png;base64,BBBB" }] }];
       await keToan.query('UPDATE "QuoteSheet" SET "extraTables" = $2::jsonb WHERE id = $1', [sheetId, JSON.stringify(daTra)]);
 
       // Payload phẳng (cấp báo giá). Đáng chú ý: hai đường ghi nay KHÔNG còn chung một hàng —
-      // account HN ghi cột của Quote, kế toán ghi cột của QuoteSheet — nên bài này từ chỗ chốt
-      // "không xoá mất của nhau" trở thành chốt "không khoá chéo nhau tới mức treo".
+      // account HN ghi cột của Quote, lượt kia ghi cột của QuoteSheet — nên bài này từ chỗ chốt
+      // "không xoá mất của nhau" trở thành chốt "không khoá chéo nhau tới mức treo". (Kế toán ghi
+      // khoản chi chen với đường Lưu: tests/hddv-dong-thoi.test.js.)
       const dangLuu = banNgay(acc.put(`/api/quotes/${id}/hn`).send({
         hnTables: [{ ...hn, items: [{ ...hn.items[0], name: "Thuê xe HN (sửa)", unitPrice: 2500 }] }],
       }));

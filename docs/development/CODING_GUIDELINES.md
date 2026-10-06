@@ -162,7 +162,7 @@ so khớp chuỗi tiếng Việt — thứ sẽ vỡ ngay lần sửa câu chữ
 |---|---|---|
 | Tên hàm/biến **nội bộ** một file | tiếng Việt không dấu | `ghiAnToan`, `nhanSuKien`, `chotKhoaLacQuan`, `coSheetChet`, `sheetsTuoi`, `tinHieuHuy`, `daXuLyHuy`, `sinhFileXuat`, `chanBaoGiaQuaLon` |
 | Tên **export** dùng chéo module | tiếng Anh | `updateQuote`, `computeQuoteTotals`, `canOnQuote`, `resolveUserPermissions` |
-| Tên miền nghiệp vụ, cột CSDL, key quyền | tiếng Anh | `QuoteSheet`, `extraTables`, `quote:internal:pay` |
+| Tên miền nghiệp vụ, cột CSDL, key quyền | tiếng Anh | `QuoteSheet`, `extraTables`, `invoice:input:pay` |
 | Chuỗi hiển thị, thông điệp lỗi, chú thích | **tiếng Việt** | |
 
 Lý do rất thực dụng: tên nội bộ mô tả **ý định nghiệp vụ** (`coSheetChet` — "có

@@ -28,7 +28,9 @@ import GRID from "../components/GridTable.tsx?raw";
 import EXTRA from "../components/ExtraTables.tsx?raw";
 import PERSONNEL from "../pages/Personnel.tsx?raw";
 import WIZARD from "../pages/NewQuoteWizard.tsx?raw";
+import HOP_KHOAN_CHI from "../components/HopKhoanChi.tsx?raw";
 import { safeImgSrc } from "../components/GridTable";
+import { anhHienDuoc } from "./khoanChi";
 
 const anhThat = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==";
 
@@ -65,13 +67,33 @@ describe("mọi <img> của cụm này đều đi qua bộ lọc src", () => {
   const imgSrcExprs = (code: string) =>
     [...code.matchAll(/<img\b[^>]*?\ssrc=\{([^}]*)\}/g)].map((m) => m[1].trim());
 
-  for (const [ten, code] of [["GridTable.tsx", GRID], ["ExtraTables.tsx", EXTRA], ["Personnel.tsx", PERSONNEL]] as const) {
+  for (const [ten, code] of [["GridTable.tsx", GRID], ["Personnel.tsx", PERSONNEL]] as const) {
     it(`${ten}: không còn <img src={…}> gán thô`, () => {
       const exprs = imgSrcExprs(code);
       expect(exprs.length).toBeGreaterThan(0);
       for (const e of exprs) expect(e).toMatch(/^safeImgSrc\(/);
     });
   }
+
+  // 2026-10-06: hộp tích thanh toán + ảnh chứng từ dòng nội bộ (ExtraPayDialog) đã RỜI màn soạn — kế toán làm việc
+  // đó ở hộp "Khoản chi" của trang Hóa đơn đầu vào (HopKhoanChi.tsx). ExtraTables.tsx vì thế không còn <img> nào.
+  it("ExtraTables.tsx: không còn <img> nào (ảnh chứng từ đã rời màn soạn)", () => {
+    expect(imgSrcExprs(EXTRA), "màn soạn lại vẽ <img> — nếu cố ý thì phải qua safeImgSrc, và đổi bài này về kiểm bộ lọc").toHaveLength(0);
+  });
+
+  // Hộp "Khoản chi" nằm ở bundle CHÍNH nên dùng bản sao `anhHienDuoc` (lib/khoanChi.ts) thay vì kéo GridTable vào —
+  // bộ lọc đó phải neo TOÀN CHUỖI y như safeImgSrc, và MỌI <img> của hộp phải đi qua nó (kể cả ảnh đã lọc lúc nạp).
+  it("HopKhoanChi.tsx: mọi <img src={…}> đi qua anhHienDuoc(…)", () => {
+    const exprs = imgSrcExprs(HOP_KHOAN_CHI);
+    expect(exprs.length).toBeGreaterThan(0);
+    for (const e of exprs) expect(e).toMatch(/^anhHienDuoc\(/);
+  });
+  it("anhHienDuoc chặn đúng những gì safeImgSrc chặn", () => {
+    for (const s of [anhThat, "data:image/png;base64,iVBORw0KGgo=", 'data:image/png;base64,AAA"><a href=x>', "data:image/png;base64,AAA ",
+      "data:image/png;base64,AAA<script>alert(1)</script>", "javascript:alert(1)", "data:text/html;base64,PHNjcmlwdD4=", "https://vi-du.test/anh.png", "", null, undefined]) {
+      expect(anhHienDuoc(s), String(s)).toBe(safeImgSrc(s));
+    }
+  });
 
   it("trình tạo báo giá không khôi phục ngầm tính năng logo khách hàng đã gỡ", () => {
     expect(WIZARD).not.toMatch(/customerLogo|safeLogo|onLogo|Logo khách hàng/);

@@ -33,7 +33,7 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
 }
 
 // FE-18: sự kiện nào làm tươi query nào. Máy chủ (src/db.ts RT_ENTITY → src/sse.ts emitChange) chỉ
-// bắn 'changed' cho ba thực thể và payload có sẵn `entity`. Trước đây client bỏ qua payload và làm tươi
+// bắn 'changed' cho bốn thực thể và payload có sẵn `entity`. Trước đây client bỏ qua payload và làm tươi
 // MỌI query đang mở: kế toán mở Hóa đơn thì mỗi lần Sales bấm Lưu là tải lại cả /quotes/projects
 // (≤2000 báo giá), Dashboard gọi lại 4 lệnh analytics — kể cả khi thứ đổi chỉ là một khách hàng.
 // Khoá nào hiện TÊN của thực thể kia (tên khách trên danh sách báo giá, tên người tạo trên Dashboard)
@@ -44,10 +44,18 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
 // bỏ chốt, xoá báo giá đều làm đổi các cột đó. invalidateQueries chỉ refetch query ĐANG MỞ, nên chỉ tốn
 // khi có người đang ở trang Nhân sự. KHÔNG cần ở customer/user: accountName/company được CHÉP vào hồ sơ
 // lúc chọn dự án, danh sách không hiện tên người tạo báo giá.
+// "quoteFacets" = SỐ ĐẾM trên bộ lọc Danh sách báo giá (chip trạng thái, người tạo, công ty, ghi chú/màu): đi CÙNG khoá "quotes"
+// ở mọi thực thể — danh sách đổi thì số đếm đổi (báo giá mới/xoá/đổi trạng thái, ghi chú mới, tên khách/người tạo đổi).
 export const KHOA_THEO_THUC_THE: Record<string, string[]> = {
-  quote: ["quotes", "quoteProjects", "dashboard", "quote-internal", "audit", "personnel"],
-  customer: ["customers", "quotes", "quoteProjects", "dashboard", "audit"],
-  user: ["users", "permissions", "perm-catalog", "quotes", "quoteProjects", "dashboard", "audit"],
+  quote: ["quotes", "quoteFacets", "quoteProjects", "inputInvoices", "dashboard", "quote-internal", "audit", "personnel"],
+  // Ghi chú + màu ở dòng Danh sách báo giá: chỉ danh sách báo giá hiện nó (xem RT_ENTITY ở src/db.ts).
+  quoteNote: ["quotes", "quoteFacets"],
+  // Khoản chi của trang Hóa đơn đầu vào (đã chi + ảnh, ngày HĐ, ghi chú KT — src/services/inputInvoiceService.ts phát
+  // tay MỘT lần sau commit). Đổi: chính trang đó, màn chỉ-xem-nội-bộ của tài khoản chi phí (cột "✓ Đã TT"), cột
+  // "Đã TT x/y" của danh sách báo giá, và Nhật ký. KHÔNG đụng /quotes/projects, Dashboard: số tiền không đổi.
+  inputInvoice: ["inputInvoices", "quote-internal", "quotes", "audit"],
+  customer: ["customers", "quotes", "quoteFacets", "quoteProjects", "inputInvoices", "dashboard", "audit"],
+  user: ["users", "permissions", "perm-catalog", "quotes", "quoteFacets", "quoteProjects", "dashboard", "audit"],
 };
 
 // Cầu nối realtime: SSE 'changed' (Shell dispatch 'realtime:changed' kèm detail {entity, action}) →

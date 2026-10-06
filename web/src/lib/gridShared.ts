@@ -37,10 +37,10 @@ export function dangGoIME(e: {
 let _kSeq = 1;
 export const nextK = () => _kSeq++;
 
-// BA CỘT CHỈ CỦA BẢNG NỘI BỘ (Chi phí HCM · Phí khách hàng · Hà Nội — GridTable `cotNoiBo`). Lưới soạn
-// và màn kế toán chỉ-xem (InternalQuoteView) đọc CÙNG hai hằng này: kế toán đối chiếu chứng từ theo đúng
-// chữ người soạn nhìn thấy, hai nơi tự gõ nhãn là hai bản sẽ trôi khỏi nhau.
-/** Tiêu đề ba cột, đúng thứ tự trên lưới (sau GHI CHÚ, trước DUYỆT / THANH TOÁN). */
+// BA CỘT CHỈ CỦA BẢNG NỘI BỘ (Chi phí HCM · Phí khách hàng · Hà Nội — GridTable `cotNoiBo`). Lưới soạn,
+// màn chỉ-xem (InternalQuoteView) và trang Hóa đơn đầu vào (InvoicesIn + hộp Khoản chi) đọc CÙNG các hằng
+// này: kế toán đối chiếu chứng từ theo đúng chữ người soạn nhìn thấy, mỗi nơi tự gõ nhãn là các bản sẽ trôi.
+/** Tiêu đề ba cột, đúng thứ tự trên lưới (sau GHI CHÚ, trước DUYỆT — cột THANH TOÁN đã rời lưới 2026-10-06). */
 export const COT_NOI_BO = ["NS", "CHỨNG TỪ", "LƯU KHO"] as const;
 /** Lựa chọn của cột CHỨNG TỪ — giá trị lưu khớp `chungTu` trong src/validators.ts. */
 export const CHUNG_TU: ReadonlyArray<readonly [string, string]> = [["VAT", "VAT"], ["HDNS", "HĐNS"], ["TM", "TM"]];
