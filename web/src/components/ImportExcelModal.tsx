@@ -3,6 +3,7 @@ import { api, ApiError, type EditorTemplate, type ImportResult, type ImportedShe
 import { confirmModal, toast, useEscClose } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { addrFields, autoTargetIndexes, doiChieuNhapExcel, giuTruongChiApp, khacTien, letterOfField, NEW_IMPORT_SHEET, toGridItems, diffItems, diffCounts, kindLabel, type DiffRow } from "../lib/importApply";
+import { extraTableSum } from "./ExtraTables";
 
 // Modal "Nhập từ Excel": chọn file khách gửi lại → app đọc file (server) → cho XEM app hiểu gì
 // (cột nào là gì, nhóm/nhóm con, công thức) → đối chiếu TRƯỚC/SAU với sheet đang có → nạp vào lưới.
@@ -16,6 +17,13 @@ const MAX_ROWS_PER_SHEET = 1000;
 type TargetMode = "replace" | "append" | "skip";
 /** Tên vài hàng để người dùng biết hàng NÀO (danh sách dài thì cắt, kèm số còn lại). */
 const tenVaiHang = (ten: string[]) => ten.slice(0, 3).map((t) => `“${t.slice(0, 40)}”`).join(", ") + (ten.length > 3 ? ` và ${ten.length - 3} hàng khác` : "");
+/** Tổng THẬT của một bảng ở màn gọi, khi nó không cộng như lưới báo giá. Bảng Hà Nội (`tongKhongNhanNhom`): extraTableSum — đúng
+ *  phép AccountHnView cộng "Tổng tất cả … sheet Hà Nội" (bảng HN không có `category` nên không lọc hàng đã duyệt). Cộng như lưới
+ *  (M.sheetSubtotalGrouped) thì lệch nó: 0,7 × 163.845 ra 114.692 mà bảng HN hiện 114.691; Số Ngày −1 ra −50.000 mà bảng HN cộng
+ *  +50.000. Lưới báo giá: undefined → doiChieuNhapExcel cộng bằng M.sheetSubtotalGrouped theo cờ. */
+const tongBangCua = (tongKhongNhanNhom: boolean | undefined, usesDays: boolean) => tongKhongNhanNhom
+  ? (hang: M.Item[]) => extraTableSum({ category: "hn", items: hang }, usesDays)
+  : undefined;
 /** targetIndex = NEW_SHEET → tạo THÊM sheet mới trong báo giá (file nhiều sheet hơn báo giá). */
 export const NEW_SHEET = NEW_IMPORT_SHEET;
 type SheetPlan = { targetIndex: number; mode: TargetMode };
@@ -55,8 +63,9 @@ export function ImportExcelModal({
   thayGiuCoNhomCuaDich?: boolean;
   /** Tổng các bảng của màn gọi KHÔNG BAO GIỜ nhân Số Lượng nhóm, dù cờ "Thành Tiền nhóm" bật (bảng Hà Nội: tổng là
    *  `extraTableSum`, chỉ cộng hạng mục — cờ ở đó chỉ quyết định ô Thành Tiền của dòng nhóm hiện số đã nhân hay để trống).
-   *  Cờ vẫn tự bật như mọi đường nhập; chỉ các con số trong hộp (tổng hiện tại → sau nạp, đối chiếu tiền) tính không nhân
-   *  hệ số, cho khớp số màn đó sẽ hiện — và lời báo không được nói "tổng đã nhân hệ số nhóm". */
+   *  Cờ vẫn tự bật như mọi đường nhập; chỉ các con số trong hộp (tổng hiện tại → sau nạp, đối chiếu tiền) tính bằng CHÍNH
+   *  `extraTableSum` (không nhân hệ số; làm tròn từng dòng và bỏ Số Ngày ≤ 0 đúng như nó), cho khớp số màn đó sẽ hiện — và lời
+   *  báo không được nói "tổng đã nhân hệ số nhóm". */
   tongKhongNhanNhom?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
@@ -130,16 +139,17 @@ export function ImportExcelModal({
     const giu = plan.mode !== "append" && target ? giuTruongChiApp(before, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote, giuCongThucNgayAn: !usesDays }) : null;
     const after = plan.mode === "append" ? [...before, ...conv.items] : (giu?.items ?? conv.items);
     const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0, noiBoMat = giu?.noiBoMat ?? 0, tienDaTraDoi = giu?.tienDaTraDoi ?? [];
-    const beforeTotal = M.sheetSubtotalGrouped(before, usesDays, !tongKhongNhanNhom && !!target?.groupSubtotal);
+    const tongBang = tongBangCua(tongKhongNhanNhom, usesDays);
+    const beforeTotal = tongBang ? tongBang(before) : M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
     // Cờ "Hiện Thành Tiền nhóm" SAU nạp: theo đường nạp, và TỰ BẬT khi bảng kết quả còn nhóm SL > 1 (nhập Số Lượng nhóm mà
     // tổng không nhân hệ số là xuất Excel ra sai tiền). Hai tổng dưới đây tính theo cờ HIỆU LỰC đó (`nhanSauNap` — bảng Hà Nội
-    // thì không bao giờ nhân), không theo cờ trong file. Sheet đang chọn "Bỏ qua" chỉ để xem, không nạp → không có gì được bật,
-    // tổng theo cờ của file (xem doiChieuNhapExcel). Chế độ Nối: "sau nạp" của thẻ đối chiếu là phần tổng sheet THẬT SỰ tăng
-    // thêm (= afterTotal − beforeTotal), kèm hai nguyên nhân chỉ Nối mới có — hàng nối vào rơi vào nhóm cuối của sheet, và cờ
-    // vừa bật làm đổi tổng các hàng sẵn có.
-    const tien = doiChieuNhapExcel({ fs, mode: plan.mode, target, hangSauNap: after, hangNap: conv.items, usesDays, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom });
-    const afterTotal = M.sheetSubtotalGrouped(after, usesDays, tien.nhanSauNap);
-    const { importedTotal, tongHangTep, fileTotal, moneyMismatch, lechSauNap, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nhanSauNap, tuBat: tuBatNhom, nguonNhom } = tien;
+    // thì không bao giờ nhân, cộng bằng extraTableSum), không theo cờ trong file. Sheet đang chọn "Bỏ qua" chỉ để xem, không nạp
+    // → không có gì được bật, tổng theo cờ của file (xem doiChieuNhapExcel). Chế độ Nối: "sau nạp" của thẻ đối chiếu là phần
+    // tổng sheet THẬT SỰ tăng thêm (= afterTotal − beforeTotal), kèm hai nguyên nhân chỉ Nối mới có — hàng nối vào rơi vào nhóm
+    // cuối của sheet, và cờ vừa bật làm đổi tổng các hàng sẵn có.
+    const tien = doiChieuNhapExcel({ fs, mode: plan.mode, target, hangSauNap: after, hangNap: conv.items, usesDays, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom, tongBang });
+    const afterTotal = tien.tongSauNap;
+    const { importedTotal, tongHangTep, fileTotal, moneyMismatch, lechThat, lechSauNap, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nhanSauNap, tuBat: tuBatNhom, nguonNhom } = tien;
     const moneyDelta = fileTotal == null ? null : importedTotal - fileTotal;
     const formulaDropped = fs.stats.formulasDropped + conv.droppedFormulas + (giu?.congThucNgayAnMat ?? 0);
     const rowWarnings = fs.items.reduce((n, it) => n + (it.warn?.length || 0), 0);
@@ -156,7 +166,7 @@ export function ImportExcelModal({
     const templateMismatch = !!fs.templateCode && !!targetTemplate?.code && fs.templateCode !== targetTemplate.code;
     return {
       fs, plan, target, targetTemplate, templateMismatch, isNew, usesDays, addrDetail, showDetail, detailDropped, columnMoves,
-      before, after, beforeTotal, afterTotal, importedTotal, tongHangTep, fileTotal, moneyDelta, moneyMismatch, lechSauNap, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nhanSauNap, tuBatNhom, nguonNhom,
+      before, after, beforeTotal, afterTotal, importedTotal, tongHangTep, fileTotal, moneyDelta, moneyMismatch, lechThat, lechSauNap, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nhanSauNap, tuBatNhom, nguonNhom,
       formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat, noiBoMat, tienDaTraDoi,
     };
   }, [usable, plans, active, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId, thayGiuCoNhomCuaDich, tongKhongNhanNhom]);
@@ -236,7 +246,7 @@ export function ImportExcelModal({
         const hangNap = out[out.length - 1].items;
         const tien = doiChieuNhapExcel({
           fs, mode: plan.mode, target, hangSauNap: plan.mode === "append" ? [...(target?.items || []), ...hangNap] : hangNap,
-          hangNap: conv.items, usesDays, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom,
+          hangNap: conv.items, usesDays, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom, tongBang: tongBangCua(tongKhongNhanNhom, usesDays),
         });
         // Lệch thật. Hiếm gặp: Nối mà hàng vào nhóm cuối bù đúng phần đọc thiếu — "sau nạp" trùng Excel, chỉ các hàng của file lệch.
         if (tien.lechThat) { if (tien.lechSauNap) moneyRisk++; else tepTuLechRisk++; }
@@ -251,7 +261,7 @@ export function ImportExcelModal({
     if (over) { toast(`Sheet “${over.file.name}” vượt ${MAX_ROWS_PER_SHEET} dòng/sheet (giới hạn lưu của hệ thống) — hãy tách bớt sang sheet khác rồi nạp lại`, "error"); return; }
     const risks = [
       moneyRisk ? `${moneyRisk} sheet có tổng sau nạp khác tổng trong Excel` : "",
-      tepTuLechRisk ? `${tepTuLechRisk} sheet có tổng trong Excel khác tổng các hàng đọc được trong tệp` : "",
+      tepTuLechRisk ? `${tepTuLechRisk} sheet có tổng trong Excel khác tổng các hàng đọc được trong file` : "",
       formulaRisk ? `${formulaRisk} công thức chỉ giữ được con số` : "",
       templateRisk ? `${templateRisk} sheet đang chọn khác mẫu của file` : "",
       rowRisk ? `${rowRisk} cảnh báo ở các dòng` : "",
@@ -411,14 +421,18 @@ export function ImportExcelModal({
                     )}
                     <div className={`import-check-card ${view.moneyMismatch ? (view.lechDoHeSoNhom ? "warn" : "danger") : view.fileTotal != null ? "ok" : ""}`}>
                       <span>Đối chiếu tiền</span>
+                      {/* "Chưa khớp" (không kèm số): lệch THẬT mà "sau nạp" vẫn trùng Excel — chỉ Nối, khi hàng vào nhóm cuối bù đúng
+                          phần đọc thiếu. Dòng phụ khi đó nêu tiền CÁC HÀNG ĐỌC ĐƯỢC chứ không lặp "sau nạp" (hai số bằng nhau mà vẫn
+                          "chưa khớp" thì người đọc không hiểu); dòng đỏ bên dưới nói đủ ba số. Không khớp vì hệ số nhóm (vàng) thì
+                          luôn có số lệch, dù nhỏ hơn ngưỡng dung sai. */}
                       <strong>{view.fileTotal == null
                         ? `Sau nạp: ${M.fmtMoney(view.importedTotal)}`
                         : view.moneyMismatch
-                          // "Chưa khớp" không kèm số: sau nạp trùng Excel mà chính các hàng của file không khớp tổng ghi trong file
-                          // (chỉ Nối, khi hàng vào nhóm cuối bù đúng phần đọc thiếu) — dòng đỏ bên dưới nói các hàng cộng lại bao nhiêu.
-                          ? (view.lechSauNap ? `Lệch ${view.moneyDelta! > 0 ? "+" : ""}${M.fmtMoney(view.moneyDelta)}` : "Chưa khớp")
+                          ? (view.lechThat && !view.lechSauNap ? "Chưa khớp" : `Lệch ${view.moneyDelta! > 0 ? "+" : ""}${M.fmtMoney(view.moneyDelta)}`)
                           : `Khớp ${M.fmtMoney(view.fileTotal)}`}</strong>
-                      <small>{view.fileTotal == null ? "Không tìm thấy dòng Tổng cộng trong file" : `Excel ${M.fmtMoney(view.fileTotal)} · sau nạp ${M.fmtMoney(view.importedTotal)}`}</small>
+                      <small>{view.fileTotal == null ? "Không tìm thấy dòng Tổng cộng trong file"
+                        : view.lechThat && !view.lechSauNap ? `Excel ${M.fmtMoney(view.fileTotal)} · các hàng trong file ${M.fmtMoney(view.tongHangTep)}`
+                        : `Excel ${M.fmtMoney(view.fileTotal)} · sau nạp ${M.fmtMoney(view.importedTotal)}`}</small>
                     </div>
                   </div>
                   {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0 || view.trangThaiMat > 0 || view.noiBoMat > 0 || view.tienDaTraDoi.length > 0 || view.tuBatNhom || !!view.nhomCuoiNhan || !!view.hangSanCoDoi) && (
@@ -429,7 +443,7 @@ export function ImportExcelModal({
                       {view.moneyMismatch && !view.lechDoHeSoNhom && <li>
                         <strong>Tổng tiền chưa khớp:</strong> Excel là {M.fmtMoney(view.fileTotal)}, sau nạp là {M.fmtMoney(view.importedTotal)}
                         {/* Nối có (a) / (b): "sau nạp" gồm cả phần nhân thêm — nêu riêng tổng các hàng đọc được để thấy đúng chỗ lệch của file. */}
-                        {khacTien(view.tongHangTep, view.importedTotal) && <>; riêng các hàng đọc được trong tệp cộng lại {M.fmtMoney(view.tongHangTep)}</>}
+                        {khacTien(view.tongHangTep, view.importedTotal) && <>; riêng các hàng đọc được trong file cộng lại {M.fmtMoney(view.tongHangTep)}</>}
                         . Xem các dòng màu vàng trước khi nạp.
                       </li>}
                       {view.tuBatNhom && (view.nhanSauNap ? <li>
@@ -457,12 +471,12 @@ export function ImportExcelModal({
                           Cảnh báo vàng, không chặn — như lệch do hệ số nhóm ở trên. Bảng Hà Nội không nhân hệ số nhóm nên không có. */}
                       {view.nhomCuoiNhan && <li>
                         <strong>
-                          Các hàng nối vào{view.nhomCuoiNhan.chiPhanDau && " (phần đứng trước dòng nhóm đầu tiên của tệp)"} nằm trong{" "}
+                          Các hàng nối vào{view.nhomCuoiNhan.chiPhanDau && " (phần đứng trước dòng nhóm đầu tiên của file)"} nằm trong{" "}
                           {view.nhomCuoiNhan.nhomPhu ? "nhóm phụ" : "nhóm"} {view.nhomCuoiNhan.ten ? `“${view.nhomCuoiNhan.ten}”` : "không tên"}{" "}
                           (Số Lượng {view.nhomCuoiNhan.soLuong}) ở cuối sheet
                         </strong>{" "}
-                        nên được nhân ×{view.nhomCuoiNhan.soLuong}: {M.fmtMoney(view.nhomCuoiNhan.trongTep)} trong tệp → {M.fmtMoney(view.nhomCuoiNhan.sauNap)} sau nạp.
-                        {" "}Muốn chúng không bị nhân thì thêm một dòng nhóm ở đầu tệp (hoặc ngay trước các hàng này sau khi nạp).
+                        nên được nhân ×{view.nhomCuoiNhan.soLuong}: {M.fmtMoney(view.nhomCuoiNhan.trongTep)} trong file → {M.fmtMoney(view.nhomCuoiNhan.sauNap)} sau nạp.
+                        {" "}Muốn chúng không bị nhân thì thêm một dòng nhóm ở đầu file (hoặc ngay trước các hàng này sau khi nạp).
                       </li>}
                       {view.hangSanCoDoi && <li>
                         <strong>Bật Thành Tiền nhóm làm tổng các hàng sẵn có đổi {M.fmtMoney(view.hangSanCoDoi.truoc)} → {M.fmtMoney(view.hangSanCoDoi.sau)}</strong>

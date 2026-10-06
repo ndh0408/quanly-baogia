@@ -128,6 +128,9 @@ nhân hệ số nhóm khác tổng ghi trong file: "Đã bật Thành Tiền nh�
 tổng đã nhân hệ số nhóm và khác tổng ghi trong file". Sheet đích ĐANG bật (Thay / Nối không tắt nó)
 mà file không nhân hệ số cũng lệch y như thế, và cũng chỉ cảnh báo ("Sheet đích đang bật Thành Tiền
 nhóm…"). Lệch THẬT — tổng theo cờ trong file cũng không khớp — vẫn đi qua hộp xác nhận như trước.
+Ngưỡng dung sai của thẻ đối chiếu (số lớn hơn giữa 2 đ và 0,5 % tổng ghi trong file) chỉ để nuốt sai số
+đọc file. Phần chênh do hệ số nhóm là số tiền chính xác, nên hễ lần nạp đem lại khác tổng ghi trong file
+vì hệ số nhóm thì thẻ **không bao giờ** báo "Khớp", dù chỉ chênh vài đồng — thẻ vàng "Lệch …", không chặn.
 Sheet chọn **Bỏ qua** chỉ để xem: không bật gì, tổng tính theo cờ của file. Máy chủ, Excel, PDF không
 đổi: tổng vẫn tính theo cờ đã lưu.
 
@@ -138,18 +141,23 @@ không chặn, hai thứ mà riêng Nối mới có:
 
 - hàng của file đứng trước dòng nhóm đầu tiên của file nằm trong nhóm cuối của sheet nên được nhân Số
   Lượng nhóm đó — "Các hàng nối vào nằm trong nhóm “…” (Số Lượng 3) ở cuối sheet nên được nhân ×3:
-  200.000 trong tệp → 600.000 sau nạp" (file mở đầu bằng dòng nhóm của chính nó thì không có câu này);
+  200.000 trong file → 600.000 sau nạp" (file mở đầu bằng dòng nhóm của chính nó thì không có câu này);
 - ô vừa tự bật làm đổi tổng các hàng sẵn có — "Bật Thành Tiền nhóm làm tổng các hàng sẵn có đổi
   100.000 → 300.000".
 
-Lệch THẬT xét trên chính các hàng của file, nên vẫn đỏ + hỏi xác nhận, kể cả khi phần nhân thêm tình cờ
-bù đúng phần đọc thiếu. Bảng Hà Nội không nhân hệ số nhóm nên không có hai câu trên.
+Hai câu này hiện bất kể phần nhân thêm lớn hay nhỏ, và khi có chúng mà phần tăng thêm khác tổng ghi
+trong file thì thẻ không báo "Khớp" (xem ngưỡng dung sai ở trên). Lệch THẬT xét trên chính các hàng
+của file, nên vẫn đỏ + hỏi xác nhận, kể cả khi phần nhân thêm tình cờ bù đúng phần đọc thiếu — thẻ
+khi đó ghi "Chưa khớp" kèm tiền các hàng đọc được ("Excel 400.000 · các hàng trong file 200.000"),
+không lặp hai số "sau nạp" bằng nhau. Bảng Hà Nội không nhân hệ số nhóm nên không có hai câu trên.
 
 Phần **Hà Nội** (và bảng phụ Chi phí HCM / Phí khách hàng) khác ở tiền: tổng bảng là `extraTableSum`
 — chỉ cộng hạng mục, **không bao giờ nhân** Số Lượng nhóm dù cờ bật, và các bảng nội bộ này không xuất
 Excel; cờ ở đó chỉ quyết định ô Thành Tiền của dòng nhóm hiện số đã nhân hay để trống. Nhập Excel vào
 bảng Hà Nội vẫn tự bật + khoá ô (cùng luật lưới), còn hộp nhập tính tổng của bảng KHÔNG nhân hệ số và
-nói đúng như vậy — không nói "tổng đã nhân hệ số nhóm".
+nói đúng như vậy — không nói "tổng đã nhân hệ số nhóm". Mọi tổng của hộp ở đó ("Tổng hiện tại … → …",
+"sau nạp" của thẻ đối chiếu) cộng bằng chính `extraTableSum`, nên khớp từng đồng với "Tổng tất cả …
+sheet Hà Nội" — cả ở ca làm tròn ,5 (0,7 × 163.845 ra 114.691) lẫn Số Ngày ≤ 0 (bảng bỏ qua Số Ngày đó).
 
 Báo giá cũ đã lưu "tắt + nhóm SL > 1" tìm bằng truy vấn chỉ-đọc ở
 [`docs/development/DATABASE.md`](../development/DATABASE.md) (mục "Truy vấn kiểm dữ liệu") — và

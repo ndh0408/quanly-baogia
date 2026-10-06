@@ -3318,6 +3318,10 @@ textarea[aria-invalid="true"] {
   background: var(--warn-soft);
   color: var(--text);
   font-size: 13px;
+  /* Các dòng ở đây in nguyên chữ người dùng gõ (tên nhóm cuối sheet trong cảnh báo Nối, cảnh báo của file…). Một chuỗi liền
+     không có chỗ xuống dòng ("BANNER_KHO_TONG_HOP_XXXX…", 70 ký tự) đẩy thân hộp cuộn ngang ở màn 375px — đo trên Chrome: li
+     rộng 601px trong khung 268px. Cho bẻ giữa chữ khi hết chỗ. */
+  overflow-wrap: anywhere;
 }
 .import-warn li + li {
   margin-top: 4px;
