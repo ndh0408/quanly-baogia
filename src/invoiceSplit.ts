@@ -64,6 +64,13 @@ export function soHoaDon(s: SplitSheet, chia: boolean, viTri: number): number | 
 /** Sheet ĐÃ ĐI RA NGOÀI ở phía hóa đơn: có số hóa đơn hoặc đã thu tiền. */
 export const sheetDaXuat = (s: SplitSheet): boolean => coGiaTri(s.invoiceNo) || s.paidAt != null;
 
+/** Sheet thuộc một hóa đơn ĐÃ CÓ SỐ HĐ — mốc khoá phép chia (và khoá sửa báo giá, daXuatHoaDon). "Làm lại hóa đơn"
+ *  gỡ số HĐ là sheet hết khoá; ngày thu tiền (paidAt) KHÔNG phải mốc này — xem luật thu tiền ở invoiceSplitService. */
+export const sheetCoSoHD = (s: SplitSheet): boolean => coGiaTri(s.invoiceNo);
+
+/** Mốc thu tiền so sánh được (cùng ngày giờ = cùng lần thu). null = chưa thu. */
+export const mocThu = (s: SplitSheet): number | null => (s.paidAt == null ? null : new Date(s.paidAt).getTime());
+
 /** Gom id sheet theo khoá hóa đơn. `sheets` phải theo thứ tự hiển thị (order). */
 export function nhomTheoKhoa(sheets: SplitSheet[], chia: boolean): Map<string, number[]> {
   const m = new Map<string, number[]>();

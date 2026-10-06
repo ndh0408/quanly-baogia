@@ -16,6 +16,9 @@ export type HoaDonDung = { so: number; code: string; sheets: SheetTrongHoaDon[];
 export type KetQuaChia = { chia: boolean; hoaDon: HoaDonDung[]; deSau: SheetTrongHoaDon[]; khongXuat: SheetTrongHoaDon[] };
 
 export const daChia = (sheets: ProjectSheet[]) => sheets.some((s) => s.invoiceGroup != null || s.invoiceHold != null);
+/** Sheet kế toán để "Không xuất" — KHÔNG tính vào Chưa thu / công nợ ở mọi trang (chủ repo 2026-10-06: "có bỏ ra").
+ *  "Để sau" thì VẪN tính: chưa xuất nhưng vẫn phải thu. Chỉ có nghĩa khi báo giá đã chia (cột cũ null hết = chưa chia). */
+export const laKhongXuat = (q: ProjectQuote, sh: ProjectSheet) => sh.invoiceHold === "skip" && daChia(q.sheets || []);
 export const tienCoVat = (subtotal: number, vatPercent: unknown) => subtotal + Math.round((subtotal * (Number(vatPercent) || 0)) / 100);
 
 /** Lựa chọn của một sheet trên hộp chia: "1".."99" | "later" | "skip". */

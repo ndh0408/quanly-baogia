@@ -5,9 +5,14 @@
 //     rồi tạo lại, id đổi) hay thêm/xoá sheet — kế toán tải lại rồi chia lại, không đoán.
 //   · MỌI phần tử { group: null, hold: null } = BỎ CHIA (về "mỗi sheet một hóa đơn" như cũ).
 //   · Còn lại mỗi sheet phải có group (1…99) HOẶC hold.
-//   · HÓA ĐƠN ĐÃ XUẤT ĐỨNG YÊN: sheet đã có số HĐ hoặc đã thu tiền (sheetDaXuat) đang nằm trong một hóa đơn thì hóa đơn đó
-//     phải giữ NGUYÊN tập sheet VÀ nguyên số thứ tự (mã _NN) — không gom thêm, không tách ra, không đổi số. Ngược lại là
-//     đổi số tiền / mã của một hóa đơn đã gửi khách → 409.
+//   · HÓA ĐƠN ĐÃ XUẤT ĐỨNG YÊN: sheet đã có SỐ HĐ (sheetCoSoHD) đang nằm trong một hóa đơn thì hóa đơn đó phải giữ NGUYÊN
+//     tập sheet VÀ nguyên số thứ tự (mã _NN) — không gom thêm, không tách ra, không đổi số. Ngược lại là đổi số tiền / mã
+//     của một hóa đơn đã gửi khách → 409. Muốn chia lại thì "Làm lại hóa đơn" (setInvoiceRedo, dưới) gỡ số HĐ trước.
+//   · TIỀN ĐÃ THU KHÔNG ĐƯỢC SAI: thu tiền lưu là MỘT NGÀY trên từng sheet (QuoteSheet.paidAt — không có số tiền riêng;
+//     "đã thu" = trọn thành tiền của sheet đó). Nên (a) sheet đã thu phải nằm trong một hóa đơn (Để sau / Không xuất →
+//     409: ô Chưa thu / Không xuất sẽ nuốt mất khoản đã thu, và sheet giữ lại không sửa được ngày thu nữa), (b) một hóa
+//     đơn không được gom sheet đã thu với sheet chưa thu hay thu ngày khác (409): ghi đồng loạt sẽ CHÉP ngày thu sang sheet
+//     chưa thu — tức ghi nhận tiền chưa hề vào. Tách hóa đơn đã thu ra từng phần thì được: mỗi sheet giữ ngày thu của mình.
 //   · Hóa đơn MỚI gom nhiều sheet: hợp nhất trường hóa đơn từng cột (giá trị khác rỗng đầu tiên theo thứ tự sheet) rồi
 //     ghi đồng loạt — PO / Hạng mục / CTy kế toán đã gõ trên một sheet không biến mất.
 // Quyền: invoice:page vào (route) + invoice:edit (ở đây). Phạm vi GLOBAL như PUT /sheets/:sheetId/invoice: kế toán làm
@@ -19,7 +24,7 @@ import { httpError } from "../httpError.js";
 import { emitChange } from "../sse.js";
 import { can, PERMISSIONS as P } from "../permissions.js";
 import {
-  INVOICE_SHARED_FIELDS, daChiaHoaDon, khoaHoaDon, soHoaDon, sheetDaXuat, nhomTheoKhoa, type SplitSheet,
+  INVOICE_SHARED_FIELDS, daChiaHoaDon, khoaHoaDon, soHoaDon, sheetDaXuat, sheetCoSoHD, mocThu, nhomTheoKhoa, type SplitSheet,
 } from "../invoiceSplit.js";
 
 type GanSheet = { sheetId: number; group: number | null; hold: "later" | "skip" | null };
@@ -66,16 +71,34 @@ export async function setInvoiceSplit(req: Request) {
     // Không xuất không đổi gì của hóa đơn đã xuất.
     const anTrongHoaDon = new Set(tuoi.filter((s) => s.custStatus === "rejected" && !sheetDaXuat(s as unknown as SplitSheet)).map((s) => s.id));
     const tapTinh = (ds: number[] | undefined) => (ds ?? []).filter((id) => !anTrongHoaDon.has(id));
+    const tenCua = (i: number) => tuoi[i].name || `Sheet ${i + 1}`;
     for (let i = 0; i < tuoi.length; i++) {
       const s = cu[i];
-      if (!sheetDaXuat(s)) continue;
+      if (!sheetCoSoHD(s)) continue;
       const kCu = khoaHoaDon(s, chiaCu);
       if (kCu === "later" || kCu === "skip") continue;   // dữ liệu lạ (số HĐ trên sheet Để sau) — không có hóa đơn nào để giữ
       const kMoi = khoaHoaDon(moi[i], chiaMoi);
       const giuTap = tapBang(tapTinh(nhomCu.get(kCu)), tapTinh(nhomMoi.get(kMoi)));
       const giuSo = soHoaDon(s, chiaCu, i) === soHoaDon(moi[i], chiaMoi, i);
       if (!giuTap || !giuSo) {
-        throw httpError(409, `Sheet "${tuoi[i].name || `Sheet ${i + 1}`}" nằm trong hóa đơn ĐÃ XUẤT (có số HĐ / đã thu) — không gom thêm, tách ra hay đổi số hóa đơn đó được`);
+        throw httpError(409, `Sheet "${tenCua(i)}" nằm trong hóa đơn ĐÃ XUẤT (số HĐ ${tuoi[i].invoiceNo}) — không gom thêm, tách ra hay đổi số hóa đơn đó được. Muốn chia lại: bấm "Làm lại HĐ" trước`);
+      }
+    }
+    // TIỀN ĐÃ THU (xem đầu tệp): (a) sheet đã thu phải thuộc một hóa đơn; (b) không gom đã thu với chưa thu / thu ngày khác.
+    for (let i = 0; i < tuoi.length; i++) {
+      if (anTrongHoaDon.has(tuoi[i].id) || mocThu(cu[i]) == null) continue;
+      const k = khoaHoaDon(moi[i], chiaMoi);
+      if (k === "later" || k === "skip") {
+        throw httpError(409, `Sheet "${tenCua(i)}" đã ghi nhận thu tiền — phải nằm trong một hóa đơn, không để ${k === "skip" ? "Không xuất" : "Để sau"} được`);
+      }
+    }
+    for (const [k, ds] of nhomMoi) {
+      if (k === "later" || k === "skip") continue;
+      const tinh = tuoi.map((s, i) => ({ s, i })).filter(({ s }) => ds.includes(s.id) && !anTrongHoaDon.has(s.id));
+      const moc = new Set(tinh.map(({ i }) => mocThu(cu[i])));
+      if (moc.size > 1) {
+        const daThu = tinh.filter(({ i }) => mocThu(cu[i]) != null).map(({ i }) => tenCua(i));
+        throw httpError(409, `Không gom được: sheet đã thu tiền (${daThu.join(", ")}) nằm chung hóa đơn với sheet chưa thu hoặc thu ngày khác — gom vào sẽ ghi nhận cả hóa đơn là đã thu, sai tiền. Để sheet đã thu thành hóa đơn riêng`);
       }
     }
 
@@ -106,4 +129,50 @@ export async function setInvoiceSplit(req: Request) {
   emitChange("quote", "update", quoteId);
   await audit(req, "quote.invoice.split", { resource: "quote", resourceId: quoteId, before: { sheets: kq.truoc }, after: { sheets: kq.sau } });
   return { sheets: kq.sau };
+}
+
+/**
+ * LÀM LẠI HÓA ĐƠN (chủ repo 2026-10-06: "back lại cho họ tự chọn lại để làm lại hóa đơn").
+ * POST /api/quotes/:id/invoice-redo  body { sheetId } — một sheet BẤT KỲ của hóa đơn cần làm lại.
+ *
+ * Gỡ số HĐ khỏi MỌI sheet của hóa đơn đó, trong MỘT transaction dưới khoá QuoteSheet. Cùng lúc gỡ Ngày HĐ + Link HĐ —
+ * hai thứ thuộc về chính tờ hóa đơn bị huỷ: để lại Ngày HĐ thì cột Công nợ vẫn đếm ngày từ một hóa đơn không còn, và ô
+ * "Tình trạng HĐ" vẫn đọc nửa vời. Nhật ký `quote.invoice.redo` giữ đủ ba giá trị cũ + danh sách sheet.
+ * KHÔNG đụng ngày thu tiền (paidAt) hay PO / chứng từ / hạng mục / ghi chú. Sheet đã thu vẫn đã thu; luật thu tiền ở
+ * setInvoiceSplit chặn việc gom làm sai tiền về sau.
+ * Không còn sheet nào mang số HĐ → báo giá tự hết khoá sửa (daXuatHoaDon), đúng luật cũ.
+ */
+export async function setInvoiceRedo(req: Request) {
+  if (!can(req.session, P.INVOICE_EDIT)) throw httpError(403, "Bạn không có quyền làm lại hóa đơn");
+  const quoteId = Number(req.params.id);
+  const sheetId = Number(req.body?.sheetId);
+  const quote = await prisma.quote.findUnique({ where: { id: quoteId }, select: { id: true, status: true, deletedAt: true } });
+  if (!quote || quote.deletedAt) throw httpError(404, "Không tìm thấy báo giá");
+  if (quote.status !== "converted") throw httpError(403, "Chỉ làm lại hóa đơn của dự án đã chốt");
+
+  const kq = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${quoteId} ORDER BY id FOR UPDATE`;
+    const tuoi = await tx.quoteSheet.findMany({ where: { quoteId }, orderBy: [{ order: "asc" }, { id: "asc" }] });
+    const ban = tuoi.find((s) => s.id === sheetId);
+    if (!ban) throw httpError(409, "Sheet không còn trong báo giá này (có người vừa lưu báo giá) — tải lại trang");
+    const ds = tuoi as unknown as SplitSheet[];
+    const chia = daChiaHoaDon(ds);
+    const khoa = khoaHoaDon(ban as unknown as SplitSheet, chia);
+    const thanh = tuoi.filter((s) => khoaHoaDon(s as unknown as SplitSheet, chia) === khoa);
+    const coSo = thanh.filter((s) => sheetCoSoHD(s as unknown as SplitSheet));
+    if (!coSo.length) throw httpError(409, "Hóa đơn này chưa có số HĐ — không có gì để làm lại");
+    await tx.quoteSheet.updateMany({ where: { id: { in: thanh.map((s) => s.id) } }, data: { invoiceNo: null, invoiceDate: null, invoiceLink: null } });
+    return {
+      truoc: {
+        invoiceNo: [...new Set(coSo.map((s) => s.invoiceNo))],
+        invoiceDate: [...new Set(thanh.map((s) => s.invoiceDate?.toISOString() ?? null).filter(Boolean))],
+        invoiceLink: [...new Set(thanh.map((s) => s.invoiceLink).filter(Boolean))],
+        sheets: thanh.map((s) => ({ sheetId: s.id, name: s.name, paidAt: s.paidAt ? s.paidAt.toISOString() : null })),
+      },
+      sheetIds: thanh.map((s) => s.id),
+    };
+  });
+  emitChange("quote", "update", quoteId);
+  await audit(req, "quote.invoice.redo", { resource: "quote", resourceId: quoteId, before: kq.truoc, after: { invoiceNo: null, invoiceDate: null, invoiceLink: null, sheetIds: kq.sheetIds } });
+  return { sheetIds: kq.sheetIds, invoiceNo: kq.truoc.invoiceNo };
 }

@@ -10,7 +10,9 @@ import { daChia, laMacDinh, luaChonCua, nhomHoaDon } from "../lib/hoaDonChia";
 // Máy chủ (PUT /quotes/:id/invoice-split) giữ luật: hóa đơn đã xuất (có số HĐ / đã thu) đứng yên — ô của sheet đó khoá
 // sẵn ở đây cho khỏi bấm rồi mới nhận 409.
 
-const daXuat = (sh: { invoiceNo?: string | null; paidAt?: string | null }) => !!String(sh.invoiceNo ?? "").trim() || !!sh.paidAt;
+// Khoá ô = sheet thuộc hóa đơn ĐÃ CÓ SỐ HĐ (muốn đổi: "Làm lại HĐ" trước). Sheet đã thu (không còn số HĐ) vẫn chọn được —
+// máy chủ chặn gom đã thu với chưa thu / để Để sau, Không xuất, kèm lời giải thích.
+const daXuat = (sh: { invoiceNo?: string | null }) => !!String(sh.invoiceNo ?? "").trim();
 
 export function HopChiaHoaDon({ q, onClose, onSaved }: { q: ProjectQuote; onClose: () => void; onSaved: () => void }) {
   const sheets = useMemo(() => q.sheets || [], [q]);
@@ -63,13 +65,13 @@ export function HopChiaHoaDon({ q, onClose, onSaved }: { q: ProjectQuote; onClos
           <button type="button" className="x" onClick={onClose} aria-label="Đóng" disabled={dangLuu}>✕</button>
         </div>
         <div className="modal-body">
-          <p className="muted">Chọn sheet nào thuộc <b>Hóa đơn 1</b>, <b>Hóa đơn 2</b>… (nhiều sheet cùng số = gom một hóa đơn), <b>Để sau</b> (xuất lượt sau) hoặc <b>Không xuất</b>. Hóa đơn đã có số HĐ / đã thu thì giữ nguyên.</p>
+          <p className="muted">Chọn sheet nào thuộc <b>Hóa đơn 1</b>, <b>Hóa đơn 2</b>… (nhiều sheet cùng số = gom một hóa đơn), <b>Để sau</b> (xuất lượt sau) hoặc <b>Không xuất</b>. Hóa đơn đã có số HĐ thì giữ nguyên — muốn đổi, bấm <b>Làm lại HĐ</b> trước. Sheet đã thu tiền không gom chung với sheet chưa thu.</p>
           <table className="list-table inv-chia-bang">
             <thead><tr><th scope="col">Sheet</th><th scope="col" className="num">Thành tiền</th><th scope="col">Thuộc</th></tr></thead>
             <tbody>
               {sheets.map((sh, i) => sh.id == null ? null : (
                 <tr key={sh.id}>
-                  <td>{tenSheet(i)}{trangKhachTuChoi(q, sh) && <span className="muted"> (khách không duyệt)</span>}{daXuat(sh) && <span className="status approved" title={`Số HĐ ${sh.invoiceNo || "—"}`}> đã xuất</span>}</td>
+                  <td>{tenSheet(i)}{trangKhachTuChoi(q, sh) && <span className="muted"> (khách không duyệt)</span>}{daXuat(sh) && <span className="status approved" title={`Số HĐ ${sh.invoiceNo || "—"}`}> đã xuất</span>}{sh.paidAt && <span className="status approved"> đã thu</span>}</td>
                   <td className="num">{fmtMoney(Number(sh.subtotal) || 0)}</td>
                   <td>
                     <select name={`chiaHoaDon-${sh.id}`} autoComplete="off" aria-label={`Hóa đơn của sheet ${tenSheet(i)}`}

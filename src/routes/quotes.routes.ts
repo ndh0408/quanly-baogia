@@ -45,7 +45,7 @@ import {
 } from "../services/quoteService.js";
 import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
 import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay, daChiCuaBaoGia, docChungTuNoiBo } from "../services/inputInvoiceService.js";
-import { setInvoiceSplit } from "../services/invoiceSplitService.js";
+import { setInvoiceSplit, setInvoiceRedo } from "../services/invoiceSplitService.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -218,6 +218,17 @@ router.put(
   }),
   requireAnyPermission(P.INVOICE_PAGE),
   asyncHandler(async (req: Request, res: Response) => res.json(await setInvoiceSplit(req)))
+);
+
+// LÀM LẠI HÓA ĐƠN: gỡ số HĐ (+ ngày, link) khỏi mọi sheet của một hóa đơn — giữ nguyên ngày thu tiền. Sau đó chia lại được.
+router.post(
+  "/:id/invoice-redo",
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive() }),
+    body: z.object({ sheetId: z.number().int().positive() }).strict(),
+  }),
+  requireAnyPermission(P.INVOICE_PAGE),
+  asyncHandler(async (req: Request, res: Response) => res.json(await setInvoiceRedo(req)))
 );
 
 // (Bốn route thanh toán cũ theo hàng — POST /:id/extra/:sheetId/:rid/pay, GET …/proof, POST /:id/hn/:rid/pay,

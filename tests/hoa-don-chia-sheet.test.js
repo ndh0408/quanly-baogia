@@ -164,6 +164,42 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     expect((await chia(keToan, id, [g(a, 1), g(b, null, "skip"), g(c, 2)])).status).toBe(200);
   });
 
+  it("LÀM LẠI HÓA ĐƠN: gỡ số HĐ + ngày + link khỏi MỌI sheet của hóa đơn, GIỮ ngày thu; audit; hết khoá sửa; chia lại được", async () => {
+    const id = await taoBaoGiaChot("lamlai");
+    const [a, b, c] = await sheetsCua(id);
+    const g = (x, group, hold = null) => ({ sheetId: x.id, group, hold });
+    expect((await chia(keToan, id, [g(a, 1), g(b, 1), g(c, 2)])).status).toBe(200);
+    expect((await keToan.put(`/api/quotes/sheets/${a.id}/invoice`).send({ invoiceNo: "R-1", invoiceDate: "2026-10-01", invoiceLink: "https://hd.vn/r1", paidAt: "2026-10-05" })).status).toBe(200);
+    const lamLai = (agent, sheetId) => agent.post(`/api/quotes/${id}/invoice-redo`).send({ sheetId });
+
+    expect((await lamLai(account, b.id)).status, "không có invoice:page").toBe(403);
+    expect((await lamLai(keToan, 999999999)).status, "sheet không thuộc báo giá").toBe(409);
+    expect((await sheetsCua(id))[0].invoiceNo, "bị từ chối thì không gỡ gì").toBe("R-1");
+
+    const r = await lamLai(keToan, b.id);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const sau = await sheetsCua(id);
+    expect(sau.map((s) => [s.invoiceNo, s.invoiceDate, s.invoiceLink])).toEqual([[null, null, null], [null, null, null], [null, null, null]]);
+    expect(sau.map((s) => s.paidAt?.toISOString().slice(0, 10) ?? null), "TIỀN ĐÃ THU giữ nguyên").toEqual(["2026-10-05", "2026-10-05", null]);
+    const nk = await prisma.auditEvent.findFirst({ where: { action: "quote.invoice.redo", resourceId: String(id) }, orderBy: { id: "desc" } });
+    expect(nk?.before).toMatchObject({ invoiceNo: ["R-1"], invoiceLink: ["https://hd.vn/r1"] });
+    expect(nk.before.sheets.map((x) => x.sheetId)).toEqual([a.id, b.id]);
+    expect((await lamLai(keToan, a.id)).status, "hết số HĐ → không có gì để làm lại").toBe(409);
+
+    // Hết số HĐ → báo giá hết khoá sửa như luật cũ.
+    const q0 = (await admin.get(`/api/quotes/${id}`)).body;
+    expect((await admin.put(`/api/quotes/${id}`).send({ baseUpdatedAt: q0.updatedAt, title: `${TAG} lamlai v2` })).status).toBe(200);
+    const [a2, b2, c2] = await sheetsCua(id);
+
+    // Luật tiền đã thu: gom sheet đã thu với sheet chưa thu → 409; sheet đã thu Để sau / Không xuất → 409.
+    expect((await chia(keToan, id, [g(a2, 1), g(b2, 1), g(c2, 1)])).status).toBe(409);
+    expect((await chia(keToan, id, [g(a2, 1), g(b2, null, "later"), g(c2, 2)])).status).toBe(409);
+    expect((await chia(keToan, id, [g(a2, 1), g(b2, null, "skip"), g(c2, 2)])).status).toBe(409);
+    // Tách hai sheet đã thu thành hai hóa đơn: mỗi sheet giữ ngày thu của mình — được.
+    expect((await chia(keToan, id, [g(a2, 1), g(b2, 2), g(c2, 3)])).status).toBe(200);
+    expect((await sheetsCua(id)).map((s) => s.paidAt?.toISOString().slice(0, 10) ?? null)).toEqual(["2026-10-05", "2026-10-05", null]);
+  });
+
   it("Không xuất: sheet skip giữ nguyên tiền/sheet, không nhận số HĐ", async () => {
     const id = await taoBaoGiaChot("skip");
     const [a, b, c] = await sheetsCua(id);

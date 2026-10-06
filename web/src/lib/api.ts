@@ -684,6 +684,9 @@ export const api = {
   // Chia sheet thành hóa đơn (kế toán, invoice:edit): liệt kê ĐỦ sheet của báo giá; mọi phần tử {group:null, hold:null} = bỏ chia.
   chiaHoaDon: (quoteId: number, sheets: { sheetId: number; group: number | null; hold: "later" | "skip" | null }[]) =>
     req<{ sheets: { sheetId: number; group: number | null; hold: string | null }[] }>(`/quotes/${quoteId}/invoice-split`, { method: "PUT", body: JSON.stringify({ sheets }) }),
+  // Làm lại hóa đơn: gỡ số HĐ + ngày + link khỏi mọi sheet của hóa đơn chứa `sheetId` (giữ ngày thu tiền).
+  lamLaiHoaDon: (quoteId: number, sheetId: number) =>
+    req<{ sheetIds: number[]; invoiceNo: string[] }>(`/quotes/${quoteId}/invoice-redo`, { method: "POST", body: JSON.stringify({ sheetId }) }),
   signSheet: (sheetId: number, signed: boolean) =>
     req<unknown>(`/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) }),
   // (markExtraPay / getExtraProof / markHnPay / getHnProof ĐÃ GỠ 2026-10-06 cùng bốn route /pay · /proof theo báo giá:

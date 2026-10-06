@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
-import { toast } from "../lib/ui";
+import { toast, confirmModal } from "../lib/ui";
 import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, dash, Stat } from "../lib/format";
 import { smartTextMatch } from "../lib/filterText";
 import { nhomHoaDon, tienCoVat } from "../lib/hoaDonChia";
@@ -238,7 +238,15 @@ export function InvoicesPage({ me }: { me: Me }) {
       })
     : shown;
 
-  const sumAmount = shown.reduce((s, r) => s + r.amount, 0);
+  // Sheet Để sau / Không xuất trong phạm vi ô tìm kiếm + CTy (bảng nhóm riêng bên dưới dùng cùng phép lọc).
+  const heldLoc = (hold: "later" | "skip") => held.filter((h) => h.hold === hold
+    && (!cty || defaultCty(h.q) === cty)
+    && smartTextMatch(q, [h.q.customerName, h.q.customerCode, h.q.title, h.code, h.name, h.amount, fmtMoney(h.amount)]));
+  // "Để sau" chưa xuất nhưng VẪN PHẢI THU → cộng vào Tổng + Chưa thu (chủ repo 2026-10-06); "Không xuất" thì không.
+  // Chỉ cộng khi không lọc theo thứ chỉ hóa đơn mới có (số/ngày HĐ, đã thu, quá hạn, ô thiếu) — sheet chưa xuất không có.
+  const tinhDeSau = !status && !missing && (collection === "" || collection === "unpaid") && !year && !month && !dateFrom && !dateTo;
+  const deSauTien = tinhDeSau ? heldLoc("later").reduce((s, h) => s + h.amount, 0) : 0;
+  const sumAmount = shown.reduce((s, r) => s + r.amount, 0) + deSauTien;
   const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
   // Hạn công nợ áp cho TỪNG DÒNG: ưu tiên hạn RIÊNG của khách (trang Mã khách hàng), chưa đặt → 30 ngày.
   const overdue = shown.filter(isOverdue);
@@ -256,6 +264,24 @@ export function InvoicesPage({ me }: { me: Me }) {
       toast("Đã lưu", "success");
       // Đồng bộ cache cho trang Quản lý dự án / Dashboard (tham chiếu cùng nguồn) thấy ngay giá trị mới.
       qc.invalidateQueries({ queryKey: ["quoteProjects"] });
+    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
+  };
+
+  // LÀM LẠI HÓA ĐƠN (chủ repo 2026-10-06: "back lại cho họ tự chọn lại để làm lại hóa đơn"): gỡ số HĐ + ngày + link khỏi
+  // mọi sheet của hóa đơn; tiền đã thu GIỮ NGUYÊN. Sau đó các sheet chọn lại được trong "Chia HĐ".
+  const lamLai = async (r: Row) => {
+    if (!r.sheetId) return;
+    const thu = r.paidAt ? ` Đã thu ${fmtMoney(r.amount)} ngày ${fmtDate(r.paidAt)} — GIỮ NGUYÊN, không gỡ.` : "";
+    const ok = await confirmModal(
+      `Làm lại hóa đơn ${r.code}?`,
+      `Gỡ số HĐ ${r.invoiceNo}${r.invoiceDate ? `, Ngày HĐ ${fmtDate(r.invoiceDate)}` : ""}${r.invoiceLink ? ", Link HĐ" : ""} khỏi ${r.sheetNames.length > 1 ? `${r.sheetNames.length} sheet (${r.sheetNames.join(", ")})` : `sheet ${r.sheetNames[0] || ""}`}. Sau đó chọn lại sheet ở "Chia HĐ" rồi nhập số HĐ mới.${thu}`,
+      { danger: true, confirmText: "Gỡ số HĐ" },
+    );
+    if (!ok) return;
+    try {
+      await api.lamLaiHoaDon(r.q.id, r.sheetId);
+      toast(`Đã gỡ số HĐ ${r.invoiceNo}`, "success");
+      load();
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
   };
 
@@ -315,9 +341,7 @@ export function InvoicesPage({ me }: { me: Me }) {
   // Nhóm SHEET ĐỂ SAU (chưa xuất — kế toán còn phải xuất) / KHÔNG XUẤT (mờ, bật bằng ô tích). Chỉ áp ô tìm kiếm + CTy:
   // các bộ lọc còn lại (số HĐ, ngày HĐ, thu tiền) là của hóa đơn, sheet chưa xuất không có.
   const heldTable = (hold: "later" | "skip") => {
-    const ds = held.filter((h) => h.hold === hold
-      && (!cty || defaultCty(h.q) === cty)
-      && smartTextMatch(q, [h.q.customerName, h.q.customerCode, h.q.title, h.code, h.name, h.amount, fmtMoney(h.amount)]));
+    const ds = heldLoc(hold);
     if (!ds.length) return null;
     const tieuDe = hold === "later" ? "Sheet để sau — chưa xuất hóa đơn" : "Sheet không xuất hóa đơn";
     return (
@@ -401,7 +425,7 @@ export function InvoicesPage({ me }: { me: Me }) {
       ) : err && !data ? null : (   /* lỗi tải mà CHƯA có dữ liệu → chỉ hiện banner lỗi, không hiện stat 0 gây hiểu nhầm */
         <>
           <div className="stat-row">
-            <Stat label="Tổng số tiền (VAT)" value={fmtMoney(sumAmount)} />
+            <Stat label="Tổng số tiền (VAT)" value={fmtMoney(sumAmount)} title={deSauTien ? `Gồm ${fmtMoney(deSauTien)} của sheet Để sau (chưa xuất HĐ)` : undefined} />
             <Stat label="Đã thu" value={fmtMoney(collected)} tone="ok" active={collection === "paid"} onClick={() => setCollection((v) => v === "paid" ? "" : "paid")} title="Bấm để lọc hóa đơn đã thu" />
             <Stat label="Chưa thu" value={fmtMoney(sumAmount - collected)} tone={sumAmount - collected > 0 ? "danger" : undefined} active={collection === "unpaid"} onClick={() => setCollection((v) => v === "unpaid" ? "" : "unpaid")} title="Bấm để lọc hóa đơn chưa thu" />
             <Stat label="Nợ quá hạn" value={overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0"} tone={overdue.length ? "danger" : "ok"} active={collection === "overdue"} onClick={() => setCollection((v) => v === "overdue" ? "" : "overdue")} title="Bấm để lọc nợ quá hạn" />
@@ -445,6 +469,10 @@ export function InvoicesPage({ me }: { me: Me }) {
                             {canEdit && (r.q.sheets?.length || 0) > 1 && (
                               <button type="button" className="btn btn-xs btn-ghost inv-chia-nut" title="Gom / tách sheet thành hóa đơn, Để sau, Không xuất"
                                       aria-label={`Chia hóa đơn — ${r.code}`} onClick={() => setChiaQ(r.q)}>Chia HĐ</button>
+                            )}
+                            {canEdit && r.invoiceNo && (
+                              <button type="button" className="btn btn-xs btn-ghost inv-chia-nut" title="Gỡ số HĐ để chọn lại sheet và làm lại hóa đơn"
+                                      aria-label={`Làm lại hóa đơn — ${r.code}`} onClick={() => void lamLai(r)}>Làm lại HĐ</button>
                             )}
                             {r.sheetNames.length > 1 && <div className="muted inv-chia-sheets">{r.sheetNames.length} sheet</div>}
                           </td>
