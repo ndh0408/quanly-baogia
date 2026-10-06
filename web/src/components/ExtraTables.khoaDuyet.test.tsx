@@ -7,7 +7,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("../lib/venueCatalog")>()), loadCatalog: () => Promise.resolve({ entries: [], venues: [] }) }));
-vi.mock("../lib/ui", async (goc) => ({ ...(await goc<typeof import("../lib/ui")>()), toast: () => {}, confirmModal: async () => true }));
+const toastGoi: string[] = [];
+vi.mock("../lib/ui", async (goc) => ({ ...(await goc<typeof import("../lib/ui")>()), toast: (m: string) => { toastGoi.push(m); }, confirmModal: async () => true }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { ExtraTables, type ExtraTable } from "./ExtraTables";
@@ -17,7 +18,7 @@ const MAU: EditorTemplate[] = [{ id: 1, code: "gn", name: "GN", companyId: 1, la
 const hang = (o: Record<string, unknown>) => ({ kind: "item", name: "x", unit: "bộ", quantity: 1, unitPrice: 1000, notes: "", ...o });
 
 let thung: HTMLDivElement, goc: Root;
-beforeEach(() => { thung = document.createElement("div"); document.body.appendChild(thung); goc = createRoot(thung); });
+beforeEach(() => { toastGoi.length = 0; thung = document.createElement("div"); document.body.appendChild(thung); goc = createRoot(thung); });
 afterEach(() => { act(() => goc.unmount()); thung.remove(); document.body.innerHTML = ""; });
 
 const dong = (i: number) => thung.querySelector(`table.excel-table tr[data-row="${i}"]`) as HTMLTableRowElement;
@@ -55,5 +56,33 @@ describe("ExtraTables — hàng đã duyệt bị khoá", () => {
     expect(dong(0).querySelector<HTMLSelectElement>('select[name="chungTu"]')!.disabled).toBe(false);
     expect(dong(0).querySelector<HTMLInputElement>('input[name="luuKho"]')!.disabled).toBe(false);
     expect(dong(0).querySelector<HTMLInputElement>('input[name="unitPrice"]')!.disabled).toBe(true);
+  });
+});
+
+// Đường sửa NHIỀU Ô (dán, kéo điền, cắt, Ctrl+Z) không đi qua ô đã tắt mà ghi thẳng vào model rồi báo đổi. Hàng đã duyệt
+// phải được HOÀN LẠI ngay ở lần báo đổi đó (cùng cơ chế với bảng HN — lib/giuHangKhoa), kèm toast; bỏ duyệt rồi thì thôi.
+describe("ExtraTables — sửa lọt vào hàng đã duyệt bị hoàn lại ngay", () => {
+  const baoDoi = () => act(() => { dong(1).querySelector<HTMLInputElement>('input[name="luuKho"]')!.click(); });
+  it("ghi đè giá + xoá hàng đã duyệt → hoàn lại (chèn lại đúng chỗ) + toast", () => {
+    const sheet = dung(false);
+    const items = sheet.extraTables[0].items as unknown as Record<string, unknown>[];
+    items[0].unitPrice = 999_999;          // như dán / kéo điền đè lên
+    baoDoi();
+    expect(items[0].unitPrice).toBe(1000);
+    expect(toastGoi.some((m) => /đã duyệt bị khoá/.test(m))).toBe(true);
+    items.splice(0, 1);                    // như cắt / Ctrl+Z làm mất hàng
+    // Báo đổi qua ô tên sheet (DOM của lưới còn chỉ số hàng cũ — bấm ô trong lưới lúc này là chạm hàng không còn).
+    act(() => { const o = thung.querySelector<HTMLInputElement>('input[name="tenSheet"]')!; o.value = "HCM"; o.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(items[0]).toMatchObject({ rid: "d", name: "Đã duyệt", unitPrice: 1000, approved: true });
+    expect(dong(0).querySelector<HTMLInputElement>('input[name="unitPrice"]')!.disabled, "lưới vẽ lại từ model đã hoàn").toBe(true);
+  });
+  it("người duyệt BỎ tích trước → sửa / xoá sau đó KHÔNG bị hoàn", () => {
+    const sheet = dung(false);
+    const items = sheet.extraTables[0].items as unknown as Record<string, unknown>[];
+    act(() => { dong(0).querySelector<HTMLInputElement>('input[name="approved"]')!.click(); });
+    items[0].unitPrice = 5000;
+    baoDoi();
+    expect(items[0].unitPrice).toBe(5000);
+    expect(toastGoi.some((m) => /bị khoá/.test(m))).toBe(false);
   });
 });

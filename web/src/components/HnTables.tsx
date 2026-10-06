@@ -8,6 +8,7 @@ import { extraTableSum, removeTableFromList, loiXoaBangDaChi, type ExtraTable } 
 import { KhoiSheet } from "./KhoiSheet";
 import type { DaChiTheoRid } from "../lib/daChiHang";
 import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
+import { useGiuHangKhoa } from "../lib/giuHangKhoa";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
 //
@@ -68,10 +69,6 @@ export function gopTrangThaiHn(dich: HnTable[], nguon: unknown) {
     if (m) for (const k of ["trangThaiDuyet", "approved", "approvedAt", "approvedBy", "lyDoTra"]) it[k] = m[k];
   }
 }
-/** Trường của hàng mà khoá giữ nguyên (nội dung + trạng thái). `boNoiBo`: người quản lý HN sửa được NS · Chứng từ · Lưu kho. */
-const TRUONG_KHOA = ["kind", "label", "name", "detail", "unit", "quantity", "quantityExact", "unitPrice", "days", "notes", "formulas",
-  "trangThaiDuyet", "approved", "approvedAt", "approvedBy", "lyDoTra"];
-const TRUONG_NOI_BO = ["ns", "luuKho", "chungTu"];
 
 /** Mẫu cột của một bảng HN: `templateId` của bảng, thiếu thì mẫu đầu của công ty (không có thì mẫu đầu
  *  danh sách). MỘT luật cho lưới, tổng và đường Lưu (QuoteEditor / AccountHnView dọn `days` theo nó — L64). */
@@ -116,48 +113,14 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
   // ── GIỮ HÀNG KHOÁ ─────────────────────────────────────────────────────────────────────────────────
-  // Ô của hàng khoá đã tắt trong lưới (GridTable `khoaHang`), nhưng dán nhiều ô / kéo điền / cắt / Ctrl+Z vẫn chạm được
-  // model. Chụp nội dung các hàng khoá (theo rid) ở mỗi mốc đồng bộ với máy chủ (mảng mới, hoặc `dongBo` đổi), rồi sau
-  // MỖI lần lưới báo đổi thì trả hàng khoá về đúng bản chụp — kể cả hàng bị xoá (chèn lại đúng chỗ). Máy chủ vẫn chặn
-  // (409) nếu có đường nào lọt.
-  const [vKhoa, setVKhoa] = useState(0);
-  const truongKhoa = moCotNoiBo ? TRUONG_KHOA : [...TRUONG_KHOA, ...TRUONG_NOI_BO];
-  const khoaRef = useRef<{ nguon: unknown; dongBo: unknown; ds: { rid: string; t: HnTable; idx: number; goc: Record<string, unknown> }[] } | null>(null);
-  if (!khoaRef.current || khoaRef.current.nguon !== tables || khoaRef.current.dongBo !== dongBo) {
-    const ds: { rid: string; t: HnTable; idx: number; goc: Record<string, unknown> }[] = [];
-    for (const x of tables) (x.items || []).forEach((it, idx) => {
-      const r = it as unknown as Record<string, unknown>;
-      if (typeof r.rid === "string" && hangHnBiKhoa(it as HangHn, cheDo, !!canApprove)) ds.push({ rid: r.rid, t: x, idx, goc: JSON.parse(JSON.stringify(r)) });
-    });
-    khoaRef.current = { nguon: tables, dongBo, ds };
-  }
-  const giuHangKhoa = (): boolean => {
-    let vi = false;
-    for (const k of khoaRef.current?.ds ?? []) {
-      if (!tables.includes(k.t)) continue;   // bảng có hàng khoá không xoá được (xoaBang chặn)
-      const items = k.t.items as unknown as Record<string, unknown>[];
-      const it = items.find((x) => x.rid === k.rid);
-      if (!it) {
-        const ban = JSON.parse(JSON.stringify(k.goc)) as Record<string, unknown>; ban._k = nextK();
-        items.splice(Math.min(k.idx, items.length), 0, ban); vi = true; continue;
-      }
-      for (const f of truongKhoa) {
-        if (JSON.stringify(it[f] ?? null) !== JSON.stringify(k.goc[f] ?? null)) {
-          if (k.goc[f] === undefined) delete it[f]; else it[f] = JSON.parse(JSON.stringify(k.goc[f]));
-          vi = true;
-        }
-      }
-    }
-    return vi;
-  };
+  // Dán nhiều ô / kéo điền / cắt / Ctrl+Z đè lên hàng khoá → hoàn lại ngay (lib/giuHangKhoa — dùng chung với Chi phí HCM).
+  const { phien: vKhoa, giu: giuHangKhoa } = useGiuHangKhoa({
+    bangs: tables, dongBo, moCotNoiBo,
+    khoa: (it) => hangHnBiKhoa(it as HangHn, cheDo, !!canApprove),
+    thongBao: "Hàng đã duyệt / đã gửi duyệt bị khoá — phần sửa vào hàng đó đã được hoàn lại.",
+  });
   const danhDau = () => { (tables as unknown as CoBan)._hnBan = true; onMarkDirty(); };
-  const onChange = () => {
-    if (giuHangKhoa()) {
-      setVKhoa((v) => v + 1);   // vẽ lại lưới từ model đã trả về
-      toast("Hàng đã duyệt / đã gửi duyệt bị khoá — phần sửa vào hàng đó đã được hoàn lại.", "error");
-    }
-    danhDau(); redraw();
-  };
+  const onChange = () => { giuHangKhoa(); danhDau(); redraw(); };   // giữ hàng khoá TRƯỚC khi đánh dấu / vẽ lại
   const khoa = (it: HangHn) => hangHnBiKhoa(it, cheDo, !!canApprove);
   const bangCoHangKhoa = (x: HnTable | null) => !!x && (x.items || []).some((it) => khoa(it as HangHn));
   const [active, setActive0] = useState(0);
