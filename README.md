@@ -11,7 +11,7 @@ comes out of it.
 
 ![Quote editor](editor.png)
 
-**30 Prisma models · 142 HTTP endpoints · 361 test files**
+**31 Prisma models · 145 HTTP endpoints · 366 test files**
 
 <sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
 `node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.
@@ -65,7 +65,7 @@ The parts that took the actual work:
 | Layer | Technology |
 |---|---|
 | API | Node.js 24 · **TypeScript 6** · Express 4 · Zod 4 validation |
-| Data | PostgreSQL · **Prisma 7** (30 models) · Redis (ioredis) |
+| Data | PostgreSQL · **Prisma 7** (31 models) · Redis (ioredis) |
 | Auth | Cookie sessions + JWT access/refresh · bcrypt · TOTP 2FA (speakeasy) · role + per-user permissions |
 | Realtime | Server-Sent Events ([`src/sse.ts`](src/sse.ts)) with a Redis Pub/Sub backplane |
 | Background work | BullMQ workers on Redis |
@@ -100,6 +100,15 @@ The same app grew two more modules the business needed:
   the full grid — add/rename/delete sheets, paste from Excel, import a file,
   formulas — without ever seeing how many sheets the owner has or what they are
   called. Customer details are inherited, never re-entered.
+- **Notes on the quotation list** — each row has a free-text note plus one of five
+  colours (Zalo-style picker), shared by everyone who can see that row. It lives in
+  its own table (`QuoteListNote`), never on `Quote`: writing a note must not bump
+  `Quote.updatedAt`, or it would trip the optimistic lock of whoever is editing.
+- **Output vs input invoices** — *Hóa đơn đầu ra* (invoices issued to customers,
+  entered by accounting per closed-quote sheet) and *Hóa đơn đầu vào*: a read-only
+  ledger of every internal-cost row that has been **approved** (HCM cost / customer
+  fees row by row, Hà Nội pricing once the whole part is approved) — each one is a
+  purchase invoice accounting has to chase.
 
 Quotation lifecycle is intentionally not an internal approval chain — the only
 approval that matters is the customer's: `draft → converted` (they agreed) or

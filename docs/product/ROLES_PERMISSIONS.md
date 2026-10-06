@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 142 endpoint
+# Ma trận phân quyền — toàn bộ 145 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -59,14 +59,16 @@ Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`
 > Giới hạn tần suất: `/login` + `/token` 10 lần/15 phút mỗi IP (`skipSuccessfulRequests`); `/forgot-password` 5/15 phút.
 > Chống dò tài khoản: bcrypt luôn chạy với dummy hash; `/forgot-password` trả 200 **trước** khi làm việc nền.
 
-## `/api/quotes` — 26 endpoint
+## `/api/quotes` — 32 endpoint
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
-| GET | `/` | ✓ | `quote:read:*` | all/own | `quoteScopeWhereOrThrow` | — | $ PII | AUTH-002 | **VÁ** |
+| GET | `/` | ✓ | `quote:read:*` | all/own | `quoteScopeWhereOrThrow` | bộ lọc (trạng thái nhiều · người tạo · công ty · ngày · tổng tiền · ghi chú/màu) **AND** với phạm vi quyền, không bao giờ mở rộng nó · tìm nhiều từ không dấu · sắp xếp 10 cột · **view lược** (account HN, tài khoản chi phí) giữ cách tìm cũ, bỏ mọi bộ lọc chạm trường họ không thấy (tổng tiền, ghi chú, người tạo, khách danh mục) và chỉ sắp theo 4 cột cũ | $ PII | AUTH-002 · `ql-loc-danh-sach` | **VÁ** |
+| GET | `/facets` | ✓ | `quote:read:*` | all/own | `quoteScopeWhereOrThrow` — **view bị lược 403** (account HN, tài khoản chi phí: đếm theo người tạo / ghi chú là cách dò thứ họ không được thấy) | — | số đếm cho bộ lọc Danh sách báo giá: mỗi nhóm (trạng thái, người tạo, công ty, ghi chú/màu) đếm theo mọi bộ lọc KHÁC của nó, chỉ trong phạm vi quyền của người xem | PII | `ql-loc-danh-sach` | OK |
 | GET | `/next-number` | ✓ | `quote:create` | — | — | — | — | AUTHZ-007 | **VÁ** |
 | GET | `/assignable-users` | ✓ | `quote:create` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/projects` | ✓ | `user:manage`\|`invoice:read`\|`invoice:page` **hoặc** `quote:read:own` | all/own | — | chỉ `converted` | $ PII | AUTH-005 | **VÁ** |
+| GET | `/input-invoices` | ✓ | `invoice:page` | global | — | mọi hàng bảng nội bộ **đã duyệt**: Chi phí HCM / Phí KH theo hàng (`item.approved`), Báo giá HN khi `hnStatus = approved`; báo giá xoá mềm bị loại · bản cũ của bảng HN còn trong trang bị bỏ (đếm hai lần) · **không** mang `paidProof` · chỉ đọc, không chạm `Quote.updatedAt` | $ PII | `hoa-don-dau-vao` | OK |
 | POST | `/sheets/:sheetId/sign` | ✓ | `quote:sign:all`\|`:own` | all/own | qua `sheet.quote.createdById` | chỉ `converted`, chưa xoá | — | — | OK |
 | POST | `/sheets/:sheetId/customer-decision` | ✓ | `quote:send` | own | `canOnQuote(update)` | chưa xoá · đã xuất HĐ → 409 | — | — | OK |
 | PUT | `/sheets/:sheetId/invoice` | ✓ | `invoice:read`\|`page` vào; `invoice:edit`/`pay` **theo từng field** | global | qua sheet→quote | chỉ `converted` | $ | — | OK |
@@ -76,8 +78,8 @@ Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`
 | GET | `/:id/hn/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` | ghi audit `quote.internal.proof-view` (cờ `hn`) | **PII** | `quote-hn-cap-bao-gia` | OK |
 | GET | `/hn/accounts` | ✓ | `quote:hn:manage` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/:id` | ✓ | `quote:read:*` | all/own | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
-| POST | `/` | ✓ | `quote:create` | — | route **+** service | — | — | AUTH-001 | **VÁ** |
-| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` | khoá khi đã xuất hoá đơn (`daXuatHoaDon`); `converted`/`lost` sửa được bởi người có `quote:send` + khoá lạc quan | $ | `quotes.workflow` | OK |
+| POST | `/` | ✓ | `quote:create` | — | route **+** service · khách (danh mục) gắn vào phải tồn tại và `customer:read` được (400 / 403) | — | — | AUTH-001 · `ql-doi-khach-hang` | **VÁ** |
+| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` · **đổi khách hàng (danh mục)**: khách mới phải tồn tại và người đổi `customer:read` được (400 / 403) — CHỈ kiểm khi giá trị ĐỔI, nên lần Lưu thường mang lại `customerId` cũ không bị chặn; ghi `khachHang` (mã + tên) trước/sau vào audit `quote.update` | khoá khi đã xuất hoá đơn (`daXuatHoaDon`); `converted`/`lost` sửa được bởi người có `quote:send` + khoá lạc quan | $ | `quotes.workflow` · `ql-doi-khach-hang` | OK |
 | POST | `/:id/hn/assign` | ✓ | `quote:hn:manage` | own | `canOnQuote(update)` | — | — | — | OK |
 | PUT | `/:id/hn` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chặn khi đã gửi/duyệt | $ | — | OK |
 | POST | `/:id/hn/submit` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chỉ `assigned`/`rejected` | — | — | OK |
@@ -89,6 +91,7 @@ Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`
 | GET | `/:id/versions/:a/diff/:b` | ✓ | `quote:read:*` | all/own | `loadAuthorizedQuote` | — | $ | — | OK |
 | GET | `/:id/approvals` | ✓ | `quote:read:*` | all/own | `loadAuthorizedQuote` | — | — | — | OK |
 | PUT | `/:id/members` | ✓ | người tạo **hoặc** `quote:update:all` | own | so `createdById` | nhận `members[{userId,scopes}]` (client cũ gửi `memberIds` = đủ 4 vùng) | PII | — | OK |
+| PUT | `/:id/list-note` | ✓ | `quote:update:*` (chủ / thành viên có vùng / `update:all`) | all/own | `loadAuthorizedQuote(update)` — **view bị lược 403** (account HN, tài khoản chi phí), thành viên chỉ-xem 403 | bảng riêng `QuoteListNote` nên **KHÔNG** bump `Quote.updatedAt` (không đá văng khoá lạc quan của người đang soạn), không sinh `QuoteVersion`, **không khoá** khi đã xuất hoá đơn · báo giá xoá mềm → 404 · ghi audit `quote.list-note` | — | `ql-ghi-chu-danh-sach` | OK |
 | DELETE | `/:id` | ✓ | `quote:delete:*` | all/own | `canOnQuote(delete)` | **`converted` không ai xoá được** | — | `quotes.workflow` | OK |
 | POST | `/:id/duplicate` | ✓ | `quote:create` **và** đọc được nguồn | own | `canOnQuote(read)` | **account phụ 403** (bản sao sẽ đứng tên người bấm + mang mã dự án của họ) | $ | — | OK |
 
@@ -268,7 +271,7 @@ oracle phân loại tài khoản) · `/api/auth/change-password` (xoay định d
 | **manager** (Account) | own+gửi | all | đọc+giá vốn | own | all | dự án own | nhật ký |
 | **account_hn** | **chỉ bảng HN được giao** | **403** | **403** | 403 | 403 | 403 | 403 |
 | **hr** | **403** | **403** | **403** | đọc all | 403 | 403 | 403 |
-| **accountant** | **403** | **403** | **403** | đọc all + đánh dấu TT | 403 | trang Hoá đơn | 403 |
+| **accountant** | **403** | **403** | **403** | đọc all + đánh dấu TT | 403 | trang Hóa đơn đầu ra (nhập) + Hóa đơn đầu vào (xem) | 403 |
 | **tài khoản bị gỡ sạch quyền** | **403** | **403** | **403** | **403** | **403** | **403** | **403** |
 | **account phụ** (được thêm vào 1 báo giá) | xem đủ · sửa đúng vùng được tick | theo quyền riêng | theo quyền riêng | theo quyền riêng | theo quyền riêng | **403** (lọc `createdById`) | theo quyền riêng |
 

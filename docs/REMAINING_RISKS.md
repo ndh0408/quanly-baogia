@@ -60,7 +60,7 @@ không ai đi sửa nhầm:
 
 * `hanoi-tables-unprotected-on-main-save` — cần một tác nhân có `quote:update` mà
   **không** có `quote:hn:fill`; nhưng ai có `quote:hn:fill` đã bị chặn 403 ở
-  `PUT /api/quotes/:id` (`src/routes/quotes.routes.ts:223`). Người chủ báo giá xoá
+  `PUT /api/quotes/:id` (`src/routes/quotes.routes.ts`, nhánh `can(req.session, P.QUOTE_HN_FILL)` của route `router.put("/:id"`). Người chủ báo giá xoá
   một sheet là thao tác họ vốn được phép, không phải phá vòng duyệt.
 * `logout-leaves-refresh-tokens-alive` — đã đo bằng request thật: `POST
   /api/auth/logout` chỉ với `Authorization: Bearer` trả **200** và

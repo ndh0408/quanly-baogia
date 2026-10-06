@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, isPreviewMode, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite } from "../lib/api";
+import { api, ApiError, isPreviewMode, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite, type Customer } from "../lib/api";
 import { toast, confirmModal, promptModal, useEscClose, modalChotBaoGia, toLocalInputDate } from "../lib/ui";
 import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
@@ -9,6 +9,7 @@ import { ExtraTables } from "../components/ExtraTables";
 import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
+import { CustomerPicker } from "../components/CustomerPicker";
 import { sapXepTheoFile } from "../lib/importApply";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuyenBanNhapCu } from "../lib/localDraft";
@@ -354,6 +355,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  // ĐỔI KHÁCH HÀNG (danh mục) ngay trong báo giá: hộp chọn + khoá dựng lại các ô "Bên nhận" (chúng UNCONTROLLED — defaultValue
+  // chỉ đọc lúc dựng, nên đổi `q.toCompany…` bằng mã mà không đổi `key` thì màn hình vẫn hiện khách CŨ). Hook ở ĐÂY, trước hai
+  // lệnh return sớm (xem ghi chú ở `dangTai`).
+  const [khOpen, setKhOpen] = useState(false);
+  const [khKey, setKhKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [othersEditing, setOthersEditing] = useState<{ id: number; name: string }[]>([]); // presence: người KHÁC đang mở báo giá này
@@ -782,6 +788,24 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const truocNuaTab = (e: { clientX: number; currentTarget: HTMLElement }) => { const r = e.currentTarget.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; };
   const keoDuoc = suaMain && sheets.length > 1 && !saving;
 
+  // ── ĐỔI KHÁCH HÀNG (danh mục) ─────────────────────────────────────────────────
+  // Chủ repo 2026-09-30: "trong báo giá cho chọn đổi khách hàng luôn nhé". Đổi khách là đổi CẢ khối "Bên nhận": tên, người liên
+  // hệ, email, SĐT, địa chỉ lấy theo khách MỚI — kể cả ô mà khách mới để trống (để TRỐNG, không giữ email/SĐT của khách CŨ dưới tên
+  // khách mới: báo giá gửi đi mang email của công ty khác nặng hơn nhiều một ô trống). Chưa lưu cho tới khi bấm Lưu, và các ô vẫn
+  // sửa tay được ngay sau đó. Chọn lại ĐÚNG khách đang gắn thì không đổi gì (khỏi đè phần đã sửa tay).
+  const chonKhach = (c: Customer) => {
+    setKhOpen(false);
+    if (dangLuuHoacDaDoi()) return;   // hộp chọn mở lúc PUT đang bay / editor đã gỡ: ghi vào `q` cũ là mất im lặng (app#15)
+    if (Number(q.customerId) === c.id) { toast("Báo giá đã thuộc khách hàng này", "info"); return; }
+    const chu = (v: unknown) => (typeof v === "string" ? v : "");
+    const d = q as Record<string, unknown>;
+    d.customerId = c.id; d.customerCode = c.code; d.customerName = c.name; d.customer = { code: c.code, name: c.name };
+    d.toCompany = c.name || ""; d.toContact = chu(c.contactName); d.toEmail = chu(c.email); d.toPhone = chu(c.phone); d.toAddress = chu(c.address);
+    setKhKey((k) => k + 1);
+    mark(); redrawMeta();
+    toast(`Đã đổi sang khách hàng ${c.code} — ${c.name}. Thông tin bên nhận đã điền theo khách mới; kiểm tra rồi bấm Lưu.`, "success");
+  };
+
   // ── save ───────────────────────────────────────────────────────────────────
   // Trả `true` CHỈ khi bản đang soạn đã nằm trên máy chủ VÀ editor vẫn đứng ở báo giá này. Mọi
   // đường khác trả `false`: đang lưu dở, lỗi, 409 (kể cả khi người dùng bấm Hủy ở hộp xung đột — lúc
@@ -1208,11 +1232,25 @@ Lý do (không bắt buộc):`,
         <div className="meta-2col">
           <fieldset className="meta-col">
             <legend>Bên nhận · Khách hàng</legend>
-            <label>Tên khách hàng<input defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
-            <label>Người liên hệ<input defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Email<input type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ<input defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
+            {/* Khách hàng TRONG DANH MỤC đang gắn với báo giá (mã KH) — đổi được ngay tại đây (chủ repo 2026-09-30). Cùng cổng
+                `suaMain` với mọi ô của khối này: người chỉ được giao phần bảng nội bộ không đổi được khách (máy chủ cũng gỡ
+                `customerId` khỏi payload của họ — FIELD_VUNG_MAIN). */}
+            <div className="kh-chon">
+              <span className="kh-chon-nhan">Mã khách hàng <span className="muted" style={{ fontSize: 11 }}>(danh mục)</span></span>
+              <div className="kh-chon-hang">
+                <div className={`kh-chon-gt${q.customerId ? "" : " chua"}`} title={q.customerId ? `${String(q.customerCode || "")} ${String(q.customerName || "")}`.trim() : undefined}>
+                  {q.customerId
+                    ? <><strong>{String(q.customerCode || `#${q.customerId}`)}</strong>{q.customerName ? <span> — {String(q.customerName)}</span> : null}</>
+                    : "Chưa gắn khách hàng trong danh mục"}
+                </div>
+                {suaMain && <button type="button" className="btn btn-sm" disabled={saving} onClick={() => setKhOpen(true)}>{q.customerId ? "Đổi khách hàng" : "Chọn khách hàng"}</button>}
+              </div>
+            </div>
+            <label>Tên khách hàng<input key={`tc${khKey}`} defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
+            <label>Người liên hệ<input key={`tl${khKey}`} defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Email<input key={`te${khKey}`} type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input key={`tp${khKey}`} defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ<input key={`ta${khKey}`} defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
           </fieldset>
           <fieldset className="meta-col">
             <legend>Bên gửi · Công ty báo giá</legend>
@@ -1243,10 +1281,12 @@ Lý do (không bắt buộc):`,
             disabled={!suaMain || saving} title="Dùng đặt tên file tải về: MãKH_TiêuĐềRútGọn_MMDD.xlsx"
             onInput={(e) => setQ("shortTitle", (e.target as HTMLInputElement).value)} />
         </div>
-        {/* MÃ SẢN XUẤT CỦA SHEET ĐANG MỞ — đúng chuỗi in ra tab Excel tương ứng và đúng mã bên
-            trang Hoá đơn. Số GN vẫn hiện mờ bên dưới: nó mới là khoá tra cứu thật của hệ thống
-            (phân quyền tải file, webhook, nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
-        <div className="quote-no">(Số: {M.sheetCode(q, (q as { _danhLaiMaSheet?: boolean })._danhLaiMaSheet ? ai + 1 : M.soMa(activeSheet, ai), sheets.length) || q.quoteNumber || ""})</div>
+        {/* Dòng "(Số: …_01)" — mã sản xuất của TỪNG sheet — đã BỎ khỏi màn soạn theo yêu cầu chủ repo
+            2026-09-30 ("bỏ cái id từng sheet đi không cần nữa"). Chỉ bỏ chỗ HIỆN: mã vẫn do máy chủ
+            cấp và đánh lại theo vị trí (cờ danhLaiMaSheet), vẫn in trên tab Excel và vẫn là cột
+            "Mã sản xuất" của trang Hoá đơn / Quản lý dự án — nơi mỗi dòng chính là một sheet.
+            Số GN thì giữ (mờ): nó là khoá tra cứu thật của hệ thống (phân quyền tải file, webhook,
+            nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
         {q.quoteNumber && <div className="quote-no-gn">{q.quoteNumber}</div>}
         <textarea className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!suaMain || saving} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
 
@@ -1573,6 +1613,7 @@ Lý do (không bắt buộc):`,
       )}
       {versions && <VersionsModal quoteId={q.id} versions={versions} onClose={() => setVersions(null)} />}
       {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={q.members || []} onClose={() => setMembersOpen(false)} onSaved={(ms) => { q.members = ms; setMembersOpen(false); redraw(); }} />}
+      {khOpen && <CustomerPicker chonId={q.customerId != null ? Number(q.customerId) : null} onClose={() => setKhOpen(false)} onPick={chonKhach} />}
     </div>
   );
 }
@@ -1626,7 +1667,7 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
   );
 }
 
-const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng", hnTables: "Bảng Báo Giá Hà Nội", hnStatus: "Trạng thái phần Hà Nội" };
+const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", customerId: "Khách hàng (danh mục — mã nội bộ)", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng", hnTables: "Bảng Báo Giá Hà Nội", hnStatus: "Trạng thái phần Hà Nội" };
 const diffVal = (v: unknown) => { if (v == null) return "—"; if (typeof v === "object") { const s = JSON.stringify(v); return s.length > 80 ? s.slice(0, 80) + "…" : s; } return String(v); };
 function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versions: QuoteVersion[]; onClose: () => void }) {
   useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app

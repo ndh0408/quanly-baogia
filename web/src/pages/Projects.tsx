@@ -100,7 +100,7 @@ export function ProjectsPage({ me }: { me: Me }) {
   return (
     <div>
       <h1>Quản lý dự án</h1>
-      <p className="muted">Dự án = báo giá <b>đã chốt</b>. {!isAdmin && <b>Bạn chỉ xem được dự án do mình tạo. </b>}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Dữ liệu hóa đơn (Số HĐ, PO, ngày, chứng từ…) là <b>tham chiếu từ trang Hóa đơn</b> — kế toán nhập bên đó. Bấm vào dòng để mở báo giá.</p>
+      <p className="muted">Dự án = báo giá <b>đã chốt</b>. {!isAdmin && <b>Bạn chỉ xem được dự án do mình tạo. </b>}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Dữ liệu hóa đơn (Số HĐ, PO, ngày, chứng từ…) là <b>tham chiếu từ trang Hóa đơn đầu ra</b> — kế toán nhập bên đó. Bấm vào dòng để mở báo giá.</p>
 
       <div className="toolbar" style={{ margin: "4px 0 6px" }}>
         <input className="grow" type="search" placeholder="Tìm: phim, mã sản xuất, khách hàng, account…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm kiếm dự án" />

@@ -17,13 +17,14 @@ erDiagram
     Quote ||--o{ QuoteVersion : "lịch sử phiên bản"
     Quote ||--o{ Approval : "legacy, không còn ghi"
     Quote ||--o{ QuoteMember : "members"
+    Quote ||--o| QuoteListNote : "ghi chú + màu ở danh sách"
     User ||--o{ QuoteMember : "userId"
     QuoteTemplate ||--o{ QuoteSheet : "templateId"
     QuoteSheet ||--o{ QuoteItem : "items"
     Product |o--o{ QuoteItem : "productId, tuỳ chọn"
 ```
 
-Sáu điều mà sơ đồ **không** nói ra được, và đều quan trọng:
+Bảy điều mà sơ đồ **không** nói ra được, và đều quan trọng:
 
 * **`QuoteSheet.extraTables` là JSON, không phải bảng.** Bảng nội bộ theo trang
   (`category` là `"hcm"` / `"khach"`) sống trong một cột `Json?`. Đó là lý do mọi
@@ -45,6 +46,11 @@ Sáu điều mà sơ đồ **không** nói ra được, và đều quan trọng:
   **`scopes` rỗng = chỉ đọc**, không phải toàn quyền — đây là mặc-định-từ-chối,
   xem `src/permissions.ts`. Hàng chuyển từ bảng cũ được cấp **đủ bốn** phạm vi vì
   bản cũ không có khái niệm phạm vi, cấp thiếu là âm thầm tước quyền người đang dùng.
+* **`QuoteListNote` (ghi chú + màu ở dòng Danh sách báo giá) là bảng RIÊNG, không phải hai cột
+  trên `Quote`** — cố ý: `Quote.updatedAt` là mốc khoá lạc quan của màn soạn, ghi lên `Quote` làm mốc
+  nhảy và đá văng lần Lưu kế tiếp của người đang soạn. Một hàng cho mỗi báo giá (khoá chính
+  `quoteId`, xoá cứng báo giá thì hàng đi theo), tên người ghi được CHỤP (`updatedByName`, không FK).
+  Không có hàng = chưa có ghi chú; cả chữ lẫn màu rỗng thì hàng bị xoá.
 * **`QuoteItem.formulas` và `QuoteItem.images` cũng là JSON.** `formulas` là siêu
   dữ liệu của trình soạn (`{"unitPrice":"=2000+3000"}`), **không** dùng để tính
   tổng. `images` là mảng data-URL base64 — nặng, nên đường lưu cố ý không đọc nó.

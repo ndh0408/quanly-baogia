@@ -3,6 +3,10 @@
    RIÊNG của các trang React (bảng HR nhiều cột + sticky, màu nguồn cột, picker, toast React…).
    Token (--card/--line/--soft…) = CHÉP ĐÚNG giá trị app cũ (trùng --surface/--border của SPA). ===== */
 :root {
+  /* Hàng XÁM của Danh sách báo giá (xen kẽ với hàng trắng) + nền khi rê chuột lên hàng đó. Hover phải
+     đậm hơn hàng xám, không thì rê chuột lên hàng chẵn không thấy gì — xem styles.hangXenKe.test.ts. */
+  --row-alt: #f3f4f7;
+  --row-alt-hover: #e6e9ef;
   --gold: #f5b400;
   --gold-d: #e0a200;
   --gold-ink: #1f2510;
@@ -25,6 +29,8 @@
   --ring: rgba(245, 180, 0, 0.28);
 }
 [data-theme="dark"] {
+  --row-alt: #1b2130;
+  --row-alt-hover: #283044;
   --gold: #fbbf24;
   --gold-d: #d99e1f;
   --gold-ink: #1a1505;
@@ -1312,11 +1318,16 @@ textarea[aria-invalid="true"] {
 }
 
 /* ── Danh sách báo giá: nút thao tác — desktop ICON gọn 1 hàng; mobile ICON+CHỮ (thẻ React). ── */
+/* Ô của BẢNG phải giữ display:table-cell. Bản trước (cộng luật chung `.list-table .row-actions { display: flex }` của
+   public/style.css) biến ô thành hộp flex: ô thấp hơn hàng → vạch kẻ dưới hàng gãy bậc, cụm Excel/⋯ lệch lên đầu hàng (đo
+   2026-10-06 ở mọi cỡ ≥821px). Cùng độ ưu tiên (0,2,0) với luật chung nhưng nạp sau nên thắng. */
 .row-actions.qa-cell {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 5px;
-  align-items: center;
+  display: table-cell;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.row-actions.qa-cell > .qa-btn + .qa-btn {
+  margin-left: 5px;
 }
 .qa-btn {
   height: 32px;
@@ -1407,6 +1418,343 @@ textarea[aria-invalid="true"] {
   background: var(--danger-bg, #fdecea);
 }
 
+/* Danh sách báo giá: hàng TRẮNG / XÁM xen kẽ (chủ repo 2026-09-30). CHỈ `.ql-table` — `.list-table` dùng
+   chung ở 8 trang, tô lây là đè lên ô hồng "chưa điền" của Hoá đơn. Hover dùng luật riêng (0,4,2) để
+   thắng `.list-table tbody tr.qrow:hover` (0,3,2) của public/style.css và vẫn đậm hơn hàng xám. */
+.list-table.ql-table tbody tr:nth-child(even) {
+  background: var(--row-alt);
+}
+.list-table.ql-table tbody tr.qrow:hover {
+  background: var(--row-alt-hover);
+}
+
+/* ── Ô GHI CHÚ + 5 MÀU ở dòng Danh sách báo giá (chủ repo 2026-09-30: "chọn màu theo kiểu Zalo") ──────────────
+   Mỗi màu = ba biến: --qn-c (chấm đặc + chấm trong bảng chọn), --qn-bg (nền thẻ ghi chú), --qn-fg (chữ trên thẻ).
+   Đặt trên `.qn-c-<khoá>` để DÙNG CHUNG cho ô ghi chú (.qn) lẫn chấm của bảng chọn (.qn-swatch). Khoá khớp
+   src/quoteListNote.ts; độ tương phản và việc đủ ba biến ở cả hai chế độ do styles.ghiChuMau.test.ts giữ. */
+.qn-c-red {
+  --qn-c: #dc3c41;
+  --qn-bg: #fde8e8;
+  --qn-fg: #b42318;
+}
+.qn-c-orange {
+  --qn-c: #d97706;
+  --qn-bg: #ffedd5;
+  --qn-fg: #9a3412;
+}
+.qn-c-green {
+  --qn-c: #1f9d55;
+  --qn-bg: #dcfce7;
+  --qn-fg: #166534;
+}
+.qn-c-blue {
+  --qn-c: #2563eb;
+  --qn-bg: #dbeafe;
+  --qn-fg: #1e40af;
+}
+.qn-c-purple {
+  --qn-c: #7c3aed;
+  --qn-bg: #ede9fe;
+  --qn-fg: #5b21b6;
+}
+[data-theme="dark"] .qn-c-red {
+  --qn-c: #ef4444;
+  --qn-bg: #3a1c1f;
+  --qn-fg: #ffb4b4;
+}
+[data-theme="dark"] .qn-c-orange {
+  --qn-c: #d97706;
+  --qn-bg: #3b2412;
+  --qn-fg: #fdba74;
+}
+[data-theme="dark"] .qn-c-green {
+  --qn-c: #1f9d55;
+  --qn-bg: #15301f;
+  --qn-fg: #86efac;
+}
+[data-theme="dark"] .qn-c-blue {
+  --qn-c: #3b82f6;
+  --qn-bg: #15294a;
+  --qn-fg: #93c5fd;
+}
+[data-theme="dark"] .qn-c-purple {
+  --qn-c: #8b5cf6;
+  --qn-bg: #2a2050;
+  --qn-fg: #c4b5fd;
+}
+
+.ql-note-th,
+.ql-note-cell {
+  min-width: 140px;
+}
+.qn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+}
+/* Chấm màu: rỗng (viền) khi chưa chọn, đặc khi đã chọn. Là <button> khi sửa được, <span> khi chỉ đọc. */
+.qn-dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background: transparent;
+}
+button.qn-dot {
+  cursor: pointer;
+}
+button.qn-dot:hover {
+  border-color: var(--text-soft);
+}
+.qn.has-color .qn-dot {
+  background: var(--qn-c);
+  border-color: var(--qn-c);
+}
+.qn-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  text-align: left;
+}
+/* Chữ ghi chú cắt ở HAI dòng (đủ tên bản v2 / hẹn gọi lại) — KHÔNG để nowrap: một ghi chú 200 ký tự mà không
+   xuống dòng thì nới cột Ghi chú tới 300px và cả bảng theo (đo trên trình duyệt thật: cột 328px, bảng 1660px). */
+.qn-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+button.qn-text {
+  cursor: text;
+}
+button.qn-text:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+/* Thẻ màu CHỈ khi có chữ — chấm màu không chữ thì để chấm tự nói, đừng vẽ một cái thẻ rỗng. */
+.qn.has-color.has-text .qn-text {
+  background: var(--qn-bg);
+  color: var(--qn-fg);
+  font-weight: 600;
+}
+.qn-empty {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.ql-card-note {
+  margin: 2px 0 8px;
+}
+
+/* Khung xem TOÀN VĂN + sửa ghi chú (bấm vào chữ ghi chú) — portal + position:fixed để không bị bảng cắt. Ô trên bảng chỉ
+   đủ 2 dòng nên ghi chú dài bị cắt "…"; khung này cho đọc hết (chủ repo: "click vào thấy hết chứ"). */
+.qn-edit {
+  position: fixed;
+  z-index: 200;
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 16px));
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--card, #fff);
+  border: 1px solid var(--line-strong, #d4d8df);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+}
+.qn-edit:focus {
+  outline: none;
+}
+.qn-edit-head {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-soft);
+}
+.qn-area {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--field-bg);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+  resize: none;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.qn-doc {
+  max-height: 40vh;
+  overflow: auto;
+  padding: 2px 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.qn-edit-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 8px;
+}
+.qn-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.qn-count.is-max {
+  color: var(--danger);
+  font-weight: 700;
+}
+/* Người · ngày ghi đứng một HÀNG RIÊNG đầu chân khung. Bản trước chen cùng hàng với "95/200" + Hủy + Lưu trong khung 340px
+   nên luôn bị cắt ("Nguyễn Văn Admin · 30/…" — scrollWidth 192 > 148, đo 2026-10-06) mà tooltip cũng không có ngày. */
+.qn-who {
+  flex: 1 0 100%;
+  order: -1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.qn-edit-act {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Bảng chọn màu kiểu Zalo — portal + position:fixed (khỏi bị .list-table overflow:hidden cắt). */
+.qn-pop {
+  position: fixed;
+  z-index: 200;
+  box-sizing: border-box;
+  width: 232px;
+  padding: 10px 12px;
+  background: var(--card, #fff);
+  border: 1px solid var(--line-strong, #d4d8df);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+}
+.qn-swatches {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.qn-swatch {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--qn-c);
+  cursor: pointer;
+}
+.qn-swatch:hover {
+  filter: brightness(1.08);
+}
+.qn-swatch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+/* Đang chọn: vòng ngoài cùng màu + dấu ✓ — dấu ✓ là thứ báo trạng thái cho người kém phân biệt màu. */
+.qn-swatch.is-on {
+  box-shadow:
+    0 0 0 2px var(--card, #fff),
+    0 0 0 4px var(--qn-c);
+}
+.qn-swatch svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.qn-clear {
+  margin-top: 8px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+.qn-clear:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+
+/* Danh sách báo giá: thu hẹp đệm ngang 14 → 10px để thêm cột Ghi chú mà bảng ít phải cuộn ngang (12 cột × 8px ≈ 96px).
+   KHÔNG làm cột thao tác dính mép phải: bản 2026-09-30 làm vậy và nó ĐÈ lên ô ghi chú — chủ repo thấy ghi chú bị che,
+   chỉ hở ra một nửa chấm màu. Bảng tràn thì cuộn ngang như mọi bảng khác của app. */
+.ql-table th,
+.ql-table td {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+/* Màn laptop: 12 cột (kể cả Ghi chú) cần tới ~1180px ở cỡ chữ 14px, nên ở 1366px (khung bảng ~1049px) bảng tràn ~130px và cột Ghi chú
+   + nút thao tác nằm ngoài khung, phải cuộn ngang mới thấy. Thu đệm ngang 10 → 6px, chữ bảng 14 → 13px và cột Ghi chú 140 → 100px:
+   không ẩn cột nào, chỉ đặc hơn một chút. Chỉ từ 821px trở lên vì dưới đó bảng đã đổi sang dạng thẻ.
+   ĐO LẠI 2026-10-06 (Chromium thật, 8 báo giá mẫu): bản trước dừng vùng đặc ở 1500px → BƯỚC NHẢY: từ 1501px chữ 14px + đệm 10px +
+   ghi chú 140px đẩy bề rộng tối thiểu 1029 → 1179px, nên 1536/1600 (FHD 125%) tràn hơn cả 1440; và 1280×720 (FHD 150%) vẫn tràn 59px,
+   cụt luôn nút "⋯". Nay: vùng đặc tới 1700px; tiêu đề cột được XUỐNG 2 DÒNG (luật `th.sortable { white-space: nowrap }` của
+   public/style.css bắt chữ HOA "TRẠNG THÁI", "TỔNG (VNĐ)"… làm bề rộng tối thiểu của cả cột; mũi tên sắp xếp dính chữ cuối bằng dấu
+   cách KHÔNG NGẮT ở QuoteList.tsx nên không bao giờ rơi xuống dòng một mình); ≤1365px đệm thêm 1px mỗi bên (12 cột × 2px = 24px).
+   KHÔNG dùng `overflow-wrap: anywhere` cho cột chữ: đã thử — nó hạ bề rộng tối thiểu dưới cả từ dài nhất và bảng gãy chữ giữa từ
+   ("Accoun/t", "showro/om"), tệ hơn cuộn ngang. Kết quả: dữ liệu thật vừa khung từ 1280px trở lên (bài khoá luật:
+   styles.ghiChuMau.test.ts); dưới 1280px (máy tính bảng ngang) bảng vẫn cuộn ngang trong khung của nó. */
+@media (min-width: 821px) and (max-width: 1700px) {
+  .ql-table th,
+  .ql-table td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .ql-table td {
+    font-size: 13px;
+  }
+  .ql-table th.sortable {
+    white-space: normal;
+  }
+  .ql-note-th,
+  .ql-note-cell {
+    min-width: 100px;
+  }
+}
+@media (min-width: 821px) and (max-width: 1365px) {
+  .ql-table th,
+  .ql-table td {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+}
+/* Mã dự án (liên kết) trên hàng xám xen kẽ: màu --primary (#a16207) chỉ đạt 4,48:1 trên --row-alt và 4,04:1 khi rê chuột — dưới AA
+   4,5 ở chữ 13px. --primary-hover (#854d0e) đạt 6,2:1 / 5,6:1; ở chế độ tối nó là vàng sáng hơn nên càng rõ. */
+.list-table.ql-table td a {
+  color: var(--primary-hover);
+}
+
 /* Thẻ báo giá (mobile, React) — thay bảng rộng phải cuộn ngang. */
 .ql-cards {
   display: flex;
@@ -1474,8 +1822,11 @@ textarea[aria-invalid="true"] {
   .qa-label {
     display: inline;
   }
-  /* FIX: toolbar thành cột trên mobile → '.grow {flex:1 1 220px}' biến 220px thành CHIỀU CAO (ô tìm cao bất thường).
-     Ép flex tự nhiên → ô tìm cao bình thường, full-rộng. */
+}
+/* FIX: toolbar thành CỘT trên mobile → '.grow {flex:1 1 220px}' biến 220px thành CHIỀU CAO (ô tìm cao bất thường). Ép flex tự nhiên
+   → ô tìm cao bình thường, full-rộng. CHỈ ≤520px: public/style.css chỉ đổi .toolbar sang cột ở đó. Bản trước áp tới 820px nên ở
+   521–820px (thanh công cụ vẫn là HÀNG) ô tìm co về 196px, placeholder bị cắt, bên phải trống 162–453px (đo 2026-10-06). */
+@media (max-width: 520px) {
   .toolbar .grow {
     flex: 0 0 auto;
   }
@@ -1924,6 +2275,319 @@ textarea[aria-invalid="true"] {
     display: none;
   }
 }
+/* Điện thoại: public/style.css đổi MỌI .toolbar sang cột ở ≤520px, khi đó `flex: 1 1 145px` ở trên thành CHIỀU CAO 145px —
+   ô chọn / ô ngày cao vọt (đo ở Hóa đơn đầu ra và Danh sách báo giá). Hàng lọc giữ dạng HÀNG xuống dòng. */
+@media (max-width: 520px) {
+  .inv-filter-row.toolbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .inv-filter-row > select,
+  .inv-date-filter {
+    flex: 1 1 140px;
+    width: auto;
+  }
+}
+
+/* Danh sách báo giá — BỘ LỌC ĐẦY ĐỦ (components/BoLocBaoGia + ChonNhieu + BangNoi). Dùng lại khung .inv-filters và chip
+   .inv-quick-filters của trang Hóa đơn ở trên; đây chỉ là phần riêng của nó. */
+.bl-panel .inv-filter-row.toolbar {
+  /* Hàng 2 (ngày + tiền + ghi chú) rộng hơn màn hình thường — cho xuống dòng thay vì tràn ngang hay bị cắt. */
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.bl-panel .inv-quick-filters {
+  /* .inv-quick-filters có margin-bottom 10px (dùng NGOÀI hàng lọc) — để nguyên thì chip lệch trục so với ô bên cạnh. */
+  margin: 0;
+}
+/* Bộ lọc THU GỌN trên điện thoại (BoLocBaoGia.tsx). Màn rộng: nút "Bộ lọc khác" ẩn, bọc .bl-them-trong không tạo hộp (contents) nên
+   hàng 1 xếp y như trước. ≤820px: mặc định chỉ còn chip trạng thái + nút; bấm nút (.is-mo) mới hiện người tạo / công ty / ngày / tiền /
+   ghi chú. Đo 2026-10-06: bộ lọc đầy đủ cao 397px = 54% màn 360×740, thẻ báo giá đầu tiên chỉ ló ra 66px. */
+.bl-mo-them {
+  display: none;
+}
+.bl-them-trong {
+  display: contents;
+}
+@media (max-width: 820px) {
+  .bl-mo-them {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .bl-panel:not(.is-mo) .bl-them-trong,
+  .bl-panel:not(.is-mo) .bl-them-hang {
+    display: none;
+  }
+}
+.bl-nhan {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.bl-tien {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bl-o-tien {
+  width: 118px;
+  padding: 7px 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Gõ chưa hiểu ("abc") → viền + nền + LỜI NHẮN báo lỗi; bộ lọc hiện có KHÔNG bị đổi (xem OTien). */
+.bl-o-tien.is-loi {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.bl-loi {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bl-ghichu {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* Năm chấm màu lọc theo nhãn ghi chú (cùng bảng màu --qn-c với ô ghi chú). Chưa chọn: nhạt; đang chọn: vòng + dấu ✓ —
+   dấu ✓ là thứ báo trạng thái cho người kém phân biệt màu. */
+.bl-mau {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--qn-c);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  opacity: 0.55;
+  cursor: pointer;
+}
+.bl-mau:hover {
+  opacity: 1;
+}
+.bl-mau:focus-visible {
+  outline: 2px solid var(--gold-d);
+  outline-offset: 2px;
+  opacity: 1;
+}
+.bl-mau.is-on {
+  opacity: 1;
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 4px var(--qn-c);
+}
+.bl-mau.is-on::after {
+  content: "✓";
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Nút "Người tạo ▾", "Công ty ▾" (ChonNhieu) + bảng nổi tích chọn (BangNoi, portal + position:fixed). */
+.cn-nut {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cn-nut:hover {
+  border-color: var(--gold-d);
+  background: var(--surface-hover);
+}
+.cn-nut:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.cn-nut.co-chon {
+  border-color: var(--gold-d);
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+.cn-sl {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--gold-d);
+  color: var(--gold-ink);
+  font-size: 11px;
+  font-weight: 800;
+}
+.cn-mui {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.bang-noi {
+  position: fixed;
+  z-index: 200;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  overflow: hidden;
+  outline: none;
+}
+.cn-tim {
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 9px;
+}
+.cn-ds {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.cn-dong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cn-dong:hover {
+  background: var(--row-hover);
+}
+.cn-dong input {
+  flex: none;
+  margin: 0;
+}
+.cn-ten {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cn-dem {
+  flex: none;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.cn-chan {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.cn-trong {
+  margin: 0;
+  padding: 10px 8px;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .bl-tien,
+  .bl-ghichu {
+    flex: 1 1 100%;
+  }
+  /* `.bl-panel` đứng trước để thắng `.toolbar input { width: 100% }` của public/style.css ở ≤520px. */
+  .bl-panel .bl-o-tien {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+/* Màn soạn báo giá — ô "Mã khách hàng (danh mục)": khách đang gắn + nút Đổi khách hàng (chủ repo 2026-09-30). Là <div>, không
+   phải <label>: `.meta-col label:first-of-type` (public/style.css) bỏ lề trên của ô ĐẦU TIÊN, nên ô "Tên khách hàng" bên dưới
+   vẫn đứng đúng chỗ — chỉ cần chừa lề dưới cho khối này. */
+.kh-chon {
+  margin-bottom: 10px;
+}
+.kh-chon-nhan {
+  display: block;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.kh-chon-hang {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.kh-chon-gt {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  overflow: hidden;
+  /* Tên khách được XUỐNG DÒNG — tối đa 2 dòng, dài hơn mới "…". Bản đầu nowrap cắt cả tên ngắn ở ≤1024px ("VIS002 — Ngân hà…", đo
+     2026-10-06) mà chỉ có title để xem đủ — chạm trên điện thoại / máy tính bảng thì không có title. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.kh-chon-gt.chua {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Hóa đơn ĐẦU VÀO — trang xem các hàng bảng nội bộ đã duyệt (dùng chung bộ lọc .inv-* ở trên). */
+.inv-in-table td {
+  vertical-align: top;
+}
+.inv-in-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.inv-in-ns {
+  min-width: 120px;
+  max-width: 220px;
+  white-space: pre-line;
+}
+.inv-in-warn {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-bg);
+  color: var(--text);
+  font-size: 13px;
+}
 
 /* Ô bảng theo TRẠNG THÁI — theme-aware (thay #ffdede/#ffe0ee/#ffd6d6/#b91c1c/#0a7d28 inline) */
 .cell-need {
@@ -2014,10 +2678,17 @@ textarea[aria-invalid="true"] {
 .kpi span.trend-flat {
   color: var(--text-muted);
 }
-/* Số KPI dài (tiền tỷ) không tràn card mobile: co chữ theo bề rộng, không rớt "đ" xuống dòng */
+/* Số KPI dài (tiền tỷ) không tràn thẻ: co chữ theo bề rộng CỦA THẺ (container query), không rớt "đ" xuống dòng.
+   Bản trước co theo bề rộng CỬA SỔ (2.2vw): từ 1182px chữ đã chạm trần 26px, trong khi lưới xếp 5 thẻ chỉ rộng 200–215px ở 1366–1440
+   → "985.000.000 đ" (197px) bị cắt mất 28–35px trong hộp 162px, `.kpi { overflow: hidden }` cắt lặng lẽ, không có dấu "…" (đo
+   2026-10-06; 1280 / 1536 cũng cắt). 10.5% bề rộng thẻ vừa cả số 10 tỷ ở mọi cỡ laptop; sàn 15px cho lưới 2 cột ở điện thoại 390px.
+   Chỉ Dashboard dùng .kpi, và nó nằm trong lưới (bề rộng do lưới quyết, không do nội dung) nên containment theo chiều ngang an toàn. */
+.kpi {
+  container-type: inline-size;
+}
 .kpi strong {
   white-space: nowrap;
-  font-size: clamp(17px, 2.2vw, 26px);
+  font-size: clamp(15px, 10.5cqi, 26px);
 }
 .stat-card .stat-value {
   font-size: clamp(16px, 2.2vw, 20px);
@@ -2170,6 +2841,61 @@ textarea[aria-invalid="true"] {
 [data-theme="dark"] .inv-table th:nth-child(5),
 [data-theme="dark"] .inv-table td:nth-child(5) {
   box-shadow: 2px 0 5px -2px rgba(0, 0, 0, 0.55);
+}
+/* ĐÓNG BĂNG THEO TẦNG (đo 2026-10-06): 5 cột khoá rộng 772px — ở 1024×768 khung cuộn chỉ 716px nên 16 cột còn lại KHÔNG BAO GIỜ xem
+   được; 1280×720 chỉ còn ô nhìn 200px, 1366×768 còn 286px. Nay: ≥1700px giữ 5 cột; 1100–1699px khoá 3 cột danh tính dòng (Khách hàng ·
+   Mã KH · Mã sản xuất = 400px); dưới 1100px không khoá gì. Mở khoá bằng `left: auto` — GIỮ position: sticky để tiêu đề vẫn dính đầu
+   khung — và HẠ z-index: cùng z-index thì cột đứng SAU trong DOM vẽ đè lên cột khoá khi cuộn ngang. Gạch dọc ranh giới dời theo. */
+@media (max-width: 1699.98px) {
+  .inv-table th:nth-child(4),
+  .inv-table td:nth-child(4),
+  .inv-table th:nth-child(5),
+  .inv-table td:nth-child(5) {
+    left: auto;
+  }
+  .inv-table td:nth-child(4),
+  .inv-table td:nth-child(5) {
+    z-index: auto;
+  }
+  .inv-table thead th:nth-child(4),
+  .inv-table thead th:nth-child(5) {
+    z-index: 3;
+  }
+  .inv-table th:nth-child(5),
+  .inv-table td:nth-child(5),
+  [data-theme="dark"] .inv-table th:nth-child(5),
+  [data-theme="dark"] .inv-table td:nth-child(5) {
+    border-right: 0;
+    box-shadow: none;
+  }
+  .inv-table th:nth-child(3),
+  .inv-table td:nth-child(3) {
+    border-right: 2px solid var(--border-strong);
+    box-shadow: 2px 0 5px -2px rgba(20, 30, 50, 0.15);
+  }
+  [data-theme="dark"] .inv-table th:nth-child(3),
+  [data-theme="dark"] .inv-table td:nth-child(3) {
+    box-shadow: 2px 0 5px -2px rgba(0, 0, 0, 0.55);
+  }
+}
+@media (max-width: 1099.98px) {
+  .inv-table th:nth-child(-n + 3),
+  .inv-table td:nth-child(-n + 3) {
+    left: auto;
+  }
+  .inv-table td:nth-child(-n + 3) {
+    z-index: auto;
+  }
+  .inv-table thead th:nth-child(-n + 3) {
+    z-index: 3;
+  }
+  .inv-table th:nth-child(3),
+  .inv-table td:nth-child(3),
+  [data-theme="dark"] .inv-table th:nth-child(3),
+  [data-theme="dark"] .inv-table td:nth-child(3) {
+    border-right: 0;
+    box-shadow: none;
+  }
 }
 .inv-table td input,
 .inv-table td select {

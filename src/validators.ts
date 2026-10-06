@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { Request, Response, NextFunction } from "express";
 import { config } from "./config.js";
 import { viZodErrorMap } from "./zodErrorMap.js";
+import { MAU_GHI_CHU, GHI_CHU_TOI_DA } from "./quoteListNote.js";
+import { COT_SAP_XEP, TRANG_THAI_BAO_GIA, docCsv } from "./quoteListFilter.js";
 
 // Global Vietnamese fallback for any rule without its own message. Runs here (module
 // body, after imports) so config.js env parsing above keeps its operator-facing text,
@@ -454,6 +456,16 @@ export const HnSaveSchema = z.object({
     .optional(),
 });
 
+// GHI CHÚ + MÀU ở dòng Danh sách báo giá: `PUT /api/quotes/:id/list-note`. Trường VẮNG = giữ nguyên
+// (gõ chữ không được xoá màu và ngược lại); `color: null` = gỡ màu; `note: ""` = xoá chữ. Không có trường
+// nào → 400. Trim trước max để "  …200 ký tự  " không bị từ chối oan vì khoảng trắng hai đầu.
+export const QuoteListNoteSchema = z
+  .object({
+    note: z.string("Ghi chú phải là chữ").trim().max(GHI_CHU_TOI_DA, `Ghi chú tối đa ${GHI_CHU_TOI_DA} ký tự`).optional(),
+    color: z.enum(MAU_GHI_CHU, "Màu không nằm trong bảng 5 màu").nullable().optional(),
+  })
+  .refine((b) => b.note !== undefined || b.color !== undefined, "Không có gì để đổi: cần gửi ghi chú hoặc màu");
+
 const sheetSchema = z.object({
   // id của sheet ĐANG CÓ trong DB (client gửi lại khi sửa). Lưu = xoá-tạo-lại sheet nên server dùng
   // id này để BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet, chữ ký, số hoá đơn…).
@@ -676,17 +688,36 @@ export const QuoteUpdateSchema = z.object({
   baseUpdatedAt: z.coerce.date().optional(),
 });
 
-export const ListQuerySchema = z.object({
+// Tham số lọc dạng "a,b" HOẶC khoá lặp (?x=a&x=b): zod chỉ KIỂM từng phần tử (không đổi giá trị) — `docBoLoc`
+// (src/quoteListFilter.ts) tách lại khi dựng điều kiện. Kiểm ở đây để rác thành 400 thay vì âm thầm bị bỏ.
+const csvHopLe = (hopLe: (x: string) => boolean, msg: string) =>
+  z.union([z.string(), z.array(z.string())]).optional().refine((v) => v === undefined || docCsv(v).every(hopLe), msg);
+const laSoDuong = (x: string) => /^\d+$/.test(x) && Number(x) > 0;
+
+// Bộ lọc của Danh sách báo giá (chủ repo 2026-09-30). `status` và `companyId` từng là MỘT giá trị — vẫn hợp lệ.
+const LocDanhSachShape = {
   q: z.string().max(200).optional(),
-  status: z.enum(QUOTE_STATUSES).optional(),
-  companyId: z.coerce.number().int().positive().optional(),
+  status: csvHopLe((x) => (TRANG_THAI_BAO_GIA as readonly string[]).includes(x), "Trạng thái không hợp lệ"),
+  companyId: csvHopLe(laSoDuong, "Mã công ty phải là số nguyên dương"),
+  creator: csvHopLe(laSoDuong, "Mã người tạo phải là số nguyên dương"),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  minTotal: z.coerce.number().min(0, "Tổng tiền không được âm").optional(),
+  maxTotal: z.coerce.number().min(0, "Tổng tiền không được âm").optional(),
+  note: z.enum(["has", "none"]).optional(),
+  noteColor: csvHopLe((x) => (MAU_GHI_CHU as readonly string[]).includes(x), "Màu không nằm trong bảng 5 màu"),
+};
+
+export const ListQuerySchema = z.object({
+  ...LocDanhSachShape,
   page: z.coerce.number().int().min(1).default(1),
   size: z.coerce.number().int().min(1).max(config.MAX_PAGE_SIZE).default(config.DEFAULT_PAGE_SIZE),
-  sort: z.enum(["createdAt", "quoteDate", "total", "quoteNumber"]).default("createdAt"),
+  sort: z.enum(COT_SAP_XEP).default("createdAt"),
   order: z.enum(["asc", "desc"]).default("desc"),
 });
+
+/** `GET /api/quotes/facets`: cùng bộ lọc với danh sách, không phân trang / sắp xếp. */
+export const QuoteFacetsQuerySchema = z.object(LocDanhSachShape);
 
 /**
  * Express middleware: parse body/query/params against a zod schema and replace

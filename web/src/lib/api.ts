@@ -1,4 +1,5 @@
 // Typed API client cho backend Express (cùng origin → cookie session tự gửi).
+import type { MauGhiChu } from "./ghiChuMau";
 export type Me = {
   id: number;
   username: string;
@@ -85,6 +86,9 @@ export type AuditListResult = { data: AuditEntry[]; meta: { total: number; page:
 // Thông báo (Notifications — increment 6).
 export type Notif = { id: number; title: string; body: string; resource?: string | null; resourceId?: string | null; readAt?: string | null; createdAt: string };
 
+// Ghi chú + màu ở dòng Danh sách báo giá (bảng QuoteListNote; máy chủ CHỈ trả cho view đầy đủ — hai nhánh lược
+// của presentQuoteRow không có trường này). `null` = dòng chưa có ghi chú.
+export type QuoteListNote = { note: string; color: MauGhiChu | null; updatedByName?: string | null; updatedAt?: string | null };
 // Danh sách báo giá (increment 8). Row linh hoạt (presentQuoteRow — thường + account_hn).
 export type QuoteRow = {
   shortTitle?: string | null;   // tiêu đề rút gọn — bảng hiển thị ưu tiên nó (tieuDeHienThi)
@@ -95,8 +99,39 @@ export type QuoteRow = {
   total?: number; toCompany?: string; customerCode?: string | null; sheetCount?: number;
   hnStatus?: string | null; hnSheetCount?: number; hnTotal?: number; _accountHnRow?: boolean;
   internalRows?: number; internalPaidRows?: number; _internalRow?: boolean; // chi phí: tiến độ thanh toán nội bộ
+  listNote?: QuoteListNote | null;
+};
+// Bộ lọc của Danh sách báo giá — đúng tên khoá của máy chủ (ListQuerySchema). Giá trị nhiều là chuỗi phẩy "a,b".
+export type ListQuotesParams = {
+  q?: string; status?: string; companyId?: string; creator?: string; from?: string; to?: string;
+  minTotal?: string; maxTotal?: string; note?: string; noteColor?: string;
+  sort?: string; order?: string; page?: number; size?: number;
+};
+// Số đếm cho từng nhóm lọc (GET /quotes/facets): mỗi nhóm đếm theo mọi bộ lọc KHÁC của nó; `mine` = của người xem.
+export type QuoteFacets = {
+  total: number; mine: number;
+  status: { value: string; count: number }[];
+  creators: { id: number; name: string; count: number }[];
+  companies: { id: number; name: string; count: number }[];
+  note: { has: number; none: number; colors: Record<string, number> };
 };
 export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: number; size: number; pageCount: number } };
+
+// Hóa đơn ĐẦU VÀO (kế toán): mỗi HÀNG bảng nội bộ ĐÃ DUYỆT là một khoản chi cần hoá đơn đầu vào.
+// Máy chủ dựng bằng src/inputInvoices.ts (HangDauVao) — không bao giờ kèm ảnh ủy nhiệm chi.
+export type InputInvoiceRow = {
+  key: string;
+  quoteId: number; quoteCode: string; title: string; status: string;
+  customerCode: string | null; customerName: string | null; companyName: string | null; createdByName: string | null;
+  sheetId: number | null; sheetName: string | null; sheetCode: string | null;   // null ở hàng Hà Nội (bảng HN thuộc cả báo giá)
+  category: "hcm" | "khach" | "hanoi"; tableName: string | null;
+  rid: string | null; name: string; detail: string | null; unit: string | null;
+  quantity: number; unitPrice: number; days: number | null; amount: number;
+  ns: string | null; chungTu: "VAT" | "HDNS" | "TM" | null; luuKho: boolean;
+  approvedAt: string | null; approvedByName: string | null;
+  paid: boolean; paidAt: string | null;
+};
+export type InputInvoicesResp = { data: InputInvoiceRow[]; meta: { quotes: number; truncated: boolean } };
 
 // Quản lý dự án (increment 9) — báo giá đã chốt, mỗi sheet 1 dòng theo dõi hoá đơn.
 export type ProjectSheet = {
@@ -546,19 +581,29 @@ export const api = {
   search: (q: string, types = "quote,customer", limit = 6) =>
     req<SearchResp>(`/search?${new URLSearchParams({ q, types, limit: String(limit) })}`),
   // Danh sách báo giá (increment 8).
-  listQuotes: (p: { q?: string; status?: string; sort?: string; order?: string; page?: number; size?: number }) => {
+  listQuotes: (p: ListQuotesParams) => {
     const sp = new URLSearchParams();
-    if (p.q) sp.set("q", p.q);
-    if (p.status) sp.set("status", p.status);
+    for (const k of ["q", "status", "companyId", "creator", "from", "to", "minTotal", "maxTotal", "note", "noteColor"] as const) if (p[k]) sp.set(k, p[k]!);
     sp.set("sort", p.sort || "createdAt"); sp.set("order", p.order || "desc");
     sp.set("page", String(p.page ?? 1)); sp.set("size", String(p.size ?? 20));
     return req<QuoteListResult>(`/quotes?${sp}`);
   },
+  // Số đếm cho bộ lọc — cùng bộ lọc với danh sách, không phân trang/sắp xếp. View lược (account HN / xem nội bộ) bị 403.
+  quoteFacets: (p: Omit<ListQuotesParams, "sort" | "order" | "page" | "size">) => {
+    const sp = new URLSearchParams();
+    for (const k of ["q", "status", "companyId", "creator", "from", "to", "minTotal", "maxTotal", "note", "noteColor"] as const) if (p[k]) sp.set(k, p[k]!);
+    return req<QuoteFacets>(`/quotes/facets?${sp}`);
+  },
   duplicateQuote: (id: number, sameProject = false) =>
     req<QuoteRow>(`/quotes/${id}/duplicate`, { method: "POST", body: JSON.stringify(sameProject ? { sameProject: true } : {}) }),
   deleteQuote: (id: number) => req<{ ok: boolean }>(`/quotes/${id}`, { method: "DELETE" }),
+  // Ghi chú + màu ở dòng danh sách. Trường vắng = giữ nguyên; `color: null` gỡ màu; `note: ""` xoá chữ.
+  setQuoteListNote: (id: number, body: { note?: string; color?: MauGhiChu | null }) =>
+    req<{ quoteId: number; note: string; color: MauGhiChu | null; updatedByName: string | null; updatedAt: string | null }>(`/quotes/${id}/list-note`, { method: "PUT", body: JSON.stringify(body) }),
   // Quản lý dự án (increment 9) — báo giá đã chốt + theo dõi hoá đơn/ký.
   quoteProjects: () => req<{ data: ProjectQuote[] }>("/quotes/projects"),
+  // Hóa đơn ĐẦU VÀO — hàng bảng nội bộ đã duyệt (quyền invoice:page).
+  inputInvoices: () => req<InputInvoicesResp>("/quotes/input-invoices"),
   updateSheetInvoice: (sheetId: number, field: string, val: string | null) =>
     req<unknown>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [field]: val }) }),
   signSheet: (sheetId: number, signed: boolean) =>

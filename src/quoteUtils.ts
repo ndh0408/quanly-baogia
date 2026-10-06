@@ -144,6 +144,8 @@ export const QUOTE_UPDATE_STATE_SELECT = {
   id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
   toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
   companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
+  // Đổi khách hàng (danh mục) ở màn soạn: updateQuote so khách mới với khách ĐANG gắn để chỉ kiểm quyền khi giá trị đổi.
+  customerId: true,
   // Sửa giá SAU KHI CHỐT phải tính lại doanh thu chốt (MONEY-01) — cần biết cột đang null (chốt
   // trước khi có cột, giữ hành vi COALESCE) hay đã có số.
   convertedTotal: true,

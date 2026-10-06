@@ -287,8 +287,8 @@ export function InvoicesPage({ me }: { me: Me }) {
 
   return (
     <div>
-      <h1>Hóa đơn</h1>
-      <p className="muted">Theo dõi hóa đơn theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
+      <h1>Hóa đơn đầu ra</h1>
+      <p className="muted">Hóa đơn <b>xuất cho khách</b> — theo dõi theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). Hóa đơn nhận từ nhà cung cấp xem ở <a href="#/invoices-in">Hóa đơn đầu vào</a>. <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
 
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">

@@ -9,6 +9,8 @@ import {
   QuoteUpdateSchema,
   ListQuerySchema,
   HnSaveSchema,
+  QuoteListNoteSchema,
+  QuoteFacetsQuerySchema,
   PAYMENT_PROOF_DATA_URL_RE,
 } from "../validators.js";
 import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
@@ -24,6 +26,8 @@ import {
   listHnAccounts,
   getQuote,
   listProjects,
+  listInputInvoices,
+  listQuoteFacets,
   signSheet,
   setSheetCustomerDecision,
   updateSheetInvoice,
@@ -38,6 +42,7 @@ import {
   diffVersionsService,
   listApprovals,
   updateMembers,
+  setQuoteListNote,
   deleteQuote,
   duplicateQuote,
 } from "../services/quoteService.js";
@@ -71,6 +76,14 @@ router.get(
   })
 );
 
+// SỐ ĐẾM cho bộ lọc của danh sách (theo trạng thái / người tạo / công ty / ghi chú + "của tôi"): cùng tham số với
+// GET /, mỗi nhóm đếm theo mọi bộ lọc KHÁC. View lược bị 403 trong service. Đặt TRƯỚC "/:id".
+router.get(
+  "/facets",
+  validate({ query: QuoteFacetsQuerySchema }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await listQuoteFacets(req)))
+);
+
 // NEXT NUMBER (preview only - real allocation happens at POST time)
 router.get(
   "/next-number",
@@ -98,6 +111,14 @@ router.get(
 router.get(
   "/projects",
   asyncHandler(async (req: Request, res: Response) => res.json(await listProjects(req)))
+);
+
+// HÓA ĐƠN ĐẦU VÀO (kế toán) — mọi hàng bảng nội bộ ĐÃ DUYỆT, mỗi hàng là một khoản chi cần hoá đơn đầu vào.
+// Cổng: invoice:page (cùng trang Hoá đơn đầu ra). Chỉ ĐỌC. Đặt TRƯỚC "/:id" để không bị nuốt vào param.
+router.get(
+  "/input-invoices",
+  requirePermission(P.INVOICE_PAGE),
+  asyncHandler(async (req: Request, res: Response) => res.json(await listInputInvoices(req)))
 );
 
 // SIGN documents for ONE sheet (Ký Chứng từ). Admin ký MỌI dự án; người có canSign (vd Lan Anh)
@@ -349,6 +370,15 @@ router.put(
     }),
   }),
   asyncHandler(async (req: Request, res: Response) => res.json(await updateMembers(req)))
+);
+
+// GHI CHÚ + MÀU ở dòng Danh sách báo giá (bảng riêng QuoteListNote — KHÔNG chạm Quote.updatedAt nên không
+// đá văng khoá lạc quan của người đang soạn). Quyền kiểm TRONG service: chủ / thành viên có vùng /
+// quote:update:all, và không phải view bị lược. Trường vắng = giữ nguyên.
+router.put(
+  "/:id/list-note",
+  validate({ params: idParam, body: QuoteListNoteSchema }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await setQuoteListNote(req)))
 );
 
 // SOFT DELETE

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type AssignableUser, type Customer, type QuoteFull } from "../lib/api";
-import { toast, useEscClose, toLocalInputDate } from "../lib/ui";
+import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type AssignableUser, type QuoteFull } from "../lib/api";
+import { toast, toLocalInputDate } from "../lib/ui";
 import { setPendingNewQuote } from "../lib/pendingQuote";
+import { CustomerPicker } from "../components/CustomerPicker";
 
 // Port "Tạo báo giá mới" (renderNewQuote) — 3 bước: chọn công ty → chọn mẫu (nhiều = nhiều sheet) →
 // thông tin (tiêu đề/khách/người-gửi/VAT/ngày/logo). KHÔNG tạo ngay: dựng draft _new + mở editor #/rnew
@@ -66,7 +67,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
       id: 0, _new: true, status: "draft", title: info.title, shortTitle: info.shortTitle.trim() || null, toCompany: info.toCompany, toContact: info.toContact,
       fromContact: info.fromContact, fromPhone: info.fromPhone, fromTitle: info.fromTitle, fromAddress: info.fromAddress,
       vatPercent: Number(info.vatPercent) || 0, quoteDate: info.quoteDate, city: "TP. Hồ Chí Minh", discount: 0, showTotals: true,
-      greeting: DEFAULT_GREETING, quoteNumber: "", companyId: companyId!, managerId, customerId: customer.id, customerCode: customer.code,
+      greeting: DEFAULT_GREETING, quoteNumber: "", companyId: companyId!, managerId, customerId: customer.id, customerCode: customer.code, customerName: customer.name,
       sheets,
     } as QuoteFull;
     setPendingNewQuote(draft);
@@ -180,38 +181,6 @@ export function NewQuoteWizard({ me }: { me: Me }) {
       </div>
 
       {pickOpen && <CustomerPicker onClose={() => setPickOpen(false)} onPick={(c) => { setCustomer({ id: c.id, code: c.code, name: c.name || "" }); setInfo((f) => ({ ...f, toCompany: f.toCompany || c.name || "" })); setPickOpen(false); }} />}   {/* FE-14: chọn mã khách thì điền sẵn "Khách hàng (To)" nếu còn trống */}
-    </div>
-  );
-}
-
-function CustomerPicker({ onClose, onPick }: { onClose: () => void; onPick: (c: Customer) => void }) {
-  const [q, setQ] = useState("");
-  useEscClose(onClose); // ESC đóng — trước đây modal này là ngõ cụt hoàn toàn cho bàn phím
-  const [rows, setRows] = useState<Customer[] | null>(null);
-  useEffect(() => { const t = setTimeout(() => { api.listCustomers(q, 1, 30).then((r) => setRows(r.data)).catch(() => setRows([])); }, 250); return () => clearTimeout(t); }, [q]);
-  return (
-    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label="Chọn khách hàng">
-        <div className="modal-head"><h3>Chọn khách hàng</h3><button className="icon-btn" onClick={onClose} aria-label="Đóng">✕</button></div>
-        <div className="modal-body">
-          <input type="search" autoFocus placeholder="Tìm mã / tên khách hàng…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 8 }} />
-          {!rows ? <div className="skeleton-wrap">{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
-            : rows.length === 0 ? <p className="muted">Không có khách hàng khớp.</p> : (
-              <div className="list-wrap">
-                <table className="list-table"><tbody>{rows.map((c) => (
-                  // Bàn phím: cùng mẫu hàng bảng của Projects.tsx (tabIndex + Enter) — trước đây
-                  // hàng này chỉ nghe onClick nên người dùng chỉ bàn phím không mở được, kẹt luôn
-                  // wizard vì bước 3 bắt buộc chọn khách hàng.
-                  <tr key={c.id} className="qrow" style={{ cursor: "pointer" }} tabIndex={0}
-                    onClick={() => onPick(c)}
-                    onKeyDown={(e) => { if (e.key === "Enter") onPick(c); }}>
-                    <td><strong>{c.code}</strong></td><td>{c.name}</td><td className="muted">{c.phone || ""}</td>
-                  </tr>))}</tbody></table>
-              </div>
-            )}
-        </div>
-        <div className="modal-foot"><button className="btn" onClick={onClose}>Đóng</button></div>
-      </div>
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { config } from "../config.js";
 import { computeQuoteTotals, assertTotalsStorable, tinhConvertedTotal, chuanHoaTheoCot, chuanHoaVat, D } from "../money.js";
 import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCounter } from "../quoteNumber.js";
 import { namVN, namNganVN, homNayVN } from "../vnTime.js";
-import { normalizeSearch, searchTextFilter } from "../searchText.js";
+import { normalizeSearch } from "../searchText.js";
 import { audit } from "../audit.js";
 import { randomUUID } from "node:crypto";
 import { trungTren } from "../prismaLoi.js";
@@ -19,7 +19,7 @@ import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
 import { codeLabel } from "../quoteCode.js";
-import { can, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
+import { can, canScoped, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
   daXuatHoaDon,
@@ -38,6 +38,9 @@ import {
   phangThanhVien, vanTayHn } from "../quoteUtils.js";
 import { httpError } from "../httpError.js";
 import { sheetKhongDoi } from "../quoteSheetDiff.js";
+import { chuanHoaGhiChu, type MauGhiChu } from "../quoteListNote.js";
+import { docBoLoc, locTheoChieu, ghepLoc, orderByTheoCot, sapIdTheoTieuDe, COT_SAP_XEP_CU, type ChieuLoc, type NguCanhLoc } from "../quoteListFilter.js";
+import { hangHoaDonDauVao, type HangDauVao } from "../inputInvoices.js";
 
 /**
  * Caller có VIEW BỊ LƯỢC — `GET /quotes/:id` chỉ trả cho họ một phần báo giá:
@@ -256,6 +259,23 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
 }
 
 /**
+ * KHÁCH HÀNG (danh mục) được GẮN vào báo giá phải (1) tồn tại và chưa bị xoá, (2) là khách mà người gắn ĐỌC được.
+ *
+ * Thiếu lớp này thì ai sửa/tạo được báo giá cũng gắn được khách của NGƯỜI KHÁC (chỉ cần đoán id) rồi đọc mã + tên khách qua chính
+ * phản hồi của báo giá (`customerCode`/`customerName`) — trong khi danh mục khách chia theo chủ sở hữu (`customer:read:own`).
+ * Cũng chặn id không có thật: trước đây nó đi thẳng xuống khoá ngoại và ra 500 thay vì một câu tiếng Việt.
+ * 400 = khách không có / đã xoá; 403 = khách ngoài phạm vi của người gắn.
+ *
+ * CHỈ gọi khi `customerId` được ĐẶT MỚI hoặc ĐỔI (updateQuote so với giá trị đang lưu): màn soạn gửi lại cả báo giá mỗi lần Lưu,
+ * kể cả `customerId` cũ — người được thêm vào báo giá của người khác, hay khách bị xoá sau khi đã gắn, vẫn phải lưu được.
+ */
+async function kiemKhachDuocGan(req: Request, customerId: number) {
+  const kh = await prisma.customer.findFirst({ where: { id: customerId }, select: { id: true, ownerId: true } });
+  if (!kh) throw httpError(400, "Khách hàng không tồn tại hoặc đã bị xóa");
+  if (!canScoped(req.session, "customer", "read", kh)) throw httpError(403, "Bạn không có quyền chọn khách hàng này");
+}
+
+/**
  * Create a quote from a validated body (req.body). Allocates the quote number +
  * per-employee project code and snapshots v1 INSIDE one transaction (failed insert
  * rolls the counter back — no burned numbers), retrying the rare P2002 collision.
@@ -268,6 +288,7 @@ export async function createQuote(req: Request) {
   // PHÒNG THỦ NHIỀU LỚP: route đã gác requirePermission(QUOTE_CREATE), nhưng service cũng phải tự
   // kiểm — mọi đường gọi mới (job/script/route khác) đều đi qua đây. Đối xứng duplicateQuote().
   if (!can(req.session, P.QUOTE_CREATE)) throw httpError(403, "Không có quyền tạo báo giá");
+  if (b.customerId != null) await kiemKhachDuocGan(req, b.customerId);
 
   const company = await prisma.company.findFirst({ where: { id: b.companyId } });
   if (!company) throw httpError(400, "Không tìm thấy công ty");
@@ -725,6 +746,10 @@ export async function updateQuote(req: Request) {
     // Phần bảng nội bộ được giao đi đường riêng (ghiVungNoiBoDuocGiao).
     if (Array.isArray(b.sheets)) { vungNoiBo = b.sheets; delete (b as any).sheets; }
   }
+  // ĐỔI KHÁCH HÀNG (danh mục) ở màn soạn — chỉ kiểm khi giá trị THAY ĐỔI (xem kiemKhachDuocGan). Đặt SAU khối phạm vi trên: người
+  // không có vùng "main" đã bị gỡ `customerId` khỏi payload nên không bao giờ tới đây. `null` = gỡ liên kết: luôn cho.
+  const doiKhach = b.customerId !== undefined && (b.customerId ?? null) !== (existing.customerId ?? null);
+  if (doiKhach && b.customerId != null) await kiemKhachDuocGan(req, b.customerId);
 
   // KHÓA LẠC QUAN (chống MẤT DỮ LIỆU): nếu client gửi mốc updatedAt đã tải mà DB đã thay đổi
   // (người khác lưu xen vào giữa lúc đang mở editor) → 409, KHÔNG ghi đè im lặng. Client cũ
@@ -1017,11 +1042,23 @@ export async function updateQuote(req: Request) {
     });
   }
 
+  // Đổi khách hàng (danh mục) là việc phải TRUY ĐƯỢC ("ai chuyển báo giá này sang khách khác?") — chỉ ghi khi có đổi, để nhật ký của
+  // các lần Lưu thường giữ nguyên hình dạng cũ. Ghi cả MÃ + TÊN khách (`khachHang`) bên cạnh `customerId` kỹ thuật: người đọc trang
+  // Nhật ký không đọc được số id. Khách cũ có thể đã bị xoá mềm → tra kèm `includeDeleted`.
+  let khachNhatKy: { cu: string | null; moi: string | null } | null = null;
+  if (doiKhach) {
+    const tenKhach = async (cid: number | null | undefined) => {
+      if (cid == null) return null;
+      const k = await prisma.customer.findFirst({ where: { id: cid }, select: { code: true, name: true }, includeDeleted: true } as any);
+      return k ? `${k.code} — ${k.name}` : `#${cid}`;
+    };
+    khachNhatKy = { cu: await tenKhach(existing.customerId), moi: await tenKhach(updated.customerId) };
+  }
   await audit(req, "quote.update", {
     resource: "quote",
     resourceId: id,
-    before: { total: Number(existing.total), status: existing.status },
-    after: { total: Number(updated.total), status: updated.status, reopened },
+    before: { total: Number(existing.total), status: existing.status, ...(khachNhatKy ? { customerId: existing.customerId ?? null, khachHang: khachNhatKy.cu } : {}) },
+    after: { total: Number(updated.total), status: updated.status, reopened, ...(khachNhatKy ? { customerId: updated.customerId ?? null, khachHang: khachNhatKy.moi } : {}) },
   });
   if (reopened) {
     await audit(req, "quote.reopened", { resource: "quote", resourceId: id });
@@ -1054,11 +1091,6 @@ export async function listQuotes(req: Request) {
   // companyId/page/size là number (có default page=1/size=DEFAULT). TS chỉ thấy ParsedQs
   // string → đọc lại với coercion tương đương runtime (Number của number = chính nó).
   const qy = req.query as Record<string, any>;
-  const q: string | undefined = qy.q;
-  const status: string | undefined = qy.status;
-  const companyId = qy.companyId !== undefined ? Number(qy.companyId) : undefined;
-  const from = qy.from;
-  const to = qy.to;
   const page = Number(qy.page) || 1;
   const size = Number(qy.size) || config.DEFAULT_PAGE_SIZE;
   const sort = String(qy.sort);
@@ -1068,40 +1100,58 @@ export async function listQuotes(req: Request) {
   // 🔒 CỔNG QUYỀN TRƯỚC PHẠM VI: không có quote:read:* nào → 403 (KHÔNG rơi xuống phạm vi own).
   // Nếu không, người bị gỡ sạch quyền báo giá vẫn thấy các báo giá mình tạo/được thêm thành viên.
   const filters: Prisma.QuoteWhereInput[] = [quoteScopeWhereOrThrow(req.session) as Prisma.QuoteWhereInput];
-  if (status) filters.push({ status: status as Prisma.QuoteWhereInput["status"] });
-  if (companyId) filters.push({ companyId });
-  if (from || to) {
-    const range: Record<string, any> = {};
-    if (from) range.gte = from;
-    if (to) range.lte = to;
-    filters.push({ quoteDate: range });
-  }
-  // Tìm KHÔNG dấu / sai dấu trên cột searchText chuẩn-hóa (quoteNumber+projectCode+title+toCompany+toContact).
-  if (q) filters.push({ searchText: searchTextFilter(String(q)) });
-  const where = { AND: filters };
   // account_hn / xem-nội-bộ: cần BẢNG NỘI BỘ của từng sheet để tính SỐ SHEET HN + TỔNG HN (hoặc
   // số hàng nội bộ). Nhưng KHÔNG nạp qua `select` của Prisma: `extraTables` chứa cả `paidProof` —
   // ảnh chứng từ base64 hàng trăm KB mỗi cái — mà presentQuoteRow không hề đọc tới. Một trang danh
   // sách 12 báo giá đo được 7,2 MB base64 kéo về rồi vứt. Xem `bangNoiBoTheoBaoGia` bên dưới.
+  // Đúng HAI quyền này cũng là thứ làm view bị LƯỢC (khối bộ lọc ngay dưới) nên `bienLuoc` chỉ là tên thứ hai của cùng một điều kiện
+  // — tests/ops-cong-kiem.test.js khoá NGUYÊN VĂN dòng dưới (đường đo explain-hot-paths phải khớp nhánh này).
   const canBangNoiBo = can(req.session, P.QUOTE_HN_FILL) || can(req.session, P.QUOTE_INTERNAL_VIEW);
+  const bienLuoc = canBangNoiBo;
+  // BỘ LỌC + TÌM THÔNG MINH (chủ repo 2026-09-30) — luật ở src/quoteListFilter.ts. View lược (account HN / xem nội
+  // bộ) giữ NGUYÊN cách tìm cũ và bị bỏ mọi bộ lọc chạm trường họ không thấy (tổng tiền, ghi chú, người tạo, khách
+  // danh mục): lọc/tìm theo thứ người ta không được thấy là cách đọc trộm nó bằng cách dò.
+  const loc = docBoLoc(qy);
+  filters.push(...ghepLoc(locTheoChieu(loc, { ...(loc.q && !bienLuoc ? await nguoiVaCongTy() : { nguoi: [], congTy: [] }), bienLuoc })));
+  const where = { AND: filters };
   // Đợt 5: danh sách mẫu CHỈ nhánh hnOnly của presentQuoteRow đọc (tính hnTotal). Route truyền
   // internalOnly = can(INTERNAL_VIEW) và presentQuoteRow xét nó TRƯỚC hnOnly → có INTERNAL_VIEW là không
   // bao giờ tới nhánh hnOnly; nạp mẫu cho họ là một truy vấn bỏ phí trên đường nóng, refetch thường xuyên.
   const canMauHn = can(req.session, P.QUOTE_HN_FILL) && !can(req.session, P.QUOTE_INTERNAL_VIEW);
+  // Sắp theo "Tiêu đề": ô hiện tiêu đề RÚT GỌN (nếu có) hoặc tiêu đề chính cắt tiền tố — SQL không sắp được đúng chữ đó
+  // (xem sapIdTheoTieuDe). Nên nạp (id, title, shortTitle) của đúng tập đã lọc, sắp ở JS, rồi chỉ nạp đủ dòng của TRANG này.
+  // View lược không được sắp theo cột mới (như mọi cột mới) → rơi về createdAt ở nhánh dưới.
+  let idTheoTieuDe: number[] | null = null;
+  let tongTheoTieuDe = 0;
+  if (!bienLuoc && sort === "title") {
+    const ds = await prisma.quote.findMany({ where, select: { id: true, title: true, shortTitle: true } });
+    tongTheoTieuDe = ds.length;
+    idTheoTieuDe = sapIdTheoTieuDe(ds, order).slice((page - 1) * size, page * size);
+  }
   const [total, rows] = await Promise.all([
-    prisma.quote.count({ where }),
+    idTheoTieuDe ? tongTheoTieuDe : prisma.quote.count({ where }),
     prisma.quote.findMany({
-      where,
-      orderBy: { [sort]: order },
+      // Vẫn AND với `where` (phạm vi quyền) dù id đã lấy từ chính tập đó — không để một đường tắt nào nạp dòng ngoài phạm vi.
+      where: idTheoTieuDe ? { AND: [...filters, { id: { in: idTheoTieuDe } }] } : where,
+      orderBy: idTheoTieuDe ? undefined : orderByTheoCot(bienLuoc && !(COT_SAP_XEP_CU as readonly string[]).includes(sort) ? "createdAt" : sort, order),
       select: QUOTE_LIST_SELECT,   // slim projection — không sheets, không customerLogo
-      skip: (page - 1) * size,
-      take: size,
+      ...(idTheoTieuDe ? {} : { skip: (page - 1) * size, take: size }),
     }),
   ]);
+  if (idTheoTieuDe) {
+    const viTri = new Map(idTheoTieuDe.map((id, i) => [id, i]));
+    rows.sort((a, b) => (viTri.get(a.id) ?? 0) - (viTri.get(b.id) ?? 0));   // findMany không giữ thứ tự của `in`
+  }
   // Số trang của từng báo giá — CHỈ cho id của trang này (vì sao không dùng `_count`: xem
   // QUOTE_LIST_SELECT). Gắn lại đúng hình dạng `_count.sheets` mà presentQuoteRow vẫn đọc.
   const soTrang = await soTrangTheoBaoGia(rows.map((r: any) => r.id));
   for (const r of rows as any[]) r._count = { sheets: soTrang.get(r.id) ?? 0 };
+  // Ghi chú + màu ở dòng (QuoteListNote). CHỈ cho người đi nhánh đầy đủ của presentQuoteRow: hai nhánh lược
+  // (account HN / xem nội bộ) chọn trường tường minh nên không có chỗ cho nó — không nạp thì đỡ một câu truy vấn.
+  if (!canBangNoiBo && rows.length) {
+    const ghiChu = await ghiChuTheoBaoGia(rows.map((r: any) => r.id));
+    for (const r of rows as any[]) r.listNote = ghiChu.get(r.id) ?? null;
+  }
   if (canBangNoiBo && rows.length) {
     // Bảng Hà Nội nay ở CẤP BÁO GIÁ nên phải nạp riêng — `presentQuoteRow` nhánh hnOnly đọc
     // `q.hnTables`. Cũng cắt ảnh ngay tại SQL, cùng lý do với bảng theo trang.
@@ -1278,6 +1328,78 @@ export async function listHnAccounts(req: Request) {
   // Tài khoản điền HN = ai có quyền quote:hn:fill (role account_hn mặc định HOẶC cấp riêng per-user).
   const data = await prisma.user.findMany({ where: { active: true, OR: [{ role: "account_hn" }, { permissions: { has: P.QUOTE_HN_FILL } }] }, select: { id: true, displayName: true, username: true }, orderBy: { displayName: "asc" } });
   return { data };
+}
+
+/**
+ * HÓA ĐƠN ĐẦU VÀO — `GET /input-invoices`: mọi hàng bảng nội bộ ĐÃ DUYỆT (Chi phí HCM / Phí khách hàng theo
+ * hàng, Báo giá Hà Nội theo `hnStatus = approved`), mỗi hàng là một khoản chi cần hoá đơn đầu vào. LUẬT chọn
+ * hàng + tính tiền nằm ở `src/inputInvoices.ts` (thuần, có test); ở đây chỉ truy vấn.
+ *
+ * QUYỀN: `invoice:page` (kế toán, admin) — cùng cổng với trang Hoá đơn đầu ra. KHÔNG phạm vi theo người tạo:
+ * kế toán phải thấy mọi khoản chi của công ty. Endpoint này chỉ ĐỌC và không chạm `Quote.updatedAt`.
+ *
+ * TRUY VẤN: một câu nhặt id báo giá CÓ hàng đã duyệt (toán tử chứa `@>` của jsonb — báo giá không có gì để
+ * hiện thì không bị kéo bảng của nó về), rồi nạp bảng của đúng nhóm đó qua `bangNoiBoTheoSheet` /
+ * `bangHnTheoBaoGia` (đã CẮT `paidProof` ngay tại SQL — ảnh ủy nhiệm chi không bao giờ đi qua dây ở đây).
+ * Trần `TRAN_DU_AN` báo giá mới nhất, cờ `truncated` báo khi bị cắt (cùng trần và cùng cách báo với trang
+ * Quản lý dự án / Hoá đơn, DB-12) — không cắt thầm.
+ */
+export async function listInputInvoices(req: Request) {
+  if (!can(req.session, P.INVOICE_PAGE)) throw httpError(403, "Bạn không có quyền xem trang Hóa đơn đầu vào");
+  // Báo giá xoá mềm bị loại (`deletedAt`); HN chỉ tính khi đã duyệt. Không lọc theo `status`: người duyệt hàng
+  // chi phí có thể làm việc đó từ lúc báo giá còn nháp, và trạng thái báo giá đi kèm từng dòng để kế toán tự lọc.
+  const nhan = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT q.id
+      FROM "Quote" q
+     WHERE q."deletedAt" IS NULL
+       AND (q."hnStatus" = 'approved'
+            OR EXISTS (SELECT 1 FROM "QuoteSheet" s
+                        WHERE s."quoteId" = q.id
+                          AND jsonb_typeof(s."extraTables") = 'array'
+                          AND s."extraTables" @> '[{"items":[{"approved":true}]}]'::jsonb))
+     ORDER BY q."quoteDate" DESC, q.id DESC
+     LIMIT ${TRAN_DU_AN + 1}`;
+  const truncated = nhan.length > TRAN_DU_AN;
+  const ids = nhan.slice(0, TRAN_DU_AN).map((r) => r.id);
+  if (!ids.length) return { data: [] as HangDauVao[], meta: { quotes: 0, truncated: false } };
+
+  const [quotes, hnTheoBaoGia, bangSheet, dsMau] = await Promise.all([
+    prisma.quote.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true, companyId: true, status: true, projectCode: true, projectVersion: true, quoteNumber: true, title: true, shortTitle: true,
+        hnStatus: true, hnReviewedAt: true, hnReviewerId: true,
+        customer: { select: { code: true, name: true } },
+        company: { select: { shortName: true, name: true } },
+        createdBy: { select: { displayName: true } },
+        sheets: { orderBy: [{ order: "asc" }, { id: "asc" }], select: { id: true, order: true, name: true, codeNo: true } },
+      },
+    }),
+    bangHnTheoBaoGia(ids),
+    bangNoiBoTheoSheet(ids),
+    dsMauBangNoiBo(),
+  ]);
+
+  // Tên người duyệt: gom id ở MỘT chỗ rồi tra MỘT câu (hàng duyệt lưu id, không lưu tên).
+  const idNguoi = new Set<number>();
+  for (const q of quotes) if (q.hnStatus === "approved" && q.hnReviewerId != null) idNguoi.add(q.hnReviewerId);
+  for (const s of bangSheet) for (const t of Array.isArray(s.tables) ? s.tables : []) for (const it of Array.isArray(t?.items) ? t.items : []) {
+    if (it && it.approved === true && typeof it.approvedBy === "number") idNguoi.add(it.approvedBy);
+  }
+  const tenNguoi = new Map<number, string>(
+    idNguoi.size ? (await prisma.user.findMany({ where: { id: { in: [...idNguoi] } }, select: { id: true, displayName: true } })).map((u) => [u.id, u.displayName] as [number, string]) : [],
+  );
+
+  const theoBaoGia = new Map<number, { sheetId: number; order: number; tables: unknown[] }[]>();
+  for (const s of [...bangSheet].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.sheetId - b.sheetId)) {
+    (theoBaoGia.get(s.quoteId) ?? theoBaoGia.set(s.quoteId, []).get(s.quoteId)!).push({ sheetId: s.sheetId, order: s.order, tables: Array.isArray(s.tables) ? s.tables : [] });
+  }
+  const data = quotes.flatMap((q) => hangHoaDonDauVao({
+    quote: q, sheets: q.sheets, sheetTables: theoBaoGia.get(q.id) ?? [], bangHn: hnTheoBaoGia.get(q.id) ?? [], dsMau, tenNguoi,
+  }));
+  // Mới duyệt lên đầu; hàng không có ngày duyệt (dữ liệu cũ) xuống cuối. Sắp ổn định: cùng ngày giữ thứ tự bảng.
+  data.sort((a, b) => (b.approvedAt ? Date.parse(b.approvedAt) : -Infinity) - (a.approvedAt ? Date.parse(a.approvedAt) : -Infinity) || b.quoteId - a.quoteId);
+  return { data, meta: { quotes: ids.length, truncated } };
 }
 
 /** GET ONE — báo giá đầy đủ (QUOTE_INCLUDE) + 403 nếu không được read. Route present. */
@@ -1947,6 +2069,115 @@ export async function listApprovals(req: Request) {
     include: { approver: { select: { id: true, username: true, displayName: true } } },
   });
   return { data: rows };
+}
+
+/**
+ * GHI CHÚ + MÀU ở dòng Danh sách báo giá — `PUT /:id/list-note`, body đã qua `QuoteListNoteSchema`.
+ *
+ * Quyền = `loadAuthorizedQuote(req, "update")`: chủ báo giá, thành viên có ÍT NHẤT MỘT vùng, người có
+ * `quote:update:all`. Thành viên chỉ-xem và người chỉ có `quote:read:all` không được đè ghi chú của chủ;
+ * view bị lược (account HN, tài khoản chi phí) bị từ chối luôn — họ cũng không được trả cột này ở danh
+ * sách (`presentQuoteRow` chọn trường tường minh cho hai nhánh đó).
+ *
+ * CỐ Ý KHÔNG dùng `canEdit` (khoá sửa sau khi xuất hoá đơn): ghi chú không phải nội dung báo giá, và dòng
+ * đã xuất hoá đơn chính là dòng cần nhắc "chờ thu" nhất. CỐ Ý không chạm `Quote` (kể cả `data: {}`):
+ * `Quote.updatedAt` là mốc khoá lạc quan của màn soạn — bump nó là đá văng lần Lưu của người đang soạn.
+ *
+ * Trường vắng trong body = GIỮ NGUYÊN, nên ghi bằng MỘT câu upsert nguyên tử (`update` chỉ liệt kê trường
+ * được gửi) chứ không đọc-rồi-ghi: hai người đổi chữ và đổi màu cùng lúc không đè mất nhau.
+ */
+export async function setQuoteListNote(req: Request) {
+  const quote = await loadAuthorizedQuote(req, "update");
+  const quoteId = quote.id;
+  const body = req.body as { note?: string; color?: MauGhiChu | null };
+  const note = body.note !== undefined ? chuanHoaGhiChu(body.note) : undefined;
+  const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { displayName: true } });
+  const updatedByName = me?.displayName || null;
+  // `searchText` = chữ ghi chú đã bỏ dấu — để ô tìm của Danh sách báo giá tìm được chữ trong ghi chú; chỉ ghi khi
+  // chữ thay đổi (đổi riêng màu không được xoá nó).
+  const row = await prisma.quoteListNote.upsert({
+    where: { quoteId },
+    create: { quoteId, note: note ?? "", searchText: normalizeSearch(note ?? ""), color: body.color ?? null, updatedByName },
+    update: { ...(note !== undefined && { note, searchText: normalizeSearch(note) }), ...(body.color !== undefined && { color: body.color }), updatedByName },
+    select: { note: true, color: true, updatedByName: true, updatedAt: true },
+  });
+  // Cả chữ lẫn màu đều rỗng → không giữ hàng rỗng. Điều kiện nằm TRONG câu DELETE: nếu giữa hai câu có
+  // người khác vừa gõ chữ vào thì hàng không còn rỗng và không bị xoá nhầm.
+  if (!row.note && !row.color) {
+    await prisma.quoteListNote.deleteMany({ where: { quoteId, note: "", color: null } });
+    await audit(req, "quote.list-note", { resource: "quote", resourceId: quoteId, after: { note: "", color: null } });
+    return { quoteId, note: "", color: null, updatedByName: null, updatedAt: null };
+  }
+  await audit(req, "quote.list-note", { resource: "quote", resourceId: quoteId, after: { note: row.note, color: row.color } });
+  return { quoteId, ...row };
+}
+
+/** Ghi chú của các báo giá trong `ids` — MỘT câu `IN`, gắn vào đúng các dòng của trang danh sách đang xem. */
+async function ghiChuTheoBaoGia(ids: number[]) {
+  if (!ids.length) return new Map<number, { note: string; color: string | null; updatedByName: string | null; updatedAt: Date }>();
+  const ds = await prisma.quoteListNote.findMany({
+    where: { quoteId: { in: ids } },
+    select: { quoteId: true, note: true, color: true, updatedByName: true, updatedAt: true },
+  });
+  return new Map(ds.map(({ quoteId, ...con }) => [quoteId, con]));
+}
+
+/** Người tạo + công ty với tên ĐÃ bỏ dấu, để tìm thông minh khớp "nguyen" ra "Nguyễn Văn Ánh" / "Gia Nguyễn". Hai bảng
+ *  nhỏ (vài chục dòng) nên khớp trong JS mỗi lượt tìm — không đáng thêm cột searchText + backfill cho chúng. */
+async function nguoiVaCongTy(): Promise<Pick<NguCanhLoc, "nguoi" | "congTy">> {
+  const [us, cs] = await Promise.all([
+    prisma.user.findMany({ select: { id: true, displayName: true, username: true } }),
+    prisma.company.findMany({ select: { id: true, name: true, shortName: true, code: true } }),
+  ]);
+  return {
+    nguoi: us.map((u) => ({ id: u.id, ten: normalizeSearch(u.displayName, u.username) })),
+    congTy: cs.map((c) => ({ id: c.id, ten: normalizeSearch(c.name, c.shortName, c.code) })),
+  };
+}
+
+/**
+ * SỐ ĐẾM cho bộ lọc của Danh sách báo giá — `GET /facets`, nhận CÙNG bộ tham số với danh sách.
+ *
+ * Mỗi nhóm đếm theo MỌI bộ lọc KHÁC (trừ chính nó) trong phạm vi của người xem: đã chọn "Đã chốt" mà nhóm Công ty
+ * vẫn đếm cả báo giá nháp thì con số trên nút nói dối; còn nhóm Trạng thái mà áp luôn bộ lọc trạng thái thì mọi nút
+ * khác về 0 và không ai chọn thêm được. (Chuẩn của tìm kiếm có facet.) `mine` = của CHÍNH người xem — cho nút "Của tôi".
+ *
+ * Cổng: view lược (account HN / xem nội bộ) bị 403 — họ không có bộ lọc này, và đếm theo người tạo / ghi chú / công
+ * ty là cách dò thứ họ không được thấy. Phạm vi quyền áp TRƯỚC: người chỉ có quote:read:own chỉ thấy số của mình.
+ */
+export async function listQuoteFacets(req: Request) {
+  if (can(req.session, P.QUOTE_HN_FILL) || can(req.session, P.QUOTE_INTERNAL_VIEW)) throw httpError(403, "Bạn không có quyền xem thống kê bộ lọc");
+  const scope = quoteScopeWhereOrThrow(req.session) as Prisma.QuoteWhereInput;
+  const loc = docBoLoc(req.query as Record<string, any>);
+  const parts = locTheoChieu(loc, { ...(loc.q ? await nguoiVaCongTy() : { nguoi: [], congTy: [] }), bienLuoc: false });
+  const voi = (boQua?: ChieuLoc): Prisma.QuoteWhereInput => ({ AND: [scope, ...ghepLoc(parts, boQua)] });
+  const toi = req.session.userId as number;
+  const [theoTrangThai, theoNguoi, theoCongTy, coGhiChu, chuaGhiChu, theoMau, cuaToi, tong] = await Promise.all([
+    prisma.quote.groupBy({ by: ["status"], where: voi("status"), _count: { _all: true } }),
+    prisma.quote.groupBy({ by: ["createdById"], where: voi("creator"), _count: { _all: true } }),
+    prisma.quote.groupBy({ by: ["companyId"], where: voi("company"), _count: { _all: true } }),
+    prisma.quote.count({ where: { AND: [voi("note"), { listNote: { isNot: null } }] } }),
+    prisma.quote.count({ where: { AND: [voi("note"), { listNote: { is: null } }] } }),
+    // Quan hệ lồng không đi qua lớp xoá-mềm của db.ts (chỉ áp cho truy vấn cấp trên cùng) nên tự thêm deletedAt.
+    prisma.quoteListNote.groupBy({ by: ["color"], where: { color: { not: null }, quote: { AND: [voi("note"), { deletedAt: null }] } }, _count: { _all: true } }),
+    prisma.quote.count({ where: { AND: [voi("creator"), { createdById: toi }] } }),
+    prisma.quote.count({ where: voi() }),
+  ]);
+  const [tenNguoi, tenCongTy] = await Promise.all([
+    theoNguoi.length ? prisma.user.findMany({ where: { id: { in: theoNguoi.map((g) => g.createdById) } }, select: { id: true, displayName: true } }) : [],
+    theoCongTy.length ? prisma.company.findMany({ where: { id: { in: theoCongTy.map((g) => g.companyId) } }, select: { id: true, name: true, shortName: true } }) : [],
+  ]);
+  const nguoi = new Map(tenNguoi.map((u) => [u.id, u.displayName]));
+  const congTy = new Map(tenCongTy.map((c) => [c.id, c.shortName || c.name]));
+  const xep = <T extends { name: string; count: number }>(ds: T[]) => ds.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "vi"));
+  return {
+    total: tong,
+    mine: cuaToi,
+    status: theoTrangThai.map((g) => ({ value: g.status, count: g._count._all })),
+    creators: xep(theoNguoi.map((g) => ({ id: g.createdById, name: nguoi.get(g.createdById) ?? `#${g.createdById}`, count: g._count._all }))),
+    companies: xep(theoCongTy.map((g) => ({ id: g.companyId, name: congTy.get(g.companyId) ?? `#${g.companyId}`, count: g._count._all }))),
+    note: { has: coGhiChu, none: chuaGhiChu, colors: Object.fromEntries(theoMau.map((g) => [g.color as string, g._count._all])) },
+  };
 }
 
 /**

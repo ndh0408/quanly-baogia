@@ -561,6 +561,7 @@ model Quote {
   versions  QuoteVersion[]
   approvals Approval[]
   members   QuoteMember[] // "account phụ": nhân viên được thêm vào để xem/sửa, có PHẠM VI riêng
+  listNote  QuoteListNote? // ghi chú + màu ở dòng của Danh sách báo giá — bảng RIÊNG, xem model bên dưới
 
   sentAt         DateTime?
   convertedAt    DateTime?
@@ -637,6 +638,31 @@ model QuoteMember {
 
   @@id([quoteId, userId])
   @@index([userId]) // "báo giá tôi được thêm vào" — đường đọc của quoteScopeWhere
+}
+
+// GHI CHÚ + MÀU ở dòng của Danh sách báo giá (chủ repo 2026-09-30) — MỘT hàng cho mỗi báo giá, dùng chung
+// cho mọi người thấy dòng đó.
+//
+// VÌ SAO BẢNG RIÊNG chứ không phải hai cột trên `Quote`: `Quote.updatedAt` là mốc KHOÁ LẠC QUAN của màn
+// soạn (client gửi `baseUpdatedAt`, lệch là 409). Ghi lên `Quote` làm mốc nhảy — một đồng nghiệp gõ ghi chú
+// ở danh sách sẽ đá văng lần Lưu kế tiếp của người đang soạn chính báo giá đó. Ghi chú là siêu dữ liệu của
+// DÒNG, không phải nội dung báo giá: không bump `updatedAt`, không sinh `QuoteVersion`, không khoá theo
+// `canEdit` (báo giá đã xuất hoá đơn vẫn ghi chú được), và không nằm trong bản chụp phiên bản.
+//
+// Không có hàng = chưa có ghi chú (service xoá hàng khi cả chữ lẫn màu đều rỗng). `color` là khoá trong
+// bảng 5 màu ("red" | "orange" | "green" | "blue" | "purple" — src/quoteListNote.ts), kiểm ở lớp API chứ
+// không bằng CHECK để đổi bảng màu không cần migration. `updatedByName` CHỤP tên lúc ghi (như
+// `QuoteSheet.signedByName`): không FK tới User để xoá tài khoản không kéo theo ghi chú của người khác.
+model QuoteListNote {
+  quoteId       Int      @id
+  quote         Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  note          String   @default("")
+  // `note` chuẩn-hoá bỏ dấu (normalizeSearch) — để Danh sách báo giá TÌM được chữ trong ghi chú không dấu / sai
+  // dấu, cùng cách với Quote.searchText / Customer.searchText. Bảng chỉ có vài trăm hàng nên không cần chỉ mục.
+  searchText    String   @default("")
+  color         String?
+  updatedByName String?
+  updatedAt     DateTime @updatedAt
 }
 
 model QuoteVersion {

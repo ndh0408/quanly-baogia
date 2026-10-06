@@ -303,7 +303,7 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
     }),
     // Ba cột BLOB bị loại khỏi bản xuất — lý do KHÁC NHAU cho từng cột, không phải "cho nhẹ":
     //   · QuoteItem.images  — mảng data-URL base64, trần validator là 10 ảnh × 2.800.000 ký tự MỖI
-    //     hạng mục (src/validators.ts:161-163). Một báo giá cỡ trung đã vượt xa bộ nhớ hợp lý, mà
+    //     hạng mục (`itemSchema.images` ở src/validators.ts). Một báo giá cỡ trung đã vượt xa bộ nhớ hợp lý, mà
     //     take ở đây là 1000 báo giá.
     //   · Quote.customerLogo — data-URL base64 logo của KHÁCH HÀNG, không phải dữ liệu cá nhân của
     //     người xin bản xuất: đưa vào một tệp tải-về là tự tạo đường rò.

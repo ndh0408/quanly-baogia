@@ -16,7 +16,10 @@ import { config } from "./config.js";
 // Chốt bằng tests/db-mem-trong-transaction.test.js (cấm `tx.<model-mềm>.delete`).
 const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote", "Customer", "Product", "PersonnelRecord", "Employee"]);
 const READS = new Set(["findUnique", "findFirst", "findMany", "findUniqueOrThrow", "findFirstOrThrow", "count", "aggregate", "groupBy"]);
-const RT_ENTITY: Record<string, string> = { Quote: "quote", Customer: "customer", User: "user" };
+// `QuoteListNote` (ghi chú + màu ở dòng Danh sách báo giá) có thực thể RIÊNG "quoteNote", KHÔNG gộp vào
+// "quote": client chỉ cần tải lại danh sách (khoá "quotes"), còn "quote" kéo theo cả /quotes/projects
+// (≤2000 báo giá), Dashboard, Nhân sự… — quá nặng cho một dòng ghi chú.
+const RT_ENTITY: Record<string, string> = { Quote: "quote", Customer: "customer", User: "user", QuoteListNote: "quoteNote" };
 const RT_WRITES = new Set(["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany"]);
 
 const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);

@@ -224,9 +224,17 @@ bắc cầu thành `invoice:edit` + `invoice:pay`.
 | có `invoiceNo` | Thanh toán |
 | có `invoiceNo` **và** `paidAt` | Done |
 
-Hai trang đọc **cùng một nguồn dữ liệu**: trang **Hoá đơn** (`invoice:page`) là
-nơi kế toán **nhập**; trang **Quản lý dự án** (`invoice:read`) là nơi tham chiếu,
-chỉ xem. Nhập một chỗ, hiện cả hai.
+Hai trang đọc **cùng một nguồn dữ liệu**: trang **Hóa đơn đầu ra** (`invoice:page`; tên cũ
+"Hoá đơn", route vẫn là `#/invoices`) là nơi kế toán **nhập**; trang **Quản lý dự án**
+(`invoice:read`) là nơi tham chiếu, chỉ xem. Nhập một chỗ, hiện cả hai.
+
+Từ 2026-09-30 có thêm trang **Hóa đơn đầu vào** (`#/invoices-in`, cùng cổng `invoice:page`,
+`GET /api/quotes/input-invoices`): **chỉ xem**, liệt kê mọi **hàng bảng nội bộ đã duyệt** — mỗi
+hàng là một khoản chi kế toán phải đòi hoá đơn đầu vào. "Đã duyệt" có hai dạng: Chi phí HCM / Phí
+khách hàng duyệt **theo hàng** (`item.approved`, quyền `quote:internal:approve`); Báo giá Hà Nội
+duyệt ở **mức báo giá** (`Quote.hnStatus = approved` — cờ `approved*` của từng hàng HN không phải
+nguồn sự thật). Luật chọn hàng + tính tiền ở `src/inputInvoices.ts` (dùng đúng `extraTableSum`);
+không bao giờ mang ảnh ủy nhiệm chi. Hàng chưa duyệt không cộng vào tổng báo giá nên không xuất hiện.
 
 ### Thanh toán từng hàng bảng nội bộ
 
@@ -258,7 +266,7 @@ một tài khoản cụ thể có thể khác bảng này. `admin` **luôn full*
 | `manager` | Account | tạo/sửa/xoá **của mình**, chốt/không chốt | ✓ | giao/duyệt HN | — (trừ khi được cấp riêng) |
 | `account_hn` | Account HN | chỉ đọc/ghi báo giá **được giao**, view bị lược | — | **điền + gửi duyệt** | — |
 | `hr` | Nhân sự | — | — | — | — |
-| `accountant` | Kế toán | — | — | — | trang Hoá đơn: sửa + đánh dấu thu tiền |
+| `accountant` | Kế toán | — | — | — | trang Hóa đơn đầu ra: sửa + đánh dấu thu tiền; trang Hóa đơn đầu vào: xem |
 
 `hr` và `accountant` **không thấy báo giá**. Quyền mặc định của họ nằm ở domain
 nhân sự: `hr` chỉ có `personnel:read:all`; `accountant` có thêm
@@ -283,6 +291,12 @@ nhân sự: `hr` chỉ có `personnel:read:all`; `accountant` có thêm
 5. **Trạng thái mức sheet phải được BÊ sang bản mới** mỗi lần Lưu (Lưu = xoá
    sheet + tạo lại). Chữ ký, số hoá đơn, ngày thanh toán, ý kiến khách đều sống
    ở đó.
+6. **Đổi khách hàng (danh mục) đi qua cùng cổng sửa báo giá, cộng một lớp riêng.** Khách mới phải
+   tồn tại (chưa xoá) và người đổi phải `customer:read` được nó (`kiemKhachDuocGan`, cả lúc tạo) — không thì đoán
+   id là gắn được khách của người khác rồi đọc mã + tên qua phản hồi. Lớp này chỉ chạy khi `customerId` **đổi**:
+   màn soạn gửi lại cả báo giá mỗi lần Lưu, kể cả `customerId` cũ (khách đã chuyển chủ / bị xoá sau khi gắn
+   vẫn phải Lưu được). Đã xuất hoá đơn thì khoá như mọi trường khác; account phụ không có vùng "Báo giá chính"
+   bị gỡ `customerId` khỏi payload (`FIELD_VUNG_MAIN`). Nhật ký `quote.update` ghi mã + tên khách trước/sau.
 
 ## Cái tài liệu này KHÔNG mô tả
 
