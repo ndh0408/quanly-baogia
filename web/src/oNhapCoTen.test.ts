@@ -8,20 +8,9 @@
 // Quét thẻ JSX `<input|select|textarea …>` trong *.tsx (bỏ tệp test). Thẻ có `{...props}` được bỏ qua vì tên có thể đến
 // từ props. Dòng chú thích (`*`, `//`) và thẻ trơn không thuộc tính như `<input>` trong lời giải thích cũng bỏ qua.
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
-
-const GOC = join(__dirname);
-
-function tepTsx(thuMuc: string): string[] {
-  const kq: string[] = [];
-  for (const ten of readdirSync(thuMuc)) {
-    const p = join(thuMuc, ten);
-    if (statSync(p).isDirectory()) kq.push(...tepTsx(p));
-    else if (ten.endsWith(".tsx") && !ten.endsWith(".test.tsx")) kq.push(p);
-  }
-  return kq;
-}
+// Nạp mã nguồn qua Vite (`?raw`) chứ không qua node:fs: tsconfig của web chỉ có kiểu vite/client, không có @types/node —
+// lúc dựng image (cd web && npm ci && tsc) `node:fs` / `__dirname` không có kiểu và bản dựng gãy.
+const NGUON = import.meta.glob<string>(["./**/*.tsx", "!./**/*.test.tsx"], { query: "?raw", import: "default", eager: true });
 
 function oThieuTen(nguon: string): number[] {
   const dong: number[] = [];
@@ -46,8 +35,8 @@ function oThieuTen(nguon: string): number[] {
 
 describe("ô nhập trong web/src đều có name hoặc id", () => {
   it("không thẻ <input|select|textarea> nào thiếu cả name lẫn id", () => {
-    const thieu = tepTsx(GOC).flatMap((p) =>
-      oThieuTen(readFileSync(p, "utf8")).map((d) => `${relative(GOC, p).split(sep).join("/")}:${d}`));
+    expect(Object.keys(NGUON).length, "glob phải thấy mã nguồn").toBeGreaterThan(20);
+    const thieu = Object.entries(NGUON).flatMap(([p, nguon]) => oThieuTen(nguon).map((d) => `${p.slice(2)}:${d}`));
     expect(thieu, "thêm name=\"…\" cho các ô này (Chrome Issues: form field should have an id or name)").toEqual([]);
   });
 
