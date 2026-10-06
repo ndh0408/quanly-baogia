@@ -262,21 +262,21 @@ export function InvoicesPage({ me }: { me: Me }) {
     const v = (r[field] as string) || "";
     if (!editable(r, field as string)) return <td className={missCls(r[field])}>{v || dash}</td>;
     if (editKey !== ck(r, field as string)) return viewTd(r, field as string, v || dash);
-    return <td className={missCls(r[field])}><input name={String(field)} autoFocus defaultValue={v} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
+    return <td className={missCls(r[field])}><input autoComplete="off" name={String(field)} autoFocus defaultValue={v} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
       onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, field as string, e.target.value.trim() || null); }} /></td>;
   };
   const dateCell = (r: Row, field: keyof Row) => {
     const disp = hasValue(r[field]) ? fmtDate(r[field] as string) : dash;
     if (!editable(r, field as string)) return <td className={missCls(r[field])}>{disp}</td>;
     if (editKey !== ck(r, field as string)) return viewTd(r, field as string, disp);
-    return <td className={missCls(r[field])}><input name={String(field)} autoFocus type="date" defaultValue={toInputDate(r[field] as string)} style={{ width: 140 }} aria-label={fieldLabel(field as string, r)}
+    return <td className={missCls(r[field])}><input autoComplete="off" name={String(field)} autoFocus type="date" defaultValue={toInputDate(r[field] as string)} style={{ width: 140 }} aria-label={fieldLabel(field as string, r)}
       onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, field as string, e.target.value || null); }} /></td>;
   };
   const selectCell = (r: Row, field: keyof Row, options: string[], defVal = "") => {
     const disp = (r[field] as string) || defVal;
     if (!editable(r, field as string)) return <td>{disp || dash}</td>;
     if (editKey !== ck(r, field as string)) return viewTd(r, field as string, disp || dash);
-    return <td className={missCls(disp)}><select name={String(field)} autoFocus defaultValue={disp} style={{ width: 74 }} aria-label={fieldLabel(field as string, r)}
+    return <td className={missCls(disp)}><select autoComplete="off" name={String(field)} autoFocus defaultValue={disp} style={{ width: 74 }} aria-label={fieldLabel(field as string, r)}
       onKeyDown={editKeyDown}
       onChange={(e) => { setEditKey(null); saveField(r, field as string, e.target.value || null); }}
       onBlur={() => setEditKey(null)}>

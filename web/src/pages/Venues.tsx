@@ -196,7 +196,7 @@ function FirstVenue({ canManage, onAdd }: { canManage: boolean; onAdd: AddVenueH
         <li>Xong. Lúc làm báo giá, gõ “quầy vé” là app hiện đúng hạng mục để chèn nhanh.</li>
       </ol>
       <div className="vn-firstform">
-        <input name="name" ref={inputRef} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…" disabled={busy}
+        <input autoComplete="off" name="name" ref={inputRef} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…" disabled={busy}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }} />
         <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy || !name.trim()}>{busy ? "Đang thêm…" : "Thêm rạp"}</button>
       </div>
@@ -221,7 +221,7 @@ function AddVenueRow({ onAdd }: { onAdd: AddVenueHandler }) {
   };
   return (
     <div className="vn-addv">
-      <input name="name" ref={inputRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="+ Thêm rạp mới…" disabled={busy}
+      <input autoComplete="off" name="name" ref={inputRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="+ Thêm rạp mới…" disabled={busy}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }} />
       {name.trim() && <button type="button" className="btn btn-sm btn-primary" onClick={() => void submit()} disabled={busy}>{busy ? "…" : "Thêm"}</button>}
     </div>
@@ -274,7 +274,7 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
       <div className="vn-rhead">
         <button type="button" className="btn btn-sm vn-back" onClick={onBack}>‹ Danh sách</button>
         {renaming ? (
-          <input name="name" className="vn-rename" autoFocus value={name} onChange={(e) => setName(e.target.value)}
+          <input autoComplete="off" name="name" className="vn-rename" autoFocus value={name} onChange={(e) => setName(e.target.value)}
             onBlur={() => void rename()} onKeyDown={(e) => {
               if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
               if (e.key === "Escape") { e.preventDefault(); renameCancelledRef.current = true; setRenaming(false); setName(venue.name); }
@@ -523,7 +523,7 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
           {err && <div className="err">⚠ {err}</div>}
           <div className="grid">
             <label className="full"><span>Tên hạng mục</span>
-              <input name="name" autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
+              <input autoComplete="off" name="name" autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
             <label className="full"><span>Ghi chú <em className="unit">(điền sẵn vào cột Ghi chú của báo giá)</em></span>
               <input name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="vd: PP in KTS" /></label>
             <label className="full" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

@@ -2394,19 +2394,19 @@ function GridTableInner(props: GridTableProps) {
     // KEY CỐ ĐỊNH (chỉ _k+field): KHÔNG để công thức/giá-trị lật key gây REMOUNT (mất focus khi gõ đè).
     // Hiển thị (kết quả công thức / giá trị sau dán-undo) đồng bộ qua paintCells ở effect (như SPA).
     return (<>
-      <input name={f} key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
+      <input autoComplete="off" name={f} key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
         title="Số hoặc công thức Excel: =G3*E3, =SUM(H3:H8), 8% — bấm/kéo ô để chèn tham chiếu"
         data-xl="so" onInput={xuLyO} />
       {fx && <button type="button" className="fx-peek-badge" title={"Công thức: " + fx} data-fx-cot={f} data-xl="xem-fx" onClick={xuLyBam}>ƒ</button>}
     </>);
   };
   const txtInput = (i: number, f: string, ph?: string) => (
-    <input name={f} data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
+    <input autoComplete="off" name={f} data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
       data-xl="chu" onInput={xuLyO} />
   );
   const onTxtInput = (i: number, f: string, el: HTMLInputElement) => { editingRef.current = true; markEditUndo(i, f); fitCell(el); const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); };
   const taInput = (i: number, f: string, ph?: string) => (
-    <textarea name={f} data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
+    <textarea autoComplete="off" name={f} data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
       ref={autoGrow} data-xl="ta" onInput={xuLyO} />
   );
   const onTaInput = (i: number, f: string, el: HTMLTextAreaElement) => { editingRef.current = true; markEditUndo(i, f); (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChangeSoft(); };
@@ -2917,7 +2917,7 @@ function GridTableInner(props: GridTableProps) {
                 return <DongNho key={it._k ?? i} sig={chuKy(i, `S|${isSub}|${letter}|${subAmt}|${M.groupMult(it)}`)} ve={() => (
                   <tr data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
                     <td className="col-stt">{String(it.label || letter)}</td>
-                    <td className="col-hangmuc"><textarea name="name" data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
+                    <td className="col-hangmuc"><textarea autoComplete="off" name="name" data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
                     {showDetail && <td className="col-detail" />}
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
                     <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
@@ -2938,7 +2938,7 @@ function GridTableInner(props: GridTableProps) {
                 return <DongNho key={it._k ?? i} sig={chuKy(i, "I")} ve={() => (
                   <tr data-row={i} className="info-row">
                     <td className="col-stt" />
-                    <td className="col-info" colSpan={infoColspan}><textarea name="name" data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
+                    <td className="col-info" colSpan={infoColspan}><textarea autoComplete="off" name="name" data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
                     {showImages && <td className="col-images">{imagesCell(i)}</td>}
                     {editable && <td className="col-action"><button className="rm-row" title="Xóa" data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
                   </tr>
@@ -2951,7 +2951,7 @@ function GridTableInner(props: GridTableProps) {
               return <DongNho key={it._k ?? i} sig={chuKy(i, `H|${span}|${stt}`)} ve={() => (
                 <tr data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
                   <td className="col-stt" rowSpan={span}>{stt}</td>
-                  <td className="col-hangmuc" rowSpan={span}><textarea name="name" data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} data-xl="ten-hang" onInput={xuLyO} /></td>
+                  <td className="col-hangmuc" rowSpan={span}><textarea autoComplete="off" name="name" data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} data-xl="ten-hang" onInput={xuLyO} /></td>
                   {dataCells(i)}
                 </tr>
               )} />;

@@ -330,14 +330,14 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
           <p className="muted" style={{ marginTop: 0 }}>Nhập email — hệ thống gửi lời mời, họ tự đặt mật khẩu. Tích các quyền tài khoản này được phép.</p>
           <div className="grid">
             <label className="full"><span>Họ tên <b className="req">*</b></span>
-              <input name="displayName" ref={firstRef} value={displayName} placeholder="VD: Nguyễn Văn A" aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />
+              <input autoComplete="off" name="displayName" ref={firstRef} value={displayName} placeholder="VD: Nguyễn Văn A" aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />
               {fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
             {/* Cùng cụm danh tính với Họ tên. Câu chữ lấy NGUYÊN của trang Hồ sơ cá nhân và màn
                 kích hoạt (#/onboard) — ba nơi cùng một trường thì phải cùng một cách gọi tên. */}
             <label className="full"><span>Tên người gửi trên báo giá</span>
-              <input name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
+              <input autoComplete="off" name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
             <label className="full"><span>Email cá nhân <b className="req">*</b></span>
-              <input name="email" type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
+              <input autoComplete="off" name="email" type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
               {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: báo giá của họ năm nay là FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span>
               <input name="projectCode" value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
@@ -482,8 +482,8 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
         <div className="modal-head"><h3>Sửa: {user.username}</h3><button className="x" onClick={() => void guardedClose()} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           <div className="grid">
-            <label className="full"><span>Tên đăng nhập</span><input name="username" value={user.username} disabled /></label>
-            <label className="full"><span>Họ tên</span><input name="displayName" ref={firstRef} value={displayName} aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />{fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
+            <label className="full"><span>Tên đăng nhập</span><input autoComplete="off" name="username" value={user.username} disabled /></label>
+            <label className="full"><span>Họ tên</span><input autoComplete="off" name="displayName" ref={firstRef} value={displayName} aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />{fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
             {/* Trước 2026-09-18 email đặt được ĐÚNG MỘT LẦN lúc mời rồi khoá cứng: `USER_SELECT` trả
                 cột này về nên giao diện ĐỌC được, nhưng không schema quản trị nào NHẬN nó — ảnh gương
                 của ca `title` (ghi-được-không-đọc-được). Một địa chỉ gõ sai lúc mời là không ai sửa
@@ -494,21 +494,21 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
                 một lá thư không bao giờ tới. Máy chủ chặn 400; `required` ở đây chỉ để người dùng biết
                 trước khi bấm Lưu. Muốn bỏ một người thì KHOÁ tài khoản, đừng xoá email. */}
             <label className="full"><span>Email <em className="unit">(địa chỉ nhận thư mời · đặt lại mật khẩu)</em></span>
-              <input name="email" type="email" required value={email} placeholder="vd: nhanvien@gianguyen.vn" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
+              <input autoComplete="off" name="email" type="email" required value={email} placeholder="vd: nhanvien@gianguyen.vn" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
               {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
             {/* Ô NẠP SẴN giá trị đang có ⇒ xoá trắng là XOÁ THẬT. Admin nhìn thấy "Chị Lan", xoá đi,
                 bấm Lưu — kỳ vọng duy nhất là nó biến mất. Bản trước quy "" về "không đổi", nên
                 giao diện báo "Đã lưu" mà cột vẫn nguyên: lưu mà không ăn. (Luật ngược lại chỉ áp
                 cho ô KHÔNG nạp sẵn — vd màn Quên mật khẩu, nơi ô luôn rỗng bất kể CSDL có gì.) */}
-            <label className="full"><span>Tên người gửi trên báo giá</span><input name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
-            <label className="full"><span>SĐT</span><input name="phone" type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
+            <label className="full"><span>Tên người gửi trên báo giá</span><input autoComplete="off" name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
+            <label className="full"><span>SĐT</span><input autoComplete="off" name="phone" type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
             {/* Cùng luật, cùng câu chữ với trang Hồ sơ cá nhân (web/src/pages/Profile.tsx) và màn
                 #/onboard — một trường thì một cách gọi tên. Ô này IN LÊN BÁO GIÁ gửi khách (dòng
                 chức danh dưới tên người gửi), nhưng trước 2026-09-17 `USER_SELECT` không trả
                 `title` về nên modal không dựng nổi ô: admin ghi được qua API mà không đọc lại được,
                 và người được mời qua email bỏ trống ô Chức danh ở #/onboard thì không ai sửa hộ
                 được nữa. */}
-            <label className="full"><span>Chức danh</span><input name="title" value={title} placeholder="VD: Account, Sale…" onChange={(e) => mark(setTitle)(e.target.value)} /></label>
+            <label className="full"><span>Chức danh</span><input autoComplete="off" name="title" value={title} placeholder="VD: Account, Sale…" onChange={(e) => mark(setTitle)(e.target.value)} /></label>
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input name="projectCode" value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
           <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={setPermsTay} onPreview={xemThu} label={user.displayName || user.username}

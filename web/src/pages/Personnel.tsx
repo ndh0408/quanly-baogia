@@ -635,12 +635,12 @@ function RecordForm({ rec, readOnly: readOnlyTheoQuyen, onClose, onSaved }: {
                     <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
                       <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}{f.type === "money" && <em className="unit"> (đ)</em>}</span>
                       {f.type === "textarea" ? (
-                        <textarea name={f.key} value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)} />
+                        <textarea autoComplete="off" name={f.key} value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)} />
                       ) : f.key === "birthYear" ? (
                         // NGÀY SINH: lịch chọn ngày (đủ dd/mm/yyyy cho hợp đồng). Trường DB là text —
                         // dữ liệu cũ chỉ có năm ("1995") giữ nguyên nếu không chọn lại (input trống + nhắc).
                         <>
-                          <input name={f.key} type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
+                          <input autoComplete="off" name={f.key} type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
                             onChange={(e) => set(f.key, inputToDdmm(e.target.value))} />
                           {form[f.key] && !fullDateToInput(form[f.key]) && (
                             <em className="unit">Đang lưu: “{form[f.key]}” (chỉ năm) — chọn ngày để có đủ ngày/tháng/năm in hợp đồng.</em>

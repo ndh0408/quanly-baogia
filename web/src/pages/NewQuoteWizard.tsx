@@ -146,28 +146,28 @@ export function NewQuoteWizard({ me }: { me: Me }) {
             <h2>Thông tin báo giá</h2>
             <p className="hint">Khách hàng, người gửi, VAT, ngày.</p>
             <div className="form-grid">
-              <label style={{ gridColumn: "1/-1" }}>Tiêu đề báo giá <span className="req">*</span><input name="title" value={info.title} placeholder="VD: Décor Premiere Phim Thỏ Ơi" onChange={(e) => set("title", e.target.value)} /></label>
+              <label style={{ gridColumn: "1/-1" }}>Tiêu đề báo giá <span className="req">*</span><input autoComplete="off" name="title" value={info.title} placeholder="VD: Décor Premiere Phim Thỏ Ơi" onChange={(e) => set("title", e.target.value)} /></label>
               {/* Tiêu đề đầy đủ thường quá dài và đầy dấu để làm TÊN TỆP. Ô này là bản gọn do người
                   dùng tự đặt; bỏ trống thì tên file lùi về tiêu đề chính. */}
               <label style={{ gridColumn: "1/-1" }}>Tiêu đề rút gọn <em className="unit">(tuỳ chọn — dùng đặt tên file tải về)</em>
-                <input name="shortTitle" value={info.shortTitle} maxLength={120} placeholder="VD: Decor Premiere" onChange={(e) => set("shortTitle", e.target.value)} /></label>
+                <input autoComplete="off" name="shortTitle" value={info.shortTitle} maxLength={120} placeholder="VD: Decor Premiere" onChange={(e) => set("shortTitle", e.target.value)} /></label>
               <label style={{ gridColumn: "1/-1" }}>Mã khách hàng <span className="req">*</span>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input name="customer" value={customer ? `${customer.code} — ${customer.name}` : ""} placeholder="Chưa chọn — bấm nút bên phải" readOnly style={{ flex: 1 }} />
                   <button type="button" className="btn btn-sm btn-primary" onClick={() => setPickOpen(true)}>Chọn khách hàng</button>
                 </div></label>
-              <label>Khách hàng (To) <span className="req">*</span><input name="toCompany" value={info.toCompany} onChange={(e) => set("toCompany", e.target.value)} /></label>
-              <label>Người liên hệ KH<input name="toContact" value={info.toContact} onChange={(e) => set("toContact", e.target.value)} /></label>
+              <label>Khách hàng (To) <span className="req">*</span><input autoComplete="off" name="toCompany" value={info.toCompany} onChange={(e) => set("toCompany", e.target.value)} /></label>
+              <label>Người liên hệ KH<input autoComplete="off" name="toContact" value={info.toContact} onChange={(e) => set("toContact", e.target.value)} /></label>
               <label style={{ gridColumn: "1/-1" }}>Người gửi — chọn nhanh
                 <select name="sender" defaultValue="__me" onChange={(e) => onSender(e.target.value)}>
                   <option value="__me">Bạn — {me.senderName || me.displayName}{me.title ? " · " + me.title : ""}</option>
                   {managers.filter((m) => m.id !== me.id).map((m) => <option key={m.id} value={m.id}>{m.senderName || m.displayName} ({ROLE_LABEL[m.role || ""] || m.role}{m.title ? " · " + m.title : ""})</option>)}
                 </select>
                 <span className="muted" style={{ fontSize: 12 }}>Tự điền Tên + Chức danh + SĐT người gửi — vẫn sửa tay được bên dưới.</span></label>
-              <label>Người gửi (From)<input name="fromContact" value={info.fromContact} onChange={(e) => set("fromContact", e.target.value)} /></label>
-              <label>Chức danh<input name="fromTitle" value={info.fromTitle} placeholder="VD: Account, Sale…" onChange={(e) => set("fromTitle", e.target.value)} /></label>
-              <label>SĐT người gửi<input name="fromPhone" value={info.fromPhone} onChange={(e) => set("fromPhone", e.target.value)} /></label>
-              <label>Địa chỉ (tự theo công ty)<input name="fromAddress" value={info.fromAddress} readOnly title="Tự lấy theo Công ty bên gửi" /></label>
+              <label>Người gửi (From)<input autoComplete="off" name="fromContact" value={info.fromContact} onChange={(e) => set("fromContact", e.target.value)} /></label>
+              <label>Chức danh<input autoComplete="off" name="fromTitle" value={info.fromTitle} placeholder="VD: Account, Sale…" onChange={(e) => set("fromTitle", e.target.value)} /></label>
+              <label>SĐT người gửi<input autoComplete="off" name="fromPhone" value={info.fromPhone} onChange={(e) => set("fromPhone", e.target.value)} /></label>
+              <label>Địa chỉ (tự theo công ty)<input autoComplete="off" name="fromAddress" value={info.fromAddress} readOnly title="Tự lấy theo Công ty bên gửi" /></label>
               <label>VAT (%)<input name="vatPercent" type="number" step="0.1" value={info.vatPercent} onChange={(e) => set("vatPercent", e.target.value)} /></label>
               <label>Ngày<input name="quoteDate" type="date" value={info.quoteDate} onChange={(e) => set("quoteDate", e.target.value)} /></label>
             </div>

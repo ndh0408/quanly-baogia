@@ -200,7 +200,7 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
             </label>
             <label className="full">
               <span>Tên công ty <b className="req">*</b></span>
-              <input name="name" ref={!isNew ? firstRef : undefined} value={name} disabled={readOnly}
+              <input autoComplete="off" name="name" ref={!isNew ? firstRef : undefined} value={name} disabled={readOnly}
                 aria-invalid={fieldErrors.name ? true : undefined}
                 onChange={(e) => { dirty.current = true; setName(e.target.value); setFieldErrors((fe) => (fe.name ? { ...fe, name: "" } : fe)); }} />
               {fieldErrors.name && <div className="field-err">{fieldErrors.name}</div>}

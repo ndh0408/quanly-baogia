@@ -1244,20 +1244,20 @@ Lý do (không bắt buộc):`,
                 {suaMain && <button type="button" className="btn btn-sm" disabled={saving} onClick={() => setKhOpen(true)}>{q.customerId ? "Đổi khách hàng" : "Chọn khách hàng"}</button>}
               </div>
             </div>
-            <label>Tên khách hàng<input name="toCompany" key={`tc${khKey}`} defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
-            <label>Người liên hệ<input name="toContact" key={`tl${khKey}`} defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Email<input name="toEmail" key={`te${khKey}`} type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input name="toPhone" key={`tp${khKey}`} defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ<input name="toAddress" key={`ta${khKey}`} defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
+            <label>Tên khách hàng<input autoComplete="off" name="toCompany" key={`tc${khKey}`} defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain || saving} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
+            <label>Người liên hệ<input autoComplete="off" name="toContact" key={`tl${khKey}`} defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain || saving} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Email<input autoComplete="off" name="toEmail" key={`te${khKey}`} type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain || saving} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input autoComplete="off" name="toPhone" key={`tp${khKey}`} defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ<input autoComplete="off" name="toAddress" key={`ta${khKey}`} defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain || saving} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
           </fieldset>
           <fieldset className="meta-col">
             <legend>Bên gửi · Công ty báo giá</legend>
             <label>Công ty <span className="muted" style={{ fontSize: 11 }}>(đã chọn lúc tạo)</span>
-              <select name="companyId" value={q.companyId} disabled title="Công ty đã chọn khi tạo báo giá — không đổi ở đây">{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            <label>Người gửi<input name="fromContact" defaultValue={q.fromContact || ""} placeholder="Người phụ trách" disabled={!suaMain || saving} onInput={(e) => setQ("fromContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Chức danh<input name="fromTitle" defaultValue={q.fromTitle || ""} placeholder="VD: Trưởng phòng KD" disabled={!suaMain || saving} onInput={(e) => setQ("fromTitle", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input name="fromPhone" defaultValue={q.fromPhone || ""} placeholder="SĐT người gửi" disabled={!suaMain || saving} onInput={(e) => setQ("fromPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ <span className="muted" style={{ fontSize: 11 }}>(tự theo công ty)</span><input name="fromAddress" value={q.fromAddress || ""} readOnly title="Tự lấy theo Công ty bên gửi" disabled={!suaMain || saving} /></label>
+              <select autoComplete="off" name="companyId" value={q.companyId} disabled title="Công ty đã chọn khi tạo báo giá — không đổi ở đây">{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            <label>Người gửi<input autoComplete="off" name="fromContact" defaultValue={q.fromContact || ""} placeholder="Người phụ trách" disabled={!suaMain || saving} onInput={(e) => setQ("fromContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Chức danh<input autoComplete="off" name="fromTitle" defaultValue={q.fromTitle || ""} placeholder="VD: Trưởng phòng KD" disabled={!suaMain || saving} onInput={(e) => setQ("fromTitle", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input autoComplete="off" name="fromPhone" defaultValue={q.fromPhone || ""} placeholder="SĐT người gửi" disabled={!suaMain || saving} onInput={(e) => setQ("fromPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ <span className="muted" style={{ fontSize: 11 }}>(tự theo công ty)</span><input autoComplete="off" name="fromAddress" value={q.fromAddress || ""} readOnly title="Tự lấy theo Công ty bên gửi" disabled={!suaMain || saving} /></label>
           </fieldset>
         </div>
 
@@ -1271,11 +1271,11 @@ Lý do (không bắt buộc):`,
         </div>
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
-        <input name="title" className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!suaMain || saving} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
+        <input autoComplete="off" name="title" className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!suaMain || saving} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
         {/* Tiêu đề RÚT GỌN — chỉ dùng đặt tên file tải về, KHÔNG in vào Excel/PDF gửi khách. */}
         <div className="short-title-row">
           <span className="muted">Tiêu đề rút gọn</span>
-          <input name="shortTitle" className="short-title-input" maxLength={120} defaultValue={(q.shortTitle as string) || ""} placeholder={q.title || "để trống → dùng tiêu đề chính"}
+          <input autoComplete="off" name="shortTitle" className="short-title-input" maxLength={120} defaultValue={(q.shortTitle as string) || ""} placeholder={q.title || "để trống → dùng tiêu đề chính"}
             disabled={!suaMain || saving} title="Dùng đặt tên file tải về: MãKH_TiêuĐềRútGọn_MMDD.xlsx"
             onInput={(e) => setQ("shortTitle", (e.target as HTMLInputElement).value)} />
         </div>
@@ -1349,7 +1349,7 @@ Lý do (không bắt buộc):`,
         </div>
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 13 }}>Tên sheet: <input name="sheetName" value={activeSheet.name || ""} disabled={!suaMain || saving} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
+          <label style={{ fontSize: 13 }}>Tên sheet: <input autoComplete="off" name="sheetName" value={activeSheet.name || ""} disabled={!suaMain || saving} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
           <label style={{ fontSize: 13 }}>Template: <select name="templateId" value={activeSheet.templateId} disabled={!suaMain || saving} onChange={(e) => {
             // L64: KHÔNG null hoá `days` ở đây. Chọn nhầm mẫu không ngày rồi chọn lại là mất sạch số Ngày
             // (lưới gắn lại theo mẫu nên Ctrl+Z không cứu). Mẫu không ngày thì tiền vốn không nhân ngày

@@ -336,10 +336,10 @@ export function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
             {err && <div className="err" role="alert">{err}</div>}
             <form id="ob-form" onSubmit={submit}>
               {!datLai && <>
-                <label><span>Họ tên</span><input name="displayName" required value={form.displayName} autoFocus onChange={(e) => set("displayName", e.target.value)} /></label>
-                <label><span>Tên người gửi trên báo giá</span><input name="senderName" placeholder="Để trống = dùng Họ tên" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} /></label>
+                <label><span>Họ tên</span><input autoComplete="name" name="displayName" required value={form.displayName} autoFocus onChange={(e) => set("displayName", e.target.value)} /></label>
+                <label><span>Tên người gửi trên báo giá</span><input autoComplete="off" name="senderName" placeholder="Để trống = dùng Họ tên" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} /></label>
                 <label><span>Số điện thoại</span><input name="phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="09xx xxx xxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></label>
-                <label><span>Chức danh</span><input name="title" placeholder="VD: Account, Sale…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
+                <label><span>Chức danh</span><input autoComplete="organization-title" name="title" placeholder="VD: Account, Sale…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
               </>}
               <label><span>Mật khẩu mới</span>
                 <span className="pw-wrap"><input name="password" type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required autoFocus={datLai} placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
