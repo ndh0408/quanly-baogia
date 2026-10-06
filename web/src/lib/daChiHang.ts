@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type DaChiHang } from "./api";
+import { api, type DaChiHang, type DaChiBaoGiaResp, type PhiaKhoanChi } from "./api";
 
 /**
  * CỘT "THANH TOÁN" CHỈ XEM của bảng nội bộ (chủ repo 2026-10-06: "cái thanh toán hiện đã thanh toán ở đây ngày như nào
@@ -11,11 +11,24 @@ import { api, type DaChiHang } from "./api";
  * cả báo giá: người soạn đang sửa dở. Hook thường (không react-query) vì màn soạn không nằm dưới QueryClientProvider ở
  * mọi nơi gọi (bài kiểm mức trang dựng QuoteEditor trần).
  */
-export type DaChiTheoRid = ReadonlyMap<string, DaChiHang>;
+/**
+ * `nguon` (báo giá + phía) đi kèm map để cột Thanh toán mở được chứng từ (📎 ảnh ủy nhiệm chi, 🧾 hóa đơn VAT) qua
+ * GET /quotes/:id/khoan-chi/:side/:rid/anh mà không phải luồn thêm prop qua ExtraTables / HnTables. Vắng = chỉ hiện chữ.
+ * Phần tử có `paid === false` là hàng CHƯA chi mà đã có HĐ VAT ("Có HĐ VAT · chưa TT").
+ */
+export type DaChiTheoRid = ReadonlyMap<string, DaChiHang> & { readonly nguon?: { quoteId: number; side: PhiaKhoanChi } };
 export type DaChiBaoGia = { sheet: DaChiTheoRid; hn: DaChiTheoRid };
 
 /** Nhịp gom: nhiều sự kiện liền nhau (kế toán tích một loạt) → một lần gọi. */
 const NHIP_GOM_MS = 300;
+
+/** Hàng đã chi (`sheet`/`hn`, paid) + hàng chưa chi có HĐ VAT (`vatChuaChi`, paid=false) → một map theo rid, gắn `nguon`. */
+export function dungMap(quoteId: number, side: PhiaKhoanChi, r: Pick<DaChiBaoGiaResp, "sheet" | "hn" | "vatChuaChi">): DaChiTheoRid {
+  const m = new Map<string, DaChiHang>();
+  for (const h of r.vatChuaChi?.[side] || []) m.set(h.rid, { ...h, paid: false });
+  for (const h of r[side] || []) m.set(h.rid, { ...h, paid: true });
+  return Object.assign(m, { nguon: { quoteId, side } });
+}
 
 export function useDaChiBaoGia(quoteId: number | null | undefined): DaChiBaoGia | null {
   const [ds, setDs] = useState<{ id: number; v: DaChiBaoGia } | null>(null);
@@ -25,11 +38,11 @@ export function useDaChiBaoGia(quoteId: number | null | undefined): DaChiBaoGia 
     let hen: ReturnType<typeof setTimeout> | undefined;
     const nap = () => {
       const toi = ++luot;
-      let p: Promise<{ sheet: DaChiHang[]; hn: DaChiHang[] }>;
+      let p: Promise<DaChiBaoGiaResp>;
       try { p = api.quoteDaChi(quoteId); } catch { return; }
       Promise.resolve(p).then((r) => {
         if (!song || toi !== luot || !r) return;   // lượt cũ về muộn không được đè lượt mới
-        setDs({ id: quoteId, v: { sheet: new Map((r.sheet || []).map((h) => [h.rid, h])), hn: new Map((r.hn || []).map((h) => [h.rid, h])) } });
+        setDs({ id: quoteId, v: { sheet: dungMap(quoteId, "sheet", r), hn: dungMap(quoteId, "hn", r) } });
       }).catch(() => { /* không đọc được → giữ bản đang có (hoặc cờ của báo giá đã nạp) */ });
     };
     const on = (ev: Event) => {

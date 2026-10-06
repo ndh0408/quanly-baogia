@@ -786,7 +786,7 @@ describe.runIf(dbAvailable)("Khoản chi (Hóa đơn đầu vào): PUT /api/quot
       const kt = await dn(ketoan);
       const r = await xemAnh(kt, qJsonCu.id, "sheet", "j-1");
       expect(r.status, JSON.stringify(r.body).slice(0, 200)).toBe(200);
-      expect(r.body).toEqual({ paidProof: ANH_THAT, proofId: null, retiredAt: null, nguon: "json-cu" });
+      expect(r.body).toEqual({ paidProof: ANH_THAT, proofId: null, retiredAt: null, nguon: "json-cu", loai: "chi", mime: null });
       expect(await khoan(qJsonCu.id, "sheet", "j-1")).toBeNull();
       const ev = await nhatKyCuoi(ketoan.id, qJsonCu.id, "quote.internal.proof-view");
       expect(ev.after).toMatchObject({ side: "sheet", rid: "j-1", proofId: null, nguon: "json-cu" });

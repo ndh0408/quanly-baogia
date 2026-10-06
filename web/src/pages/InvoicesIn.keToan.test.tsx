@@ -445,7 +445,7 @@ describe("hộp 'Khoản chi' — xung đột, lỗi, quyền", () => {
     let tuChoi: (e: unknown) => void = () => {};
     h.anh.mockImplementationOnce(() => new Promise((ok, loi) => { traLoi = ok; tuChoi = loi; }));
     await bam(nutTrongHop("Xem ảnh")!);
-    expect(h.anh.mock.calls[0]).toEqual([70, "sheet", "p1", undefined]);
+    expect(h.anh.mock.calls[0]).toEqual([70, "sheet", "p1", undefined, "chi"]);
     expect(trongHop('[aria-busy="true"]'), "đang tải").not.toBeNull();
     await act(async () => { tuChoi(new ApiError("Máy chủ lỗi 500 — thử lại sau ít phút.", 500, null)); });
     expect(trongHop(".inv-in-hop-xem .err")!.textContent).toContain("Máy chủ lỗi 500");
@@ -458,7 +458,7 @@ describe("hộp 'Khoản chi' — xung đột, lỗi, quyền", () => {
     h.anh.mockResolvedValueOnce({ paidProof: null, proofId: 4, retiredAt: "2026-10-03T03:00:00.000Z", nguon: "bang" });
     await bam([...hopThoai()!.querySelectorAll(".inv-in-hop-truoc button")][0] as HTMLButtonElement);
     await cho();
-    expect(h.anh.mock.calls.at(-1)).toEqual([70, "sheet", "p1", 4]);
+    expect(h.anh.mock.calls.at(-1)).toEqual([70, "sheet", "p1", 4, "chi"]);
     expect(trongHop(".inv-in-hop-xem")!.textContent).toContain("Không có ảnh");
   });
 });
@@ -651,7 +651,7 @@ describe("hộp 'Khoản chi' — không mất, không ghi đè im lặng, khôn
     h.anh.mockResolvedValue({ paidProof: ANH, proofId: 5, retiredAt: null, nguon: "bang" });
     await bam(nutTrongHop("Xem ảnh")!);
     await cho();
-    expect(h.anh).toHaveBeenCalledWith(88, "sheet", r.rid, undefined);
+    expect(h.anh).toHaveBeenCalledWith(88, "sheet", r.rid, undefined, "chi");
     expect(trongHop<HTMLImageElement>(".pay-proof img").getAttribute("src")).toBe(ANH);
   });
 

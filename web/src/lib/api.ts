@@ -128,14 +128,20 @@ export type TrangThaiHangDauVao = "binh-thuong" | "chua-duyet" | "hn-chua-duyet"
 export type AnhChungTuMeta = {
   id: number; uploadedAt: string | null; uploadedByName: string | null;
   retiredAt: string | null; retiredReason: "thay" | "go-anh" | "bo-danh-dau" | string | null; source: string;
-  /** Ảnh HIỆN TẠI của khoản — các ảnh còn lại đã rút vào lịch sử (không bao giờ bị xoá). */
+  /** Ảnh HIỆN TẠI của khoản (của ĐÚNG loại của nó) — các ảnh còn lại đã rút vào lịch sử (không bao giờ bị xoá). */
   hienTai: boolean;
+  /** 'chi' = ủy nhiệm chi, 'vat' = hóa đơn VAT. Vắng (máy chủ cũ) = 'chi'. */
+  loai?: "chi" | "vat";
+  /** image/… hoặc application/pdf. */
+  mime?: string | null;
 };
 /** Phần kế toán của một dòng — cùng hình dạng ở GET /input-invoices và phản hồi PUT khoản chi. */
 export type KhoanChiDto = {
   key: string; quoteId: number; side: PhiaKhoanChi; rid: string;
   version: number;
   paid: boolean; paidAt: string | null; paidByName: string | null; hasPaidProof: boolean;
+  /** Hóa đơn VAT hiện tại — ĐỘC LẬP với đã chi (máy chủ cũ không gửi → coi như chưa có). */
+  hasVatProof?: boolean; vatProofAt?: string | null; vatProofByName?: string | null;
   proofs: AnhChungTuMeta[];
   /** Số tiền LÚC TÍCH (null: chưa chi, hoặc khoản gieo từ cờ JSON cũ). */
   paidAmount: number | null;
@@ -146,9 +152,17 @@ export type KhoanChiDto = {
   keToanCapNhatLuc: string | null; keToanCapNhatBoi: string | null;
   nguon: "bang" | "json-cu" | "khong";
 };
-/** Một hàng ĐÃ CHI (trạng thái hiệu lực, máy chủ src/khoanChi.ts daChiTheoRid) — chỉ xem, không ảnh. */
-export type DaChiHang = { rid: string; paidAt: string | null; paidByName: string | null; coAnh: boolean };
-export type DaChiBaoGiaResp = { quoteId: number; sheet: DaChiHang[]; hn: DaChiHang[] };
+/** Trạng thái CHỈ XEM một hàng (máy chủ src/khoanChi.ts khoanXemTheoRid) — không ảnh, chỉ cờ. */
+export type DaChiHang = {
+  rid: string; paidAt: string | null; paidByName: string | null; coAnh: boolean;
+  /** Vắng = true (phần tử của `sheet`/`hn` luôn là hàng ĐÃ CHI); false = hàng chưa chi mà đã có HĐ VAT (`vatChuaChi`). */
+  paid?: boolean;
+  /** Đã có hóa đơn VAT + lúc đưa lên. */
+  coHdVat?: boolean; hdVatLuc?: string | null;
+};
+export type DaChiBaoGiaResp = { quoteId: number; sheet: DaChiHang[]; hn: DaChiHang[]; vatChuaChi?: { sheet: DaChiHang[]; hn: DaChiHang[] } };
+/** Chứng từ HIỆN TẠI của một hàng, xem từ bảng nội bộ (GET /quotes/:id/khoan-chi/:side/:rid/anh). */
+export type ChungTuNoiBo = { dataUrl: string; mime: string | null; loai: "chi" | "vat"; uploadedAt: string | null; uploadedByName: string | null };
 export type InputInvoiceRow = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "side"> & {
   /** `quoteId:side:rid` khi hàng có rid duy nhất; hàng thiếu / trùng rid: khoá theo vị trí và `coTheGhi = false`. */
   key: string;
@@ -171,6 +185,8 @@ export type ThanKhoanChi = {
   baseVersion: number;
   paid?: boolean;
   paidProof?: string | null;
+  /** Hóa đơn VAT: data-URL ảnh / PDF mới; `null` = gỡ (rút vào lịch sử). */
+  vatProof?: string | null;
   invoiceDate?: string | null;
   accountingNote?: string | null;
 };
@@ -650,10 +666,14 @@ export const api = {
   // Định vị bằng (báo giá, phía, rid) — rid do client giữ nguyên văn nên phải encodeURIComponent.
   ghiKhoanChi: (quoteId: number, side: PhiaKhoanChi, rid: string, body: ThanKhoanChi) =>
     req<{ row: KhoanChiDto }>(`/quotes/input-invoices/${quoteId}/${side}/${encodeURIComponent(rid)}`, { method: "PUT", body: JSON.stringify(body) }),
-  // Ảnh ủy nhiệm chi theo yêu cầu (invoice:input:pay). `proofId` mở một ảnh cũ đã rút vào lịch sử.
-  anhKhoanChi: (quoteId: number, side: PhiaKhoanChi, rid: string, proofId?: number) =>
-    req<{ paidProof: string | null; proofId: number | null; retiredAt: string | null; nguon: "bang" | "json-cu" }>(
-      `/quotes/input-invoices/${quoteId}/${side}/${encodeURIComponent(rid)}/proof${proofId != null ? `?proofId=${proofId}` : ""}`),
+  // Ảnh ủy nhiệm chi / hóa đơn VAT theo yêu cầu (invoice:input:pay). `proofId` mở một tệp cũ đã rút vào lịch sử; vắng thì
+  // bản HIỆN TẠI của `loai`.
+  anhKhoanChi: (quoteId: number, side: PhiaKhoanChi, rid: string, proofId?: number, loai: "chi" | "vat" = "chi") =>
+    req<{ paidProof: string | null; proofId: number | null; retiredAt: string | null; nguon: "bang" | "json-cu"; loai?: "chi" | "vat"; mime?: string | null }>(
+      `/quotes/input-invoices/${quoteId}/${side}/${encodeURIComponent(rid)}/proof${proofId != null ? `?proofId=${proofId}` : loai === "vat" ? "?loai=vat" : ""}`),
+  // Chứng từ HIỆN TẠI của một hàng, xem TỪ BẢNG NỘI BỘ (người đang xem hàng đó) — chỉ xem, có nhật ký.
+  chungTuNoiBo: (quoteId: number, side: PhiaKhoanChi, rid: string, loai: "chi" | "vat") =>
+    req<ChungTuNoiBo>(`/quotes/${quoteId}/khoan-chi/${side}/${encodeURIComponent(rid)}/anh?loai=${loai}`),
   updateSheetInvoice: (sheetId: number, field: string, val: string | null) =>
     req<unknown>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [field]: val }) }),
   signSheet: (sheetId: number, signed: boolean) =>

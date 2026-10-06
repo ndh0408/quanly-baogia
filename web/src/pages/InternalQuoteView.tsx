@@ -1,13 +1,16 @@
+import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Me } from "../lib/api";
 import { CHUNG_TU, COT_NOI_BO } from "../lib/gridShared";
 import * as M from "../lib/quoteMath";
 import { extraTableSum } from "../components/ExtraTables";
 import { mauBangHn } from "../components/HnTables";
-import { codeLabel, errMsg, fmtDate, dash } from "../lib/format";
+import { codeLabel, errMsg, dash } from "../lib/format";
 import { useTrangAnToan } from "../lib/phienBan";
 import { useDaChiBaoGia } from "../lib/daChiHang";
 import type { DaChiHang } from "../lib/api";
+import { OThanhToan } from "../components/OThanhToan";
+import { XemChungTu, type LoaiChungTu } from "../components/XemChungTu";
 
 // Màn hình CHỈ XEM BẢNG NỘI BỘ (quyền quote:internal:view) — tài khoản "chi phí": thấy các bảng nội bộ của
 // 1 báo giá + trạng thái ĐÃ CHI từng hàng. KHÔNG lộ giá/khách/báo giá chính (server đã lược).
@@ -41,6 +44,9 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
   // thì chưa vẽ số: vẽ tạm kiểu "nhân days bất kể mẫu" là nháy một con số tiền sai.
   const mau = useQuery({ queryKey: ["meta-templates"], queryFn: () => api.metaTemplates(), staleTime: 5 * 60_000 });
   const daChi = useDaChiBaoGia(quoteId);
+  // 📎 / 🧾 ở cột Thanh toán → hộp xem chứng từ HIỆN TẠI (chỉ xem; máy chủ kiểm quyền xem hàng + ghi nhật ký).
+  const [xemCt, setXemCt] = useState<{ hn: boolean; rid: string; loai: LoaiChungTu; ten: string } | null>(null);
+  const dongXemCt = useCallback(() => setXemCt(null), []);
 
   if (isPending || mau.isPending) return <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
   if (error || !data || mau.error) return <div className="err">⚠ {errMsg(error || mau.error, "Không tải được.")} <button className="btn btn-sm" onClick={() => { void refetch(); void mau.refetch(); }}>Thử lại</button></div>;
@@ -54,7 +60,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
   const bangHn: any[] = (Array.isArray(q.hnTables) ? q.hnTables : []).map((t: any) => ({ ...t, category: "hanoi" }));
   const daChiCua = (it: any, hn: boolean): DaChiHang | null => {
     if (daChi) { const rid = typeof it.rid === "string" ? it.rid.trim() : ""; return rid ? (hn ? daChi.hn : daChi.sheet).get(rid) ?? null : null; }
-    return it.paid === true ? { rid: "", paidAt: it.paidAt ?? null, paidByName: null, coAnh: it.hasPaidProof === true } : null;
+    return it.paid === true ? { rid: "", paidAt: it.paidAt ?? null, paidByName: null, coAnh: it.hasPaidProof === true, paid: true } : null;
   };
   const tables = [
     ...sheets.flatMap((s) => (s.tables || []).map((t: any) => ({ s, t }))),
@@ -90,9 +96,10 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
                       <td className="col-chung-tu">{nhanChungTu(it.chungTu) ?? dash}</td>
                       <td className="col-luu-kho">{it.luuKho ? <span role="img" aria-label="Có lưu kho" title="Có lưu kho">✓</span> : dash}</td>
                       <td className="col-pay">
-                        {tt ? <span className="ap-date">✓ Đã TT{tt.paidAt ? ` · ${fmtDate(tt.paidAt)}` : ""}</span> : dash}
-                        {tt?.coAnh ? <span title="Có ảnh chứng từ (kế toán xem ở trang Hóa đơn đầu vào)" role="img" aria-label="Có ảnh chứng từ"> 📎</span> : null}
-                        {tt?.paidByName ? <span className="pay-nguoi">{tt.paidByName}</span> : null}
+                        <OThanhToan h={tt} chungTu={it.chungTu}
+                          onBam={daChi && typeof it.rid === "string" && it.rid.trim()
+                            ? (e) => setXemCt({ hn: !!s.hn, rid: it.rid.trim(), loai: e.currentTarget.getAttribute("data-loai") === "vat" ? "vat" : "chi", ten: String(it.name ?? "") })
+                            : undefined} />
                       </td>
                     </tr>
                   ); })}
@@ -110,6 +117,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
           </div>
         );
       })}
+      {xemCt && <XemChungTu quoteId={quoteId} side={xemCt.hn ? "hn" : "sheet"} rid={xemCt.rid} loai={xemCt.loai} tenHang={xemCt.ten} onDong={dongXemCt} />}
     </div>
   );
 }

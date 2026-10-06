@@ -50,3 +50,18 @@ export async function compressImage(file: File): Promise<string> {
   if (lan2.length <= TRAN_ANH_KY_TU) return lan2;
   throw new Error("Ảnh quá lớn kể cả sau khi nén — hãy chụp lại gần hơn / cắt bớt rồi chọn lại.");
 }
+
+/** Hóa đơn VAT dạng PDF (hóa đơn điện tử): không nén được — đọc nguyên thành data-URL; quá trần máy chủ thì báo rõ, không gửi. */
+export function docTepPdf(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const s = String(r.result || "");
+      if (!/^data:application\/pdf;base64,/i.test(s)) return reject(new Error("Tệp không phải PDF — chọn ảnh PNG / JPG / WEBP hoặc PDF."));
+      if (s.length > TRAN_ANH_KY_TU) return reject(new Error("Tệp PDF quá lớn (tối đa khoảng 650 KB) — xuất lại hoặc chụp ảnh hóa đơn rồi chọn ảnh."));
+      resolve(s);
+    };
+    r.onerror = () => reject(new Error("Không đọc được tệp PDF — thử lại hoặc chọn tệp khác."));
+    r.readAsDataURL(file);
+  });
+}

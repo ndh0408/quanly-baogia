@@ -5,7 +5,7 @@ import { fmtMoney, fmtDate, toInputDate, statusLabel, dash, Stat } from "../lib/
 import { smartTextMatch } from "../lib/filterText";
 import { CHUNG_TU } from "../lib/gridShared";
 import { useTrangAnToan } from "../lib/phienBan";
-import { LOAI_BANG, canhBaoKhoan, fmtNgayThuan, fmtSoLuong, tenBangRieng } from "../lib/khoanChi";
+import { LOAI_BANG, canhBaoKhoan, fmtNgayThuan, fmtSoLuong, tenBangRieng, trangThaiVat } from "../lib/khoanChi";
 import { HopKhoanChi } from "../components/HopKhoanChi";
 
 // Trang HÓA ĐƠN ĐẦU VÀO (kế toán) — chủ repo 2026-09-30: "trang của những cái nào đã duyệt ở phần nội bộ".
@@ -30,11 +30,14 @@ export type BoLoc = {
   q: string; loai: string; chungTu: string; thanhToan: string; trangThai: string; tu: string; den: string;
   /** "" | "co" | "chua" — Ngày hóa đơn đã ghi chưa. */
   ngayHd: string;
+  /** "" | "chua-vat" | "da-vat" | "vat-chua-tt" — trạng thái hóa đơn VAT (chỉ hàng chứng từ VAT; lib/khoanChi.ts trangThaiVat). */
+  vat: string;
   /** Chỉ xem các dòng CẦN CHÚ Ý (trangThaiHang ≠ 'binh-thuong'); tắt = danh sách chính, không lẫn các dòng đó. */
   chuY: boolean;
 };
-export const BO_LOC_RONG: BoLoc = { q: "", loai: "", chungTu: "", thanhToan: "", trangThai: "", tu: "", den: "", ngayHd: "", chuY: false };
+export const BO_LOC_RONG: BoLoc = { q: "", loai: "", chungTu: "", thanhToan: "", trangThai: "", tu: "", den: "", ngayHd: "", vat: "", chuY: false };
 const KHONG_GHIM: ReadonlySet<string> = new Set();
+const TU_TIM_VAT: Record<string, string> = { "chua-vat": "thiếu hóa đơn vat", "da-vat": "đã có hóa đơn vat", "vat-chua-tt": "có hóa đơn vat" };
 
 /**
  * Lọc phía trình duyệt. Thuần (xuất ra để test): mỗi nhóm độc lập nên kết hợp tự do, vd HCM + VAT + Chưa thanh toán.
@@ -51,6 +54,7 @@ export function locHang(rows: InputInvoiceRow[], b: BoLoc, giu: ReadonlySet<stri
     if (b.thanhToan === "unpaid" && r.paid) return false;
     if (b.ngayHd === "co" && !r.invoiceDate) return false;
     if (b.ngayHd === "chua" && r.invoiceDate) return false;
+    if (b.vat && trangThaiVat(r.chungTu, r.paid, !!r.hasVatProof) !== b.vat) return false;
     if (b.trangThai === "other" ? r.status in TRANG_THAI_BAO_GIA : b.trangThai && r.status !== b.trangThai) return false;
     // Khoảng NGÀY DUYỆT: hàng không có ngày duyệt (dữ liệu cũ) không thể nằm trong một khoảng ngày đã chọn.
     if (b.tu || b.den) {
@@ -64,6 +68,8 @@ export function locHang(rows: InputInvoiceRow[], b: BoLoc, giu: ReadonlySet<stri
       r.paid ? "đã thanh toán đã chi" : "chưa thanh toán chưa chi",
       // Phần kế toán: ghi chú, Ngày HĐ (dd/mm/yyyy như ô hiển thị) và người đánh dấu đã chi.
       r.accountingNote, fmtNgayThuan(r.invoiceDate), r.paidByName,
+      // Trạng thái HĐ VAT — KHÔNG dùng chữ "chưa" cho hàng đã chi (tìm "chưa thanh toán" sẽ khớp nhầm hàng đã trả).
+      TU_TIM_VAT[trangThaiVat(r.chungTu, r.paid, !!r.hasVatProof) ?? ""] ?? "",
     ]);
   });
 }
@@ -82,6 +88,8 @@ const BO_QUA_BAM = "button,a,input,select,textarea,[data-ke-toan],[role=dialog],
 /** Ba dòng của ô "Kế toán": đã chi + ảnh · Ngày HĐ (+ ⚠) · ghi chú cắt một dòng (đủ chữ ở title). */
 function NoiDungKeToan({ r }: { r: InputInvoiceRow }) {
   const canh = canhBaoKhoan(r);
+  // Hàng chứng từ VAT: cùng trạng thái với cột Thanh toán ở bảng nội bộ (components/OThanhToan.tsx).
+  const vat = trangThaiVat(r.chungTu, r.paid, !!r.hasVatProof);
   return (
     <>
       <span className="inv-in-kt-d1">
@@ -93,6 +101,11 @@ function NoiDungKeToan({ r }: { r: InputInvoiceRow }) {
               : <span className="inv-in-kt-thieu">⚠ chưa có ảnh</span>}
           </>
         ) : <span className="muted">Chưa chi</span>}
+        {vat && (
+          <span className={`inv-in-kt-vat${vat === "chua-vat" ? " inv-in-kt-thieu" : ""}`} data-vat={vat}>
+            {" "}{vat === "vat-chua-tt" ? "🧾 Có HĐ VAT" : vat === "da-vat" ? "· 🧾 đã có VAT" : "· ⚠ chưa VAT"}
+          </span>
+        )}
       </span>
       <span className="inv-in-sub inv-in-kt-d2">
         {canh.length > 0 && <span className="inv-in-kt-canh" data-canh role="img" aria-label={canh.join(" · ")} title={canh.join("\n")}>⚠</span>}
@@ -215,6 +228,12 @@ export function InvoicesInPage({ me }: { me: Me }) {
         <div className="toolbar inv-filter-row inv-filter-extra">
           <select name="trangThai" value={b.trangThai} onChange={(e) => dat({ trangThai: e.target.value })} aria-label="Lọc theo trạng thái báo giá">
             <option value="">Báo giá: Tất cả</option><option value="converted">Đã chốt</option><option value="draft">Nháp</option><option value="lost">Không chốt</option><option value="other">Khác</option>
+          </select>
+          <select name="vat" value={b.vat} onChange={(e) => dat({ vat: e.target.value })} aria-label="Lọc theo hóa đơn VAT">
+            <option value="">Hóa đơn VAT: Tất cả</option>
+            <option value="chua-vat">Đã TT · chưa VAT</option>
+            <option value="da-vat">Đã TT · đã có VAT</option>
+            <option value="vat-chua-tt">Có HĐ VAT · chưa TT</option>
           </select>
           <select name="ngayHd" value={b.ngayHd} onChange={(e) => dat({ ngayHd: e.target.value })} aria-label="Lọc theo ngày hóa đơn">
             <option value="">Ngày HĐ: Tất cả</option><option value="co">Đã có ngày HĐ</option><option value="chua">Chưa có ngày HĐ</option>

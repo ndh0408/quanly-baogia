@@ -93,6 +93,25 @@ export const NHAN_LY_DO_RUT: Record<string, string> = { thay: "đã thay bằng 
  */
 const RE_ANH = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
 export const anhHienDuoc = (s: string | null | undefined): string => (typeof s === "string" && RE_ANH.test(s) ? s : "");
+/** Hóa đơn VAT dạng PDF (data-URL khớp TOÀN CHUỖI) — không vẽ được bằng <img>; mở bằng blob + tải về. */
+const RE_PDF = /^data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2}$/i;
+export const laPdfDataUrl = (s: string | null | undefined): boolean => typeof s === "string" && RE_PDF.test(s);
+
+// ── HÓA ĐƠN VAT (chủ repo 2026-10-06: "nếu có VAT mà chỉ mới thanh toán thôi thì bên nội bộ báo là đã thanh toán chưa VAT") ──
+/**
+ * Trạng thái VAT của một hàng — CHỈ khi chứng từ HIỆN TẠI là VAT; HĐNS / TM / chưa chọn → null (hiện như cũ). Bản sao CỐ Ý của
+ * src/khoanChi.ts trangThaiVat (máy chủ) — cùng ba ca:
+ *   "chua-vat"    đã chi, chưa có HĐ VAT  → "Đã TT · chưa VAT" (màu cảnh báo)
+ *   "da-vat"      đã chi + có HĐ VAT      → "Đã TT · đã có VAT"
+ *   "vat-chua-tt" chưa chi, đã có HĐ VAT  → "Có HĐ VAT · chưa TT"
+ */
+export type TrangThaiVat = "chua-vat" | "da-vat" | "vat-chua-tt";
+export function trangThaiVat(chungTu: unknown, paid: boolean, coHdVat: boolean): TrangThaiVat | null {
+  if (chungTu !== "VAT") return null;
+  if (paid) return coHdVat ? "da-vat" : "chua-vat";
+  return coHdVat ? "vat-chua-tt" : null;
+}
+export const NHAN_TRANG_THAI_VAT: Record<TrangThaiVat, string> = { "chua-vat": "chưa VAT", "da-vat": "đã có VAT", "vat-chua-tt": "Có HĐ VAT · chưa TT" };
 
 // ── HỘP "KHOẢN CHI": PHẦN NGƯỜI DÙNG ĐÃ SỬA → THÂN LỆNH GHI ────────────────────────────────────────────────────────
 /**
@@ -105,6 +124,10 @@ export type NhapKhoanChi = {
   anhMoi?: string;
   /** Gỡ ảnh hiện tại (máy chủ rút vào lịch sử, không xoá). */
   goAnh?: boolean;
+  /** data-URL hóa đơn VAT MỚI (ảnh đã nén hoặc PDF) — chuỗi rỗng coi như không có. */
+  vatMoi?: string;
+  /** Gỡ HĐ VAT hiện tại (rút vào lịch sử, không xoá). */
+  goVat?: boolean;
   /** "Xác nhận số tiền hiện tại" khi số tiền đổi sau lúc chi — gửi lại `paid: true`. */
   xacNhanTien?: boolean;
   /** Giá trị ô ngày ('YYYY-MM-DD' | "" = xoá). */
@@ -113,7 +136,7 @@ export type NhapKhoanChi = {
 };
 /** Quyền theo TRƯỜNG (máy chủ kiểm y hệt): tích + ảnh ← invoice:input:pay; ngày HĐ + ghi chú ← invoice:edit. */
 export type QuyenKhoanChi = { canPay: boolean; canEdit: boolean };
-export type DongKhoanChi = Pick<InputInvoiceRow, "version" | "paid" | "hasPaidProof" | "tienDoi" | "invoiceDate" | "accountingNote">;
+export type DongKhoanChi = Pick<InputInvoiceRow, "version" | "paid" | "hasPaidProof" | "hasVatProof" | "tienDoi" | "invoiceDate" | "accountingNote">;
 
 /**
  * THÂN lệnh PUT khoản chi: CHỈ trường thật sự đổi so với dòng hiện tại + `baseVersion`; `null` = không có gì để gửi.
@@ -135,6 +158,9 @@ export function thanKhoanChi(r: DongKhoanChi, n: NhapKhoanChi, q: QuyenKhoanChi)
       if (anh) than.paidProof = anh;
       else if (n.goAnh && r.hasPaidProof) than.paidProof = null;
     }
+    // HĐ VAT ĐỘC LẬP với đã chi: đưa / thay / gỡ ở mọi trạng thái tích.
+    if (typeof n.vatMoi === "string" && n.vatMoi) than.vatProof = n.vatMoi;
+    else if (n.goVat && r.hasVatProof) than.vatProof = null;
   }
   if (q.canEdit) {
     if (n.invoiceDate !== undefined) {
@@ -153,16 +179,17 @@ export function thanKhoanChi(r: DongKhoanChi, n: NhapKhoanChi, q: QuyenKhoanChi)
 // Realtime nạp lại dòng trong lúc hộp đang mở: ô CHƯA đụng tự lấy giá trị mới (NhapKhoanChi), `baseVersion` theo dòng mới —
 // nên lần Lưu sau KHÔNG nhận 409 và ghi đè im lặng phần người kia vừa ghi vào ĐÚNG ô mình đang sửa. Hộp chụp giá trị của
 // mỗi ô lúc BẮT ĐẦU sửa ô đó; lúc Lưu, ô nào sắp ghi mà dòng hiện tại đã khác bản chụp → hỏi trước khi ghi đè.
-export type TruongKhoanChi = "paid" | "anh" | "invoiceDate" | "accountingNote";
+export type TruongKhoanChi = "paid" | "anh" | "vat" | "invoiceDate" | "accountingNote";
 export type GocKhoanChi = Partial<Record<TruongKhoanChi, string>>;
-type DongXungDot = Pick<InputInvoiceRow, "paid" | "hasPaidProof" | "invoiceDate" | "accountingNote" | "proofs">;
-export const NHAN_TRUONG_KHOAN: Record<TruongKhoanChi, string> = { paid: "Đã chi", anh: "Ảnh chứng từ", invoiceDate: "Ngày hóa đơn", accountingNote: "Ghi chú kế toán" };
+type DongXungDot = Pick<InputInvoiceRow, "paid" | "hasPaidProof" | "hasVatProof" | "invoiceDate" | "accountingNote" | "proofs">;
+export const NHAN_TRUONG_KHOAN: Record<TruongKhoanChi, string> = { paid: "Đã chi", anh: "Ảnh chứng từ", vat: "Hóa đơn VAT", invoiceDate: "Ngày hóa đơn", accountingNote: "Ghi chú kế toán" };
 
 /** Giá trị SO SÁNH ĐƯỢC của một ô trên dòng (ảnh: id ảnh hiện tại — thay ảnh là đổi). */
 export function giaTriTruong(r: DongXungDot, t: TruongKhoanChi): string {
   switch (t) {
     case "paid": return r.paid ? "1" : "0";
-    case "anh": return String(r.proofs?.find((p) => p.hienTai)?.id ?? (r.hasPaidProof ? "json-cu" : ""));
+    case "anh": return String(r.proofs?.find((p) => p.hienTai && p.loai !== "vat")?.id ?? (r.hasPaidProof ? "json-cu" : ""));
+    case "vat": return String(r.proofs?.find((p) => p.hienTai && p.loai === "vat")?.id ?? (r.hasVatProof ? "co" : ""));
     case "invoiceDate": return r.invoiceDate ?? "";
     case "accountingNote": return (r.accountingNote ?? "").trim();
   }
@@ -173,6 +200,7 @@ export function xungDotKhoanChi(goc: GocKhoanChi, r: DongXungDot, than: ThanKhoa
   const ghi: TruongKhoanChi[] = [];
   if ("paid" in than) ghi.push("paid");
   if ("paidProof" in than) ghi.push("anh");
+  if ("vatProof" in than) ghi.push("vat");
   if ("invoiceDate" in than) ghi.push("invoiceDate");
   if ("accountingNote" in than) ghi.push("accountingNote");
   return ghi.filter((t) => goc[t] !== undefined && goc[t] !== giaTriTruong(r, t));
@@ -182,6 +210,7 @@ export function xungDotKhoanChi(goc: GocKhoanChi, r: DongXungDot, than: ThanKhoa
 export function moTaXungDot(r: DongXungDot, t: TruongKhoanChi): string {
   const gt = t === "paid" ? (r.paid ? "Đã chi" : "Chưa chi")
     : t === "anh" ? (r.hasPaidProof ? "ảnh khác" : "đã gỡ ảnh")
+    : t === "vat" ? (r.hasVatProof ? "hóa đơn khác" : "đã gỡ hóa đơn")
     : t === "invoiceDate" ? fmtNgayThuan(r.invoiceDate) || "(trống)"
     : (r.accountingNote ?? "").trim() ? `“${(r.accountingNote ?? "").trim().slice(0, 80)}${(r.accountingNote ?? "").trim().length > 80 ? "…" : ""}”` : "(trống)";
   return `${NHAN_TRUONG_KHOAN[t]} → ${gt}`;

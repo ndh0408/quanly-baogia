@@ -31,6 +31,9 @@ export const zbool = z.preprocess(
 // Tập MIME CỐ Ý hẹp hơn customerLogo (KHÔNG có gif): `sniffImage` trong src/paymentProof.ts chỉ
 // nhận PNG/JPEG/WEBP, nhận gif ở cửa vào chỉ đổi lỗi 400 thành 415 ở tầng sâu hơn.
 export const PAYMENT_PROOF_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+// Hóa đơn VAT của khoản chi (trang Hóa đơn đầu vào): ảnh như trên HOẶC PDF (hóa đơn điện tử thường là PDF). Máy chủ còn soát
+// magic bytes (src/services/inputInvoiceService.ts kiemTepVat) — nhãn trong chuỗi không được tin.
+export const VAT_PROOF_DATA_URL_RE = /^data:(image\/(png|jpe?g|webp)|application\/pdf);base64,[A-Za-z0-9+/]+={0,2}$/i;
 
 // Chặn TOP mật khẩu bị dò nhiều nhất (nguồn: các bảng "top common password" bị rò rỉ hàng năm,
 // vd Have I Been Pwned / SplashData) — quy tắc "có chữ và số" một mình cho "password1", "abc12345"
@@ -479,6 +482,9 @@ export const KhoanChiSchema = z
     baseVersion: z.number("Thiếu mốc phiên bản của khoản (baseVersion)").int().min(0),
     paid: z.boolean("'Đã chi' phải là true hoặc false").optional(),
     paidProof: z.string().max(900_000, "Ảnh chứng từ quá lớn").regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").nullable().optional(),
+    // HÓA ĐƠN VAT (chỉ hàng chứng từ VAT — máy chủ kiểm): data-URL ảnh hoặc PDF = đưa HĐ mới (bản cũ RÚT vào lịch sử); `null` = gỡ.
+    // ĐỘC LẬP với `paid`: đưa trước hay sau khi tích đều được. Cùng trần 900.000 ký tự với ảnh chứng từ.
+    vatProof: z.string().max(900_000, "Tệp hóa đơn VAT quá lớn (tối đa ~650 KB)").regex(VAT_PROOF_DATA_URL_RE, "Hóa đơn VAT phải là ảnh PNG / JPG / WEBP hoặc PDF").nullable().optional(),
     invoiceDate: z
       .union([z.literal(""), z.string().refine(laNgayLich, "Ngày hóa đơn phải là ngày có thật, dạng YYYY-MM-DD")])
       .nullable()
@@ -486,8 +492,8 @@ export const KhoanChiSchema = z
     accountingNote: z.string("Ghi chú kế toán phải là chữ").trim().max(GHI_CHU_KE_TOAN_TOI_DA, `Ghi chú kế toán tối đa ${GHI_CHU_KE_TOAN_TOI_DA} ký tự`).nullable().optional(),
   })
   .refine(
-    (b) => b.paid !== undefined || b.paidProof !== undefined || b.invoiceDate !== undefined || b.accountingNote !== undefined,
-    "Không có gì để đổi: cần gửi 'đã chi', ảnh chứng từ, ngày hóa đơn hoặc ghi chú kế toán",
+    (b) => b.paid !== undefined || b.paidProof !== undefined || b.vatProof !== undefined || b.invoiceDate !== undefined || b.accountingNote !== undefined,
+    "Không có gì để đổi: cần gửi 'đã chi', ảnh chứng từ, hóa đơn VAT, ngày hóa đơn hoặc ghi chú kế toán",
   )
   .refine((b) => !(b.paid === false && typeof b.paidProof === "string"), "Bỏ đánh dấu đã chi thì không đính ảnh chứng từ được");
 

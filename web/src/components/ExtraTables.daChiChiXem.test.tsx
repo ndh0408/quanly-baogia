@@ -41,7 +41,7 @@ afterEach(() => { act(() => goc.unmount()); thung.remove(); document.body.innerH
 
 const cho = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 const oPay = (row: number) => (thung.querySelector(`table.excel-table tr[data-row="${row}"] td.col-pay`) as HTMLElement | null);
-const chiXem = () => expect(thung.querySelectorAll("td.col-pay button, td.col-pay input, td.col-pay select, td.col-pay a, td.col-pay img"), "cột Thanh toán phải CHỈ XEM").toHaveLength(0);
+const chiXem = () => expect(thung.querySelectorAll("td.col-pay button:not(.pay-xem), td.col-pay input, td.col-pay select, td.col-pay a, td.col-pay img"), "cột Thanh toán phải CHỈ XEM").toHaveLength(0);
 
 describe("ExtraTables — cột Thanh toán theo `daChi` (chỉ xem)", () => {
   const items = () => [
@@ -125,7 +125,7 @@ describe("Màn chỉ-xem nội bộ + Account HN dùng chung nguồn", () => {
     await act(async () => { goc.render(<QueryClientProvider client={qc}><InternalQuoteView quoteId={21} me={{ id: 1 } as never} /></QueryClientProvider>); });
     await cho();
     const [a, b] = [...thung.querySelectorAll("table.list-table tbody tr")];
-    expect(a.querySelector("td.col-pay")!.textContent).toBe("✓ Đã TT · 06/10/2026 📎Kế toán Lan");
+    expect(a.querySelector("td.col-pay")!.textContent).toBe("✓ Đã TT 06/10/2026 📎Kế toán Lan");
     expect(b.querySelector("td.col-pay")!.textContent).toBe("—");
   });
 

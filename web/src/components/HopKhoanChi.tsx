@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, ApiError, isPreviewMode, type InputInvoiceRow, type KhoanChiDto } from "../lib/api";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
-import { compressImage, LOI_DOC_ANH } from "../lib/anhChungTu";
+import { compressImage, docTepPdf, LOI_DOC_ANH } from "../lib/anhChungTu";
+import { TaiPdf } from "./XemChungTu";
 import { CHUNG_TU, dangGoIME } from "../lib/gridShared";
 import { fmtMoney, fmtDate, fmtDateTime } from "../lib/format";
 import {
-  LOAI_BANG, NHAN_LY_DO_RUT, anhHienDuoc, fmtSoLuong, giaTriTruong, laNgayHoaDon, lyDoKhongTich, moTaXungDot, nhanTrangThaiHang,
+  LOAI_BANG, NHAN_LY_DO_RUT, anhHienDuoc, laPdfDataUrl, fmtSoLuong, giaTriTruong, laNgayHoaDon, lyDoKhongTich, moTaXungDot, nhanTrangThaiHang,
   tenBangRieng, thanKhoanChi, xungDotKhoanChi, type GocKhoanChi, type NhapKhoanChi, type TruongKhoanChi,
 } from "../lib/khoanChi";
 
@@ -32,7 +33,7 @@ const maLoi = (ex: unknown): string => {
   return b && typeof b === "object" && typeof (b as { code?: unknown }).code === "string" ? (b as { code: string }).code : "";
 };
 
-type XemAnh = { proofId: number | null; trangThai: "dang-tai" | "loi" | "xong"; src: string; loi: string; retiredAt: string | null };
+type XemAnh = { proofId: number | null; loai: "chi" | "vat"; trangThai: "dang-tai" | "loi" | "xong"; src: string; pdf: boolean; loi: string; retiredAt: string | null };
 
 export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu, onNapLai, onThayDoi }: {
   /** Dòng HIỆN TẠI trong cache (nạp lại → đổi theo; `version` mới là `baseVersion` của lần Lưu sau). */
@@ -58,6 +59,7 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
   const [xem, setXem] = useState<XemAnh | null>(null);
   const hopRef = useRef<HTMLDivElement>(null);
   const tepRef = useRef<HTMLInputElement>(null);
+  const tepVatRef = useRef<HTMLInputElement>(null);
   const nenBam = useRef(false);
   const conSong = useRef(true);
   const luotXem = useRef(0);
@@ -79,7 +81,15 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
   const luuDuoc = !!than && !dangLuu && !dangNen && !ngayLoi && ghiDuoc;
   const ngay = nhap.invoiceDate ?? row.invoiceDate ?? "";
   const ghiChu = nhap.accountingNote ?? row.accountingNote ?? "";
-  const anhTruoc = row.proofs.filter((p) => !p.hienTai);
+  const anhTruoc = row.proofs.filter((p) => !p.hienTai && p.loai !== "vat");
+  // HÓA ĐƠN VAT (chủ repo 2026-10-06: "nếu có VAT thì cho thêm ô bỏ VAT vào") — ĐỘC LẬP với đã chi: đưa trước hay sau khi
+  // tích đều được. Phần này hiện khi chứng từ hàng là VAT, hoặc khoản đã từng có HĐ VAT (chứng từ đổi khỏi VAT sau đó: tệp
+  // vẫn giữ, xem / gỡ được, nhưng không đưa HĐ mới — máy chủ 409 khong-phai-vat).
+  const laVat = row.chungTu === "VAT";
+  const coVat = !!row.hasVatProof;
+  const vatTruoc = row.proofs.filter((p) => !p.hienTai && p.loai === "vat");
+  const hienPhanVat = laVat || coVat || vatTruoc.length > 0;
+  const dinhVatDuoc = canPay && ghiDuoc && laVat && row.trangThaiHang !== "khong-con-hang";
   const tenRieng = tenBangRieng(row.category, row.tableName);
 
   // Đặt lại `true` mỗi lần gắn: <StrictMode> (bản dev, main.tsx) chạy giả một lượt gỡ → gắn lại; chỉ hạ cờ ở lượt gỡ là
@@ -197,17 +207,37 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
 
   // Xem ảnh theo yêu cầu, ba trạng thái tách bạch: đang tải / lỗi (+ Thử lại) / thật sự không có (khuôn PaymentDialog ở
   // pages/Personnel.tsx). Tải hỏng mà rơi vào "không có ảnh" là nói ngược với 📎 ở bảng — về một chứng từ TIỀN.
-  const xemAnh = async (proofId: number | null) => {
+  const xemAnh = async (proofId: number | null, loai: "chi" | "vat" = "chi") => {
     if (!row.rid) return;
     const lan = ++luotXem.current;
-    setXem({ proofId, trangThai: "dang-tai", src: "", loi: "", retiredAt: null });
+    setXem({ proofId, loai, trangThai: "dang-tai", src: "", pdf: false, loi: "", retiredAt: null });
     try {
-      const r = await api.anhKhoanChi(row.quoteId, row.side, row.rid, proofId ?? undefined);
-      if (conSong.current && lan === luotXem.current) setXem({ proofId, trangThai: "xong", src: anhHienDuoc(r.paidProof), loi: "", retiredAt: r.retiredAt });
+      const r = await api.anhKhoanChi(row.quoteId, row.side, row.rid, proofId ?? undefined, loai);
+      const pdf = laPdfDataUrl(r.paidProof);
+      if (conSong.current && lan === luotXem.current) setXem({ proofId, loai, trangThai: "xong", src: pdf ? (r.paidProof as string) : anhHienDuoc(r.paidProof), pdf, loi: "", retiredAt: r.retiredAt });
     } catch (ex) {
       if (conSong.current && lan === luotXem.current) {
-        setXem({ proofId, trangThai: "loi", src: "", loi: ex instanceof ApiError ? ex.message : "Không tải được ảnh chứng từ", retiredAt: null });
+        setXem({ proofId, loai, trangThai: "loi", src: "", pdf: false, loi: ex instanceof ApiError ? ex.message : "Không tải được ảnh chứng từ", retiredAt: null });
       }
+    }
+  };
+
+  // HĐ VAT: ảnh → nén như ảnh chứng từ; PDF → đọc nguyên (không nén được), quá trần thì báo rõ, KHÔNG gửi.
+  const chonVat = async (e: ChangeEvent<HTMLInputElement>) => {
+    const tep = e.target.files?.[0];
+    e.target.value = "";
+    if (!tep) return;
+    const pdf = tep.type === "application/pdf";
+    if (!pdf && !tep.type.startsWith("image/")) { toast("Chỉ chọn ảnh (PNG / JPG / WEBP) hoặc PDF", "error"); return; }
+    batDauSua("vat");
+    setDangNen(true);
+    try {
+      const tepUrl = pdf ? await docTepPdf(tep) : await compressImage(tep);
+      if (conSong.current) setNhap((x) => ({ ...x, vatMoi: tepUrl, goVat: undefined }));
+    } catch (ex) {
+      toast(ex instanceof Error && ex.message ? ex.message : LOI_DOC_ANH, "error");
+    } finally {
+      if (conSong.current) setDangNen(false);
     }
   };
 
@@ -310,7 +340,7 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
                 {paid && row.trangThaiHang === "khong-con-hang" && <p className="inv-in-hop-lydo">Dòng không còn trong báo giá — không đính ảnh mới được.</p>}
                 <input name="anhChungTu" ref={tepRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => void chonAnh(e)} />
 
-                {xem && (
+                {xem && xem.loai === "chi" && (
                   <div className="inv-in-hop-xem" aria-live="polite">
                     <div className="inv-in-hop-hang">
                       <b>{xem.proofId == null ? "Ảnh hiện tại" : `Ảnh #${xem.proofId}`}</b>
@@ -321,9 +351,11 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
                     {xem.trangThai === "loi" && (
                       <p className="err" role="alert">{xem.loi} <button type="button" className="btn btn-sm" onClick={() => void xemAnh(xem.proofId)}>Thử lại</button></p>
                     )}
-                    {xem.trangThai === "xong" && (xem.src
-                      ? <div className="pay-proof"><img src={anhHienDuoc(xem.src)} alt="Ảnh chứng từ" /></div>
-                      : <p className="muted">Không có ảnh (hoặc ảnh cũ không đọc được).</p>)}
+                    {xem.trangThai === "xong" && (xem.pdf
+                      ? <TaiPdf dataUrl={xem.src} tenTep={`chung-tu-${row.rid}.pdf`} />
+                      : xem.src
+                        ? <div className="pay-proof"><img src={anhHienDuoc(xem.src)} alt="Ảnh chứng từ" /></div>
+                        : <p className="muted">Không có ảnh (hoặc ảnh cũ không đọc được).</p>)}
                   </div>
                 )}
                 {anhTruoc.length > 0 && (
@@ -345,6 +377,78 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
               <span className="muted">{row.hasPaidProof ? "📎 Đã có ảnh — chỉ người có quyền tích ĐÃ CHI xem được." : "Chưa có ảnh chứng từ."}</span>
             )}
           </div>
+
+          {hienPhanVat && (
+            <div className="inv-in-hop-o inv-in-hop-vat" data-phan-vat>
+              <span className="inv-in-hop-nhan">Hóa đơn VAT</span>
+              {!laVat && <p className="inv-in-hop-lydo">Chứng từ của dòng này không còn là VAT — hóa đơn đã đưa vẫn giữ, nhưng không đưa hóa đơn mới.</p>}
+              {canPay ? (
+                <>
+                  {nhap.vatMoi ? (
+                    <div className="inv-in-hop-anh">
+                      {laPdfDataUrl(nhap.vatMoi)
+                        ? <p>📄 Hóa đơn PDF vừa chọn</p>
+                        : <img src={anhHienDuoc(nhap.vatMoi)} alt="Hóa đơn VAT vừa chọn (chưa lưu)" />}
+                      <div className="inv-in-hop-hang">
+                        <span className="muted">Hóa đơn vừa chọn — bấm Lưu mới ghi.</span>
+                        <button type="button" className="btn btn-sm" onClick={() => setNhap((x) => ({ ...x, vatMoi: undefined }))}>Bỏ hóa đơn vừa chọn</button>
+                      </div>
+                    </div>
+                  ) : coVat && !nhap.goVat ? (
+                    <div className="inv-in-hop-hang">
+                      <span>🧾 Đã có hóa đơn VAT{row.vatProofAt ? ` · ${fmtDateTime(row.vatProofAt)}` : ""}{row.vatProofByName ? ` · ${row.vatProofByName}` : ""}</span>
+                      <button type="button" className="btn btn-sm" onClick={() => void xemAnh(null, "vat")}>Xem hóa đơn</button>
+                      {dinhVatDuoc && <button type="button" className="btn btn-sm" onClick={() => tepVatRef.current?.click()} disabled={dangNen}>{dangNen ? "Đang đọc tệp…" : "Thay hóa đơn"}</button>}
+                      {ghiDuoc && <button type="button" className="btn btn-sm" onClick={() => { batDauSua("vat"); setNhap((x) => ({ ...x, goVat: true })); }}>Gỡ hóa đơn</button>}
+                    </div>
+                  ) : (
+                    <div className="inv-in-hop-hang">
+                      {nhap.goVat
+                        ? <span className="inv-in-hop-canh">Hóa đơn hiện tại sẽ được gỡ khi Lưu (vẫn giữ trong lịch sử).</span>
+                        : <span className={paid ? "inv-in-hop-canh" : "muted"}>{paid ? "Đã chi nhưng chưa có hóa đơn VAT." : "Chưa có hóa đơn VAT."}</span>}
+                      {nhap.goVat && <button type="button" className="btn btn-sm" onClick={() => setNhap((x) => ({ ...x, goVat: undefined }))}>Giữ hóa đơn</button>}
+                      {dinhVatDuoc && <button type="button" className="btn btn-sm" onClick={() => tepVatRef.current?.click()} disabled={dangNen}>{dangNen ? "Đang đọc tệp…" : "Chọn ảnh / PDF…"}</button>}
+                    </div>
+                  )}
+                  <input name="hoaDonVat" ref={tepVatRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" hidden onChange={(e) => void chonVat(e)} />
+                  {xem && xem.loai === "vat" && (
+                    <div className="inv-in-hop-xem" aria-live="polite">
+                      <div className="inv-in-hop-hang">
+                        <b>{xem.proofId == null ? "Hóa đơn hiện tại" : `Hóa đơn #${xem.proofId}`}</b>
+                        {xem.retiredAt && <span className="muted">· đã rút {fmtDateTime(xem.retiredAt)}</span>}
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setXem(null)}>Ẩn</button>
+                      </div>
+                      {xem.trangThai === "dang-tai" && <div className="skeleton-wrap" aria-busy="true"><div className="skeleton-row" /><div className="skeleton-row" /></div>}
+                      {xem.trangThai === "loi" && (
+                        <p className="err" role="alert">{xem.loi} <button type="button" className="btn btn-sm" onClick={() => void xemAnh(xem.proofId, "vat")}>Thử lại</button></p>
+                      )}
+                      {xem.trangThai === "xong" && (xem.pdf
+                        ? <TaiPdf dataUrl={xem.src} tenTep={`hoa-don-vat-${row.rid}.pdf`} />
+                        : xem.src
+                          ? <div className="pay-proof"><img src={anhHienDuoc(xem.src)} alt="Hóa đơn VAT" /></div>
+                          : <p className="muted">Không đọc được tệp này.</p>)}
+                    </div>
+                  )}
+                  {vatTruoc.length > 0 && (
+                    <details className="inv-in-hop-truoc">
+                      <summary>Hóa đơn trước ({vatTruoc.length})</summary>
+                      <ul>
+                        {vatTruoc.map((p) => (
+                          <li key={p.id}>
+                            <button type="button" className="btn btn-sm btn-ghost" onClick={() => void xemAnh(p.id, "vat")}>
+                              #{p.id} · {fmtDateTime(p.uploadedAt) || "—"}{p.uploadedByName ? ` · ${p.uploadedByName}` : ""}{p.retiredReason ? ` · ${NHAN_LY_DO_RUT[p.retiredReason] ?? p.retiredReason}` : ""}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </>
+              ) : (
+                <span className="muted">{coVat ? "🧾 Đã có hóa đơn VAT — chỉ người có quyền tích ĐÃ CHI xem được." : "Chưa có hóa đơn VAT."}</span>
+              )}
+            </div>
+          )}
 
           <label className="inv-in-hop-o">
             <span className="inv-in-hop-nhan">Ngày hóa đơn</span>

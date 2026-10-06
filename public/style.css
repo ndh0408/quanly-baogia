@@ -3965,3 +3965,36 @@ body.embedded .main-embed > * {
 .col-pay .pay-chua {
   color: var(--text-muted, #9aa0a6);
 }
+/* Cột THANH TOÁN chỉ xem — hóa đơn VAT (2026-10-06): đã chi mà chưa có HĐ VAT → màu cảnh báo; 📎 / 🧾 là nút xem chứng từ. */
+.col-pay .pay-chua-vat .ap-date,
+.col-pay .pay-vat-chua-tt {
+  color: var(--warn, #b45309);
+  font-weight: 600;
+}
+.col-pay .pay-xem {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  margin-left: 2px;
+  cursor: pointer;
+  font-size: inherit;
+  line-height: 1;
+  border-radius: 4px;
+}
+.col-pay .pay-xem:hover,
+.col-pay .pay-xem:focus-visible {
+  background: var(--hover, rgba(37, 99, 235, 0.12));
+  outline: none;
+}
+.xem-ct .xem-ct-anh img {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+.xem-ct .xem-ct-chu,
+.xem-ct .xem-ct-meta {
+  font-size: 12px;
+}
+.inv-in-kt-vat {
+  white-space: nowrap;
+}

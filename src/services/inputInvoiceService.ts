@@ -9,7 +9,9 @@
 //         luồng Hà Nội, GDPR, bản chụp phiên bản chỉ ĐỌC.
 //   KT-5  Thứ tự khoá: ở đây Quote FOR SHARE → đọc hàng → khoản FOR UPDATE; KHÔNG BAO GIỜ xin khoá QuoteSheet. Đường Lưu
 //         khoá QuoteSheet (nếu có) → Quote FOR UPDATE → rồi mới đọc khoản. Hai chiều không bao giờ ngược nhau.
-//   KT-7  Ảnh không bao giờ bị xoá: thay / gỡ / bỏ tích chỉ đặt `retiredAt`. Không có lệnh DELETE nào lên hai bảng.
+//   KT-7  Ảnh không bao giờ bị xoá: thay / gỡ / bỏ tích chỉ đặt `retiredAt`. Không có lệnh DELETE nào lên hai bảng. HÓA ĐƠN VAT
+//         (InputInvoiceProof.loai = 'vat', trỏ bởi `currentVatProofId`) theo đúng luật đó, và ĐỘC LẬP với đã chi: bỏ tích
+//         không rút HĐ VAT, đưa HĐ trước khi tích được.
 //   KT-8  Ghi kế toán KHÔNG đụng `Quote`/`QuoteSheet`: không bump `Quote.updatedAt` (mốc khoá lạc quan của màn soạn —
 //         tích một ô không được đá văng người đang soạn), không sinh QuoteVersion. Mỗi lần ghi tăng `version` của
 //         RIÊNG khoản đó và có nhật ký before/after (không chép ảnh).
@@ -32,7 +34,9 @@ import {
   hatGiongJson,
   coDauVetJsonCu,
   tenHangDaChi,
-  daChiTheoRid,
+  khoanXemTheoRid,
+  trangThaiHieuLuc,
+  laLoaiVat,
   ngayTuChuoi,
   ngayRaChuoi,
   dtoKhoanChi,
@@ -43,6 +47,8 @@ import {
   type KhoanChiDto,
   type LyDoRutAnh,
   type DaChiHangDto,
+  type KhoanXemHang,
+  type LoaiChungTu,
 } from "../khoanChi.js";
 
 /** Trần số ảnh MỘT khoản giữ được (kể cả ảnh đã rút) — ảnh chỉ thêm, nên phải có trần. */
@@ -57,13 +63,13 @@ function chonAnhChungTu<T extends Prisma.InputInvoiceProofSelect>(s: T): T { ret
 const CHON_KHOAN = chonKhoanChi({
   id: true, quoteId: true, side: true, rid: true,
   paid: true, paidAt: true, paidById: true, paidByName: true, paidSnapshot: true,
-  currentProofId: true, invoiceDate: true, accountingNote: true,
+  currentProofId: true, currentVatProofId: true, invoiceDate: true, accountingNote: true,
   rowSnapshot: true, legacySeed: true, source: true, version: true,
   updatedAt: true, updatedByName: true,
 });
 
 const CHON_ANH = chonAnhChungTu({
-  id: true, entryId: true, uploadedAt: true, uploadedByName: true, retiredAt: true, retiredReason: true, source: true,
+  id: true, entryId: true, uploadedAt: true, uploadedByName: true, retiredAt: true, retiredReason: true, source: true, loai: true, mime: true,
 });
 
 type DocKhoan = Pick<TxClient, "inputInvoiceEntry">;
@@ -117,7 +123,7 @@ export async function khoanDaChiCuaBaoGia(tx: TxClient, quoteId: number): Promis
 }
 
 /**
- * GET /api/quotes/:id/khoan-chi — trạng thái ĐÃ CHI hiệu lực (KT-3) từng hàng bảng nội bộ của MỘT báo giá, CHỈ XEM, cho
+ * GET /api/quotes/:id/khoan-chi — trạng thái ĐÃ CHI hiệu lực (KT-3) + cờ HÓA ĐƠN VAT từng hàng bảng nội bộ của MỘT báo giá, CHỈ XEM, cho
  * cột "Thanh toán" ở màn soạn / Account HN (chủ repo 2026-10-06: "cái thanh toán hiện đã thanh toán ở đây ngày như nào").
  * Việc tích + ảnh vẫn chỉ ở trang Hóa đơn đầu vào; màn soạn gọi lại endpoint này khi có sự kiện `inputInvoice` thay vì
  * nạp lại cả báo giá (đang soạn dở, và báo giá có thể nặng hàng chục MB ảnh).
@@ -127,25 +133,45 @@ export async function khoanDaChiCuaBaoGia(tx: TxClient, quoteId: number): Promis
  * phía (presentQuote / presentQuoteForInternal đều trả bảng nội bộ + bảng HN). Không ảnh, không Ngày HĐ / ghi chú kế toán.
  * Đọc bảng qua SQL đã CẮT `paidProof`.
  */
-export async function daChiCuaBaoGia(req: Request): Promise<{ quoteId: number; sheet: DaChiHangDto[]; hn: DaChiHangDto[] }> {
-  const id = Number(req.params.id);
-  const q = await prisma.quote.findFirst({ where: { id }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
-  if (!q) throw httpError(404, "Không tìm thấy báo giá");
-  if (!canOnQuote(req.session, "read", q)) throw httpError(403, "Bạn không có quyền xem báo giá này");
-  const phia: PhiaKhoanChi[] = can(req.session, P.QUOTE_HN_FILL) ? ["hn"] : ["sheet", "hn"];
+export async function daChiCuaBaoGia(req: Request): Promise<{
+  quoteId: number; sheet: DaChiHangDto[]; hn: DaChiHangDto[]; vatChuaChi: { sheet: DaChiHangDto[]; hn: DaChiHangDto[] };
+}> {
+  const { id, phia } = await kiemXemBangNoiBo(req);
   const khoan = await docKhoanChiTrongTx(prisma, id);
-  const theoPhia = new Map<PhiaKhoanChi, ReturnType<typeof daChiTheoRid>>();
-  for (const side of phia) theoPhia.set(side, daChiTheoRid(side, await bangCuaPhia(prisma, id, side), khoan));
+  // Lúc đưa HĐ VAT lên — một câu, chỉ siêu dữ liệu (không dataUrl).
+  const vatIds = [...khoan.values()].map((e) => e.currentVatProofId).filter((x): x is number => x != null);
+  const vatLuc = new Map<number, Date>(
+    vatIds.length ? (await prisma.inputInvoiceProof.findMany({ where: { id: { in: vatIds } }, select: { id: true, uploadedAt: true } })).map((a) => [a.id, a.uploadedAt] as [number, Date]) : [],
+  );
+  const theoPhia = new Map<PhiaKhoanChi, KhoanXemHang[]>();
+  for (const side of phia) theoPhia.set(side, khoanXemTheoRid(side, await bangCuaPhia(prisma, id, side), khoan, vatLuc));
   // Hàng cờ JSON cũ chỉ lưu id người tích — tra tên MỘT câu (gồm cả tài khoản đã xoá, như danh sách Hóa đơn đầu vào).
   const idCanTra = new Set<number>();
   for (const ds of theoPhia.values()) for (const h of ds) if (!h.paidByName && h.paidById != null) idCanTra.add(h.paidById);
   const ten = new Map<number, string>(
     idCanTra.size ? ((await prisma.user.findMany({ where: { id: { in: [...idCanTra] } }, select: { id: true, displayName: true }, includeDeleted: true } as any)) as { id: number; displayName: string }[]).map((u) => [u.id, u.displayName] as [number, string]) : [],
   );
-  const dto = (side: PhiaKhoanChi): DaChiHangDto[] => (theoPhia.get(side) ?? []).map((h) => ({
+  const dto = (side: PhiaKhoanChi, paid: boolean): DaChiHangDto[] => (theoPhia.get(side) ?? []).filter((h) => h.paid === paid).map((h) => ({
     rid: h.rid, paidAt: h.paidAt, paidByName: h.paidByName ?? (h.paidById != null ? ten.get(h.paidById) ?? null : null), coAnh: h.coAnh,
+    laVat: h.laVat, coHdVat: h.coHdVat, hdVatLuc: h.hdVatLuc,
   }));
-  return { quoteId: id, sheet: dto("sheet"), hn: dto("hn") };
+  // `sheet` / `hn` GIỮ NGHĨA CŨ (chỉ hàng ĐÃ CHI): bundle cũ còn mở trong tab coi mọi phần tử là "đã chi". Hàng CHƯA chi mà
+  // đã có HĐ VAT đi riêng ở `vatChuaChi` — bundle cũ bỏ qua khoá lạ, không hiện nhầm thành "✓ Đã TT".
+  return { quoteId: id, sheet: dto("sheet", true), hn: dto("hn", true), vatChuaChi: { sheet: dto("sheet", false), hn: dto("hn", false) } };
+}
+
+/**
+ * QUYỀN XEM BẢNG NỘI BỘ của MỘT báo giá cho các đường CHỈ XEM (cột Thanh toán + xem chứng từ từ nội bộ) = đúng GET
+ * /api/quotes/:id: `canOnQuote(read)` (404 / 403), và đúng PHẦN mà GET đó trả — account Hà Nội (`quote:hn:fill`,
+ * presentQuoteForAccountHn) chỉ phía "hn"; mọi người đọc được báo giá khác thấy cả hai phía (presentQuote /
+ * presentQuoteForInternal đều trả bảng nội bộ + bảng HN). Báo giá đã xoá mềm: 404 (extension lọc `deletedAt`).
+ */
+async function kiemXemBangNoiBo(req: Request): Promise<{ id: number; phia: PhiaKhoanChi[] }> {
+  const id = Number(req.params.id);
+  const q = await prisma.quote.findFirst({ where: { id }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
+  if (!q) throw httpError(404, "Không tìm thấy báo giá");
+  if (!canOnQuote(req.session, "read", q)) throw httpError(403, "Bạn không có quyền xem báo giá này");
+  return { id, phia: can(req.session, P.QUOTE_HN_FILL) ? ["hn"] : ["sheet", "hn"] };
 }
 
 /** Lớp phủ cho hàng THÔ của danh sách báo giá (nhánh bảng nội bộ của listQuotes) — để "Đã TT x/y" đếm theo khoản. */
@@ -166,6 +192,7 @@ type ThanKhoanChi = {
   baseVersion: number;
   paid?: boolean;
   paidProof?: string | null;
+  vatProof?: string | null;
   invoiceDate?: string | null;
   accountingNote?: string | null;
 };
@@ -184,6 +211,23 @@ function kiemAnhMoi(dataUrl: string): AnhMoi {
   const nhan = /^data:(image\/[a-z]+);/i.exec(dataUrl.trim())?.[1]?.toLowerCase().replace("image/jpg", "image/jpeg");
   const luu = nhan === kind.mime ? dataUrl.trim() : `data:${kind.mime};base64,${buf.toString("base64")}`;
   return { dataUrl: luu, mime: kind.mime, size: buf.length, sha256: sha256(buf) };
+}
+
+/** Hóa đơn VAT nhận cả PDF (hóa đơn điện tử) ngoài ảnh. Nhãn trong data-URL không được tin — soát magic bytes. */
+const RE_TEP_VAT = /^data:(image\/(?:png|jpe?g|webp)|application\/pdf);base64,(.+)$/i;
+const laPdf = (b: Buffer) => b.length > 5 && b.toString("ascii", 0, 5) === "%PDF-";
+
+/** Tệp HĐ VAT mới: giải base64 + soát magic bytes TRƯỚC transaction (ảnh PNG/JPG/WEBP hoặc PDF), cùng trần với ảnh chứng từ. */
+export function kiemTepVat(dataUrl: string): AnhMoi {
+  const m = RE_TEP_VAT.exec(String(dataUrl).trim());
+  let buf: Buffer | null;
+  try { buf = m ? Buffer.from(m[2], "base64") : null; } catch { buf = null; }
+  if (!buf || !buf.length) throw loiCoMa(415, "khong-phai-hd-vat", "Hóa đơn VAT không hợp lệ");
+  if (buf.length > MAX_PROOF_BYTES) throw loiCoMa(413, "anh-qua-lon", "Tệp hóa đơn VAT quá lớn — tối đa khoảng 650 KB (chụp / xuất lại nhỏ hơn)");
+  const mime = laPdf(buf) ? "application/pdf" : sniffImage(buf)?.mime;
+  if (!mime) throw loiCoMa(415, "khong-phai-hd-vat", "Nội dung không phải ảnh PNG/JPG/WEBP hay PDF");
+  // Dựng lại data-URL từ BYTE + kiểu đã soát (nhãn PDF trên byte ảnh, hay ngược lại, không lọt vào CSDL).
+  return { dataUrl: `data:${mime};base64,${buf.toString("base64")}`, mime, size: buf.length, sha256: sha256(buf) };
 }
 
 /** Ảnh trong JSON cũ của hàng → dòng InputInvoiceProof `json-cu`. Không qua được regex ảnh thì bỏ (vốn không xem được). */
@@ -288,11 +332,12 @@ export async function gieoKhoan(
 }
 
 /** Ảnh chụp những gì nhật ký cần của một khoản — KHÔNG BAO GIỜ có ảnh (AuditEvent không mã hoá; chép ảnh = nhân bản PII). */
-function nhatKyKhoan(e: KhoanChiNap | null, ten: string, sha: string | null, nguon: string) {
+function nhatKyKhoan(e: KhoanChiNap | null, ten: string, sha: string | null, nguon: string, vatSha: string | null = null) {
   return e
     ? {
         side: e.side, rid: e.rid, ten, version: e.version, paid: e.paid, paidAt: e.paidAt ?? null, paidById: e.paidById ?? null,
         paidByName: e.paidByName ?? null, proofId: e.currentProofId ?? null, proofSha256: sha,
+        vatProofId: e.currentVatProofId ?? null, vatProofSha256: vatSha,
         invoiceDate: ngayRaChuoi(e.invoiceDate), accountingNote: e.accountingNote ?? null, nguon,
       }
     : null;
@@ -313,15 +358,17 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
   const b = req.body as ThanKhoanChi;
 
   // (1) QUYỀN THEO TỪNG TRƯỜNG — như updateSheetInvoice: thiếu quyền của BẤT KỲ trường nào là 403 và không ghi gì.
-  const chamTien = b.paid !== undefined || b.paidProof !== undefined;
+  // HĐ VAT cùng nhóm quyền với ảnh ủy nhiệm chi (invoice:input:pay) — cùng người cầm chứng từ tiền.
+  const chamTien = b.paid !== undefined || b.paidProof !== undefined || b.vatProof !== undefined;
   const chamSua = b.invoiceDate !== undefined || b.accountingNote !== undefined;
   if (chamTien && !can(s, P.INVOICE_INPUT_PAY)) {
-    throw httpError(403, "Bạn không có quyền đánh dấu ĐÃ CHI / ảnh chứng từ — nhờ quản trị cấp quyền 'Hóa đơn đầu vào: tích ĐÃ CHI + ảnh chứng từ'.");
+    throw httpError(403, "Bạn không có quyền đánh dấu ĐÃ CHI / ảnh chứng từ / hóa đơn VAT — nhờ quản trị cấp quyền 'Hóa đơn đầu vào: tích ĐÃ CHI + ảnh chứng từ'.");
   }
   if (chamSua && !can(s, P.INVOICE_EDIT)) throw httpError(403, "Bạn không có quyền sửa Ngày hóa đơn / Ghi chú kế toán");
 
   // (2) Việc nặng TRƯỚC transaction: soát ảnh, danh sách mẫu (cột Số Ngày), tên người ghi.
   const anhMoi = typeof b.paidProof === "string" ? kiemAnhMoi(b.paidProof) : null;
+  const vatMoi = typeof b.vatProof === "string" ? kiemTepVat(b.vatProof) : null;
   const [dsMau, toi] = await Promise.all([dsMauBangNoiBo(), tenNguoi(prisma, s.userId)]);
   const uid = s.userId ?? null;
 
@@ -361,7 +408,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
 
     // (5) Khoá ĐÚNG khoản này rồi mới so mốc — hai kế toán cùng một khoản xếp hàng ở đây, người sau 409.
     const [e] = await tx.$queryRaw<KhoanChiNap[]>`
-      SELECT id, "quoteId", side, rid, paid, "paidAt", "paidById", "paidByName", "paidSnapshot", "currentProofId", "invoiceDate",
+      SELECT id, "quoteId", side, rid, paid, "paidAt", "paidById", "paidByName", "paidSnapshot", "currentProofId", "currentVatProofId", "invoiceDate",
              "accountingNote", "rowSnapshot", "legacySeed", source, version, "updatedAt", "updatedByName"
         FROM "InputInvoiceEntry" WHERE "quoteId" = ${quoteId} AND side = ${side} AND rid = ${rid} FOR UPDATE`;
     if (!e) throw httpError(500, "Không đọc được khoản chi vừa tạo");
@@ -369,7 +416,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
       throw loiCoMa(409, "khoan-chi-da-doi", "Kế toán khác vừa sửa khoản này — trang đã nạp lại, phần bạn đang nhập vẫn giữ. Kiểm lại rồi bấm Lưu lần nữa.");
     }
     const ten = hang?.ten || (e.rowSnapshot && typeof e.rowSnapshot === "object" ? String((e.rowSnapshot as any).name ?? "") : "");
-    const truoc = nhatKyKhoan(e, ten, await shaCua(tx, e.currentProofId), nguonTruoc);
+    const truoc = nhatKyKhoan(e, ten, await shaCua(tx, e.currentProofId), nguonTruoc, await shaCua(tx, e.currentVatProofId));
 
     // (6) Áp thay đổi.
     const now = new Date();
@@ -406,7 +453,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
     if (anhMoi) {
       if (!hang) throw loiCoMa(409, "hang-khong-con", "Dòng này không còn trong báo giá — không đính ảnh mới được nữa.");
       if (!paidSau) throw loiCoMa(400, "chua-danh-dau", "Chỉ đính ảnh chứng từ cho khoản ĐÃ CHI — hãy tích 'Đã chi' trước (hoặc cùng lúc).");
-      const soAnh = await tx.inputInvoiceProof.count({ where: { entryId: e.id } });
+      const soAnh = await tx.inputInvoiceProof.count({ where: { entryId: e.id, loai: "chi" } });
       if (soAnh >= TRAN_ANH_MOI_KHOAN) {
         throw loiCoMa(400, "qua-nhieu-anh", `Khoản này đã có ${soAnh} ảnh (kể cả ảnh cũ trong lịch sử) — tối đa ${TRAN_ANH_MOI_KHOAN}.`);
       }
@@ -422,6 +469,29 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
     }
     if (proofSau !== e.currentProofId) data.currentProofId = proofSau;
 
+    // HÓA ĐƠN VAT — ĐỘC LẬP với đã chi (đưa trước hay sau khi tích đều được; bỏ tích KHÔNG rút HĐ VAT). Chỉ THÊM: thay / gỡ
+    // rút bản cũ vào lịch sử (KT-7). HĐ MỚI chỉ cho hàng còn trong báo giá và đang mang chứng từ VAT; GỠ thì được ở mọi
+    // trạng thái (kế toán đưa nhầm phải sửa được cả khi chứng từ đã đổi khỏi VAT).
+    let vatSau = e.currentVatProofId ?? null;
+    if (vatMoi) {
+      if (!hang) throw loiCoMa(409, "hang-khong-con", "Dòng này không còn trong báo giá — không đưa hóa đơn VAT mới được nữa.");
+      if (hang.it.chungTu !== "VAT") throw loiCoMa(409, "khong-phai-vat", "Chứng từ của dòng này không phải VAT — người soạn đổi chứng từ sang VAT ở màn soạn trước, rồi mới đưa hóa đơn VAT.");
+      const soVat = await tx.inputInvoiceProof.count({ where: { entryId: e.id, loai: "vat" } });
+      if (soVat >= TRAN_ANH_MOI_KHOAN) {
+        throw loiCoMa(400, "qua-nhieu-anh", `Khoản này đã có ${soVat} hóa đơn VAT (kể cả bản cũ trong lịch sử) — tối đa ${TRAN_ANH_MOI_KHOAN}.`);
+      }
+      await rutAnh(vatSau, "thay");
+      const pr = await tx.inputInvoiceProof.create({
+        data: { entryId: e.id, loai: "vat", dataUrl: vatMoi.dataUrl, mime: vatMoi.mime, size: vatMoi.size, sha256: vatMoi.sha256, source: "upload", uploadedAt: now, uploadedById: uid, uploadedByName: toi },
+        select: { id: true },
+      });
+      vatSau = pr.id;
+    } else if (b.vatProof === null && vatSau != null) {
+      await rutAnh(vatSau, "go-anh");
+      vatSau = null;
+    }
+    if (vatSau !== (e.currentVatProofId ?? null)) data.currentVatProofId = vatSau;
+
     if (b.invoiceDate !== undefined) data.invoiceDate = b.invoiceDate ? ngayTuChuoi(b.invoiceDate) : null;
     if (b.accountingNote !== undefined) data.accountingNote = b.accountingNote ? b.accountingNote : null;
     if (hang) data.rowSnapshot = chupHang(hang, coNgay, side) as Prisma.InputJsonValue;
@@ -435,15 +505,16 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
         tienHienTai: hang ? chupHang(hang, coNgay, side).amount : null,
       }),
       doiTich,
+      doiVat: vatSau !== (e.currentVatProofId ?? null),
       daChi: paidSau,
       truoc,
-      sau: nhatKyKhoan(sau, ten, await shaCua(tx, sau.currentProofId), "bang"),
+      sau: nhatKyKhoan(sau, ten, await shaCua(tx, sau.currentProofId), "bang", await shaCua(tx, sau.currentVatProofId)),
     };
   });
 
   // (7) SAU commit: một sự kiện realtime + một dòng nhật ký. 4xx không tới đây nên không phát gì.
   emitChange("inputInvoice", "update");
-  await audit(req, kq.doiTich ? (kq.daChi ? "quote.internal.pay" : "quote.internal.unpay") : "quote.internal.ke-toan", {
+  await audit(req, kq.doiTich ? (kq.daChi ? "quote.internal.pay" : "quote.internal.unpay") : kq.doiVat ? "quote.internal.vat" : "quote.internal.ke-toan", {
     resource: "quote", resourceId: quoteId, before: kq.truoc, after: kq.sau,
   });
   return { row: kq.dto };
@@ -453,37 +524,95 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
 //  XEM ẢNH — GET /api/quotes/input-invoices/:quoteId/:side/:rid/proof[?proofId=N]
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+type KetQuaAnh = { paidProof: string | null; proofId: number | null; retiredAt: string | null; nguon: "bang" | "json-cu"; loai: LoaiChungTu; mime: string | null };
+
 /**
- * Ảnh ủy nhiệm chi là DỮ LIỆU CÁ NHÂN của bên thứ ba (tên + số tài khoản + số tiền): chỉ người có
- * `invoice:input:pay` xem được — tài khoản chi phí (quote:internal:view) không còn đường xem. Mỗi lần xem ghi nhật ký
- * (chỉ định danh, không chép ảnh). Đọc được cả khoản của báo giá đã xoá mềm (bằng chứng chỉ-đọc).
+ * Ảnh ủy nhiệm chi là DỮ LIỆU CÁ NHÂN của bên thứ ba (tên + số tài khoản + số tiền): ở trang Hóa đơn đầu vào chỉ người có
+ * `invoice:input:pay` xem được, kể cả LỊCH SỬ (`?proofId=`) và hóa đơn VAT (`?loai=vat`). Từ bảng nội bộ, người đang xem
+ * chính hàng đó chỉ xem được bản HIỆN TẠI qua docChungTuNoiBo (dưới). Mỗi lần xem ghi nhật ký (chỉ định danh, không chép
+ * ảnh). Đọc được cả khoản của báo giá đã xoá mềm (bằng chứng chỉ-đọc).
  */
-export async function docAnhKhoanChi(req: Request) {
+export async function docAnhKhoanChi(req: Request): Promise<KetQuaAnh> {
   const s = req.session;
   if (!can(s, P.INVOICE_PAGE) || !can(s, P.INVOICE_INPUT_PAY)) throw httpError(403, "Bạn không có quyền xem ảnh chứng từ");
   const quoteId = Number(req.params.quoteId);
   const side = String(req.params.side) as PhiaKhoanChi;
   const rid = String(req.params.rid);
   const proofId = req.query.proofId != null ? Number(req.query.proofId) : null;
+  const loai: LoaiChungTu = laLoaiVat(req.query.loai) ? "vat" : "chi";
 
-  const e = await prisma.inputInvoiceEntry.findUnique({ where: { quoteId_side_rid: { quoteId, side, rid } }, select: { id: true, currentProofId: true } });
+  const e = await prisma.inputInvoiceEntry.findUnique({ where: { quoteId_side_rid: { quoteId, side, rid } }, select: { id: true, currentProofId: true, currentVatProofId: true } });
   if (e) {
-    const id = proofId ?? e.currentProofId;
-    let ket: { paidProof: string | null; proofId: number | null; retiredAt: string | null; nguon: "bang" | "json-cu" } = { paidProof: null, proofId: null, retiredAt: null, nguon: "bang" };
+    // `proofId` mở MỘT tệp bất kỳ của khoản (lịch sử, cả hai loại); vắng thì bản HIỆN TẠI của loại đã chọn.
+    const id = proofId ?? (loai === "vat" ? e.currentVatProofId : e.currentProofId);
+    let ket: KetQuaAnh = { paidProof: null, proofId: null, retiredAt: null, nguon: "bang", loai, mime: null };
     if (id != null) {
-      const p = await prisma.inputInvoiceProof.findFirst({ where: { id, entryId: e.id }, select: { id: true, dataUrl: true, retiredAt: true } });
+      const p = await prisma.inputInvoiceProof.findFirst({ where: { id, entryId: e.id }, select: { id: true, dataUrl: true, retiredAt: true, loai: true, mime: true } });
       if (!p) throw loiCoMa(404, "khong-thay-anh", "Không tìm thấy ảnh này của khoản chi");
-      ket = { paidProof: p.dataUrl, proofId: p.id, retiredAt: p.retiredAt ? p.retiredAt.toISOString() : null, nguon: "bang" };
+      ket = { paidProof: p.dataUrl, proofId: p.id, retiredAt: p.retiredAt ? p.retiredAt.toISOString() : null, nguon: "bang", loai: laLoaiVat(p.loai) ? "vat" : "chi", mime: p.mime };
     }
-    await audit(req, "quote.internal.proof-view", { resource: "quote", resourceId: quoteId, after: { side, rid, proofId: ket.proofId, nguon: "bang" } });
+    await audit(req, "quote.internal.proof-view", { resource: "quote", resourceId: quoteId, after: { side, rid, proofId: ket.proofId, nguon: "bang", loai: ket.loai } });
     return ket;
   }
-  // Chưa có khoản → ĐỌC DỰ PHÒNG ảnh trong JSON cũ của hàng (KT-3), lọc lại bằng regex như readProofDataUrl.
-  if (proofId != null) throw loiCoMa(404, "khong-thay-anh", "Không tìm thấy ảnh này của khoản chi");
+  // Chưa có khoản → ĐỌC DỰ PHÒNG ảnh trong JSON cũ của hàng (KT-3), lọc lại bằng regex như readProofDataUrl. HĐ VAT không có
+  // bản JSON cũ nào.
+  if (proofId != null || loai === "vat") throw loiCoMa(404, "khong-thay-anh", "Không tìm thấy ảnh này của khoản chi");
   const ds = await anhJsonCuCuaHang(prisma, quoteId, side, rid);
   if (ds.length > 1) throw loiCoMa(409, "hang-trung-ma", "Có hai dòng cùng mã nội bộ trong báo giá này — nhờ người soạn mở báo giá và bấm Lưu một lần.");
   if (!ds.length) throw loiCoMa(404, "khong-thay-hang", "Không tìm thấy dòng này trong báo giá");
   const anh = typeof ds[0] === "string" && PAYMENT_PROOF_DATA_URL_RE.test(ds[0]) ? ds[0] : null;
-  await audit(req, "quote.internal.proof-view", { resource: "quote", resourceId: quoteId, after: { side, rid, proofId: null, nguon: "json-cu" } });
-  return { paidProof: anh, proofId: null, retiredAt: null, nguon: "json-cu" as const };
+  await audit(req, "quote.internal.proof-view", { resource: "quote", resourceId: quoteId, after: { side, rid, proofId: null, nguon: "json-cu", loai: "chi" } });
+  return { paidProof: anh, proofId: null, retiredAt: null, nguon: "json-cu", loai: "chi", mime: null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+//  XEM CHỨNG TỪ TỪ BẢNG NỘI BỘ — GET /api/quotes/:id/khoan-chi/:side/:rid/anh?loai=chi|vat
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Chủ repo 2026-10-06: "có để kế toán cho hình và hiển thị bên nội bộ chứ". Người đang xem CHÍNH HÀNG ĐÓ ở bảng nội bộ (màn
+ * soạn, Account HN, màn chỉ-xem nội bộ) mở được chứng từ HIỆN TẠI của hàng: ảnh ủy nhiệm chi (`loai=chi`) hoặc hóa đơn VAT
+ * (`loai=vat`). CHỈ XEM — không lịch sử (bản đã rút chỉ kế toán xem), không sửa / gỡ.
+ *
+ * QUYỀN = cột Thanh toán (kiemXemBangNoiBo — đúng GET /:id: canOnQuote read; account HN chỉ phía "hn"), CỘNG: hàng phải ĐANG
+ * nằm trong phía đó của báo giá (bản ĐẦU của rid — chủ khoản, cùng luật khoanXemTheoRid); khoản mồ côi (hàng đã xoá) hay rid
+ * đoán mò là 404 — không có đường nào đọc tệp của hàng mà người gọi không nhìn thấy. Ảnh ủy nhiệm chi chỉ khi hàng ĐANG đã
+ * chi (trạng thái hiệu lực); hàng chưa có khoản đọc dự phòng ảnh JSON cũ của đúng bản đầu. Mỗi lần xem ghi nhật ký
+ * `quote.internal.proof-view` (`noiBo: true`), không chép ảnh.
+ */
+export async function docChungTuNoiBo(req: Request): Promise<{ dataUrl: string; mime: string | null; loai: LoaiChungTu; uploadedAt: string | null; uploadedByName: string | null }> {
+  const { id: quoteId, phia } = await kiemXemBangNoiBo(req);
+  const side = String(req.params.side) as PhiaKhoanChi;
+  const rid = String(req.params.rid).trim();
+  const loai: LoaiChungTu = laLoaiVat(req.query.loai) ? "vat" : "chi";
+  if (!phia.includes(side)) throw httpError(403, "Bạn không có quyền xem chứng từ của phần này");
+  const khongThay = () => loiCoMa(404, "khong-thay-anh", loai === "vat" ? "Dòng này chưa có hóa đơn VAT" : "Dòng này chưa có ảnh ủy nhiệm chi");
+
+  const hang = [...hangCuaPhia(side, await bangCuaPhia(prisma, quoteId, side))].find((h) => typeof h.it.rid === "string" && h.it.rid.trim() === rid);
+  if (!hang) throw loiCoMa(404, "khong-thay-hang", "Không tìm thấy dòng này trong báo giá");
+  const e = await prisma.inputInvoiceEntry.findUnique({ where: { quoteId_side_rid: { quoteId, side, rid } }, select: { id: true, paid: true, paidAt: true, paidById: true, paidByName: true, currentProofId: true, currentVatProofId: true } });
+
+  let tep: { id: number | null; dataUrl: string; mime: string | null; uploadedAt: Date | null; uploadedByName: string | null } | null = null;
+  let nguon: "bang" | "json-cu" = "bang";
+  if (loai === "vat") {
+    if (e?.currentVatProofId == null) throw khongThay();
+    const p = await prisma.inputInvoiceProof.findFirst({ where: { id: e.currentVatProofId, entryId: e.id, loai: "vat", retiredAt: null }, select: { id: true, dataUrl: true, mime: true, uploadedAt: true, uploadedByName: true } });
+    tep = p;
+  } else {
+    const tt = trangThaiHieuLuc(e, hang.it);
+    if (!tt.paid || !tt.hasPaidProof) throw khongThay();
+    if (e) {
+      const p = e.currentProofId != null
+        ? await prisma.inputInvoiceProof.findFirst({ where: { id: e.currentProofId, entryId: e.id, loai: "chi", retiredAt: null }, select: { id: true, dataUrl: true, mime: true, uploadedAt: true, uploadedByName: true } })
+        : null;
+      tep = p;
+    } else {
+      nguon = "json-cu";
+      const [cu] = await anhJsonCuCuaHang(prisma, quoteId, side, rid);   // bản ĐẦU của rid — đúng hàng đang hiện
+      if (typeof cu === "string" && PAYMENT_PROOF_DATA_URL_RE.test(cu)) tep = { id: null, dataUrl: cu, mime: null, uploadedAt: tt.paidAt ? new Date(tt.paidAt) : null, uploadedByName: null };
+    }
+  }
+  if (!tep) throw khongThay();
+  await audit(req, "quote.internal.proof-view", { resource: "quote", resourceId: quoteId, after: { side, rid, proofId: tep.id, nguon, loai, noiBo: true } });
+  return { dataUrl: tep.dataUrl, mime: tep.mime, loai, uploadedAt: tep.uploadedAt ? tep.uploadedAt.toISOString() : null, uploadedByName: tep.uploadedByName };
 }

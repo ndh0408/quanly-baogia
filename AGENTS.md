@@ -70,7 +70,7 @@ quy là làm hỏng công việc của người khác.
   KT) nằm ở bảng `InputInvoiceEntry` / `InputInvoiceProof`: **đường Lưu báo giá không ghi** hai bảng
   đó (chỉ `src/services/inputInvoiceService.ts` và công cụ `src/khoanChiBackfill.ts` ghi); hàng
   **ĐÃ CHI không xoá được qua đường Lưu** (xoá hàng / bảng / trang → 400 `hang-da-chi`); ảnh chứng
-  từ **không bao giờ bị xoá** — thay / gỡ / bỏ tích chỉ RÚT (`retiredAt`), FK `RESTRICT`; đường Lưu
+  từ (cả hóa đơn VAT — `InputInvoiceProof.loai = 'vat'`, độc lập với đã chi) **không bao giờ bị xoá** — thay / gỡ / bỏ tích chỉ RÚT (`retiredAt`), FK `RESTRICT`; đường Lưu
   viết mới phải **khoá `Quote` (FOR NO KEY UPDATE) trước khi đọc khoản** — kế toán ghi dưới `Quote FOR
   SHARE`, đọc trước khi khoá là có khe đua — và gọi **`chuanHoaRidTrung` trên bản CSDL TRƯỚC mọi
   reconcile** (rid trùng / dính khoảng trắng trong dữ liệu cũ làm cờ + ảnh dời hàng hoặc rơi im) cùng

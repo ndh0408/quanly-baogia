@@ -27,7 +27,8 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     // Các mã quote.internal.* (proof-view · ke-toan ở đây, pay / unpay ở nhóm dưới) từ 2026-10-06 đều do trang Hóa
     // đơn đầu vào ghi (kế toán, src/services/inputInvoiceService.ts). Mã GIỮ NGUYÊN để dòng nhật ký cũ (bảng nội bộ
     // ở màn soạn / tài khoản chi phí) vẫn lọc được — chỉ đổi nhãn.
-    ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi (Hóa đơn đầu vào)"],
+    ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi / hóa đơn VAT"],
+    ["quote.internal.vat", "Hóa đơn đầu vào: đưa / thay / gỡ hóa đơn VAT"],
     ["quote.internal.ke-toan", "Hóa đơn đầu vào: ngày HĐ / ghi chú KT / ảnh chứng từ"],
     ["quote.list-note", "Ghi chú / màu ở danh sách báo giá"],
     // MƯỜI MÃ DƯỚI ĐÂY (ở đây và ở nhóm Nhân sự) TỪNG VẮNG MẶT, và bài test phủ mã vẫn XANH:
@@ -109,6 +110,7 @@ const FIELD_LABEL: Record<string, string> = {
   invoiceDate: "Ngày hóa đơn", paid: "Đã chi", paidByName: "Người đánh dấu chi",
   proofId: "Ảnh chứng từ (mã)", proofSha256: "Dấu vân tay ảnh", side: "Phía bảng", rid: "Mã hàng nội bộ",
   nguon: "Nguồn dữ liệu", version: "Phiên bản khoản", ten: "Hạng mục",
+  vatProofId: "Hóa đơn VAT (mã)", vatProofSha256: "Dấu vân tay hóa đơn VAT", loai: "Loại chứng từ", noiBo: "Xem từ bảng nội bộ",
   // Đổi khách hàng (danh mục) của báo giá: máy chủ ghi MÃ + TÊN ở `khachHang` (đọc được) và số id ở `customerId` (kỹ thuật — ẩn, xem diffRows).
   khachHang: "Khách hàng (danh mục)",
   // Tài khoản / hồ sơ nhân sự / danh bạ (hay gặp ở user.*, personnel.*, employee.*)

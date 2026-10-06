@@ -44,7 +44,7 @@ import {
   duplicateQuote,
 } from "../services/quoteService.js";
 import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
-import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay, daChiCuaBaoGia } from "../services/inputInvoiceService.js";
+import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay, daChiCuaBaoGia, docChungTuNoiBo } from "../services/inputInvoiceService.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -135,11 +135,11 @@ router.put(
   asyncHandler(async (req: Request, res: Response) => res.json(await ghiKhoanChi(req)))
 );
 // Ảnh ủy nhiệm chi của khoản (dữ liệu cá nhân bên thứ ba) — service đòi thêm invoice:input:pay. `?proofId=` mở một
-// ảnh cũ đã rút vào lịch sử. Mỗi lần xem ghi nhật ký.
+// ảnh cũ đã rút vào lịch sử; `?loai=vat` mở hóa đơn VAT hiện tại. Mỗi lần xem ghi nhật ký.
 router.get(
   "/input-invoices/:quoteId/:side/:rid/proof",
   requirePermission(P.INVOICE_PAGE),
-  validate({ params: KhoanChiParams, query: z.object({ proofId: z.coerce.number().int().positive().optional() }) }),
+  validate({ params: KhoanChiParams, query: z.object({ proofId: z.coerce.number().int().positive().optional(), loai: z.enum(["chi", "vat"]).optional() }) }),
   asyncHandler(async (req: Request, res: Response) => res.json(await docAnhKhoanChi(req)))
 );
 
@@ -339,6 +339,14 @@ router.get(
   "/:id/khoan-chi",
   validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => res.json(await daChiCuaBaoGia(req)))
+);
+// CHỨNG TỪ HIỆN TẠI của một hàng, xem TỪ BẢNG NỘI BỘ (chủ repo 2026-10-06: "có để kế toán cho hình và hiển thị bên nội bộ
+// chứ") — ảnh ủy nhiệm chi (`loai=chi`) hoặc hóa đơn VAT (`loai=vat`). Quyền y GET /:id/khoan-chi + hàng phải đang nằm trong
+// phần người gọi thấy; chỉ bản hiện tại, chỉ xem, có nhật ký — xem docChungTuNoiBo.
+router.get(
+  "/:id/khoan-chi/:side/:rid/anh",
+  validate({ params: z.object({ id: z.coerce.number().int().positive(), side: z.enum(["sheet", "hn"]), rid: z.string().min(1).max(64) }), query: z.object({ loai: z.enum(["chi", "vat"]).optional() }) }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await docChungTuNoiBo(req)))
 );
 
 // APPROVAL trail for a quote

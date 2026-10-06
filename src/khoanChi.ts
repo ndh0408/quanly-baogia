@@ -48,6 +48,8 @@ export type KhoanChiNap = {
   paidByName: string | null;
   paidSnapshot: unknown;
   currentProofId: number | null;
+  /** Hóa đơn VAT hiện tại (InputInvoiceProof loai 'vat') — ĐỘC LẬP với đã chi. Vắng = chưa có (đọc từ nguồn cũ). */
+  currentVatProofId?: number | null;
   invoiceDate: Date | string | null;
   accountingNote: string | null;
   rowSnapshot: unknown;
@@ -67,7 +69,14 @@ export type AnhChungTuNap = {
   retiredAt: Date | string | null;
   retiredReason: string | null;
   source: string;
+  /** 'chi' = ủy nhiệm chi (mặc định), 'vat' = hóa đơn VAT. Vắng = 'chi'. */
+  loai?: string;
+  mime?: string;
 };
+
+/** Loại chứng từ của một ảnh / tệp trong InputInvoiceProof. */
+export type LoaiChungTu = "chi" | "vat";
+export const laLoaiVat = (loai: unknown) => loai === "vat";
 
 const LOAI_SHEET = new Set(["hcm", "khach"]);
 const CAU_TRUC = new Set(["section", "subsection", "info"]);
@@ -377,24 +386,66 @@ export function phuKeToan<T>(out: T, khoan: Map<string, Pick<KhoanChiNap, "paid"
  * / màn chỉ-xem nội bộ (GET /api/quotes/:id/khoan-chi). Không mang ảnh, không mang Ngày HĐ / ghi chú kế toán / version:
  * người xem chỉ cần biết "đã chi chưa, ngày nào, ai tích". `coAnh` chỉ là cờ — ảnh vẫn chỉ mở ở trang Hóa đơn đầu vào.
  */
-export type DaChiHangDto = { rid: string; paidAt: string | null; paidByName: string | null; coAnh: boolean };
+export type DaChiHangDto = {
+  rid: string; paidAt: string | null; paidByName: string | null; coAnh: boolean;
+  /** Chứng từ HIỆN TẠI của hàng là VAT (trạng thái VAT theo chứng từ hiện tại — đổi khỏi VAT thì ảnh vẫn giữ, chỉ thôi hiện). */
+  laVat: boolean;
+  /** Kế toán đã đưa HĐ VAT lên (cờ — tệp chỉ tải qua GET /:id/khoan-chi/:side/:rid/anh?loai=vat). */
+  coHdVat: boolean;
+  hdVatLuc: string | null;
+};
+export type KhoanXemHang = DaChiHangDto & { paid: boolean; paidById: number | null };
 
 /**
- * Các hàng ĐANG hiệu lực đã chi của MỘT phía, theo `rid`. `paidById` đi kèm (chỉ nội bộ máy chủ) để nơi gọi tra tên cho
- * hàng cờ JSON cũ (khoản mới đã lưu sẵn `paidByName`). Rid trùng (dữ liệu cũ): chỉ bản ĐẦU — khoản thuộc bản đầu (xem
- * chuanHoaRidTrung), và màn hình tra theo rid nên không phân biệt được các bản sau. Hàng thiếu rid bỏ qua (không tra được).
+ * Trạng thái CHỈ XEM từng hàng của MỘT phía, theo `rid`: mọi hàng ĐANG hiệu lực đã chi, cộng hàng CHƯA chi mà kế toán đã đưa
+ * HĐ VAT ("Có HĐ VAT · chưa TT"). `paidById` đi kèm (chỉ nội bộ máy chủ) để nơi gọi tra tên cho hàng cờ JSON cũ. Rid trùng
+ * (dữ liệu cũ): chỉ bản ĐẦU — khoản thuộc bản đầu (xem chuanHoaRidTrung), và màn hình tra theo rid nên không phân biệt được
+ * các bản sau. Hàng thiếu rid bỏ qua (không tra được). `vatLuc`: id HĐ VAT → lúc đưa lên.
  */
-export function daChiTheoRid(side: string, tables: unknown, khoan: Map<string, Pick<KhoanChiNap, "paid" | "paidAt" | "paidById" | "paidByName" | "currentProofId">>): (DaChiHangDto & { paidById: number | null })[] {
-  const out: (DaChiHangDto & { paidById: number | null })[] = [];
+export function khoanXemTheoRid(
+  side: string, tables: unknown,
+  khoan: Map<string, Pick<KhoanChiNap, "paid" | "paidAt" | "paidById" | "paidByName" | "currentProofId" | "currentVatProofId">>,
+  vatLuc: ReadonlyMap<number, Date | string | null> = new Map(),
+): KhoanXemHang[] {
+  const out: KhoanXemHang[] = [];
   const daGap = new Set<string>();
   for (const { it } of hangCuaPhia(side, tables)) {
     const rid = chu(it.rid);
     if (!rid || daGap.has(rid)) continue;
     daGap.add(rid);
-    const tt = trangThaiHieuLuc(khoan.get(khoaKhoanChi(side, rid)), it);
-    if (tt.paid) out.push({ rid, paidAt: tt.paidAt, paidByName: tt.paidByName, coAnh: tt.hasPaidProof, paidById: tt.paidById });
+    const e = khoan.get(khoaKhoanChi(side, rid));
+    const tt = trangThaiHieuLuc(e, it);
+    const vatId = e?.currentVatProofId ?? null;
+    if (!tt.paid && vatId == null) continue;
+    out.push({
+      rid, paid: tt.paid, paidAt: tt.paidAt, paidByName: tt.paidByName, coAnh: tt.paid && tt.hasPaidProof, paidById: tt.paidById,
+      laVat: it.chungTu === "VAT", coHdVat: vatId != null, hdVatLuc: vatId != null ? isoHoacNull(vatLuc.get(vatId)) : null,
+    });
   }
   return out;
+}
+
+/** Chỉ các hàng ĐANG hiệu lực đã chi (khoanXemTheoRid lọc `paid`). */
+export function daChiTheoRid(
+  side: string, tables: unknown,
+  khoan: Map<string, Pick<KhoanChiNap, "paid" | "paidAt" | "paidById" | "paidByName" | "currentProofId" | "currentVatProofId">>,
+  vatLuc?: ReadonlyMap<number, Date | string | null>,
+): (DaChiHangDto & { paidById: number | null })[] {
+  return khoanXemTheoRid(side, tables, khoan, vatLuc).filter((h) => h.paid).map(({ paid: _p, ...h }) => h);
+}
+
+/**
+ * Trạng thái VAT của một hàng cho người xem — CHỈ khi chứng từ HIỆN TẠI là VAT; hàng HĐNS / TM / chưa chọn → null (hiện như
+ * cũ: đã chi hay chưa). Dùng chung luật ở máy chủ (bộ lọc, test) và web (lib/khoanChi.ts trangThaiVat — bản sao CỐ Ý).
+ *   "chua-vat"   — đã chi, chưa có HĐ VAT ("Đã TT · chưa VAT", màu cảnh báo)
+ *   "da-vat"     — đã chi + có HĐ VAT
+ *   "vat-chua-tt" — chưa chi mà đã có HĐ VAT
+ */
+export type TrangThaiVat = "chua-vat" | "da-vat" | "vat-chua-tt";
+export function trangThaiVat(chungTu: unknown, paid: boolean, coHdVat: boolean): TrangThaiVat | null {
+  if (chungTu !== "VAT") return null;
+  if (paid) return coHdVat ? "da-vat" : "chua-vat";
+  return coHdVat ? "vat-chua-tt" : null;
 }
 
 /** Cờ JSON cũ đúng lúc tạo khoản — `legacySeed` (để `backfillKhoanChi --kiem` bắt bản app cũ còn ghi JSON). */
@@ -460,8 +511,12 @@ export type AnhChungTuDto = {
   retiredAt: string | null;
   retiredReason: string | null;
   source: string;
-  /** Ảnh HIỆN TẠI của khoản (các ảnh còn lại đã rút vào lịch sử). */
+  /** Ảnh HIỆN TẠI của khoản (các ảnh còn lại đã rút vào lịch sử) — hiện tại của ĐÚNG loại của nó. */
   hienTai: boolean;
+  /** 'chi' = ủy nhiệm chi, 'vat' = hóa đơn VAT. */
+  loai: LoaiChungTu;
+  /** Kiểu tệp (image/… hoặc application/pdf) — để biết mở ảnh hay tải PDF; null với dữ liệu thiếu. */
+  mime: string | null;
 };
 
 /**
@@ -480,6 +535,10 @@ export type KhoanChiDto = {
   paidAt: string | null;
   paidByName: string | null;
   hasPaidProof: boolean;
+  /** Đã có HĐ VAT hiện tại (độc lập với đã chi) + lúc / người đưa lên. */
+  hasVatProof: boolean;
+  vatProofAt: string | null;
+  vatProofByName: string | null;
   proofs: AnhChungTuDto[];
   /** Số tiền LÚC TÍCH (null: chưa chi, hoặc khoản gieo từ cờ JSON cũ — không biết số lúc trả). */
   paidAmount: number | null;
@@ -511,6 +570,8 @@ export function dtoKhoanChi(p: {
   const { quoteId, side, rid, entry } = p;
   const tt = trangThaiHieuLuc(entry, p.itJson);
   const paidAmount = entry ? tienLucChi(entry) : null;
+  const vatId = entry?.currentVatProofId ?? null;
+  const vat = vatId != null ? (p.anh ?? []).find((a) => a.id === vatId) : undefined;
   return {
     key: khoaDongDauVao(quoteId, side, rid),
     quoteId,
@@ -521,6 +582,9 @@ export function dtoKhoanChi(p: {
     paidAt: tt.paidAt,
     paidByName: tt.paidByName ?? (tt.paidById != null ? p.tenNguoi?.get(tt.paidById) ?? null : null),
     hasPaidProof: tt.hasPaidProof,
+    hasVatProof: vatId != null,
+    vatProofAt: vat ? isoHoacNull(vat.uploadedAt) : null,
+    vatProofByName: vat?.uploadedByName ?? null,
     proofs: (p.anh ?? [])
       .slice()
       .sort((a, b) => b.id - a.id)
@@ -531,7 +595,9 @@ export function dtoKhoanChi(p: {
         retiredAt: isoHoacNull(a.retiredAt),
         retiredReason: a.retiredReason ?? null,
         source: a.source,
-        hienTai: entry?.currentProofId === a.id,
+        hienTai: laLoaiVat(a.loai) ? vatId === a.id : entry?.currentProofId === a.id,
+        loai: laLoaiVat(a.loai) ? "vat" : "chi",
+        mime: a.mime ?? null,
       })),
     paidAmount,
     tienDoi: tt.paid && paidAmount != null && p.tienHienTai != null && paidAmount !== p.tienHienTai,

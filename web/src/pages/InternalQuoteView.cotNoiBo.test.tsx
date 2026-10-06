@@ -94,10 +94,10 @@ describe("InternalQuoteView — ba cột NS · CHỨNG TỪ · LƯU KHO (chỉ �
       Object.assign((q.hnTables as { items: Record<string, unknown>[] }[])[0].items[0], { paid: true, paidAt: "2026-10-02T03:00:00.000Z" });
     });
     const [bd, st] = [...bang(0).querySelectorAll("tbody tr")];
-    expect(o(bd, "col-pay")).toBe("✓ Đã TT · 01/10/2026 📎");
+    expect(o(bd, "col-pay")).toBe("✓ Đã TT 01/10/2026 📎");
     expect(o(st, "col-pay")).toBe("—");
     const [xe] = [...bang(1).querySelectorAll("tbody tr")];
-    expect(o(xe, "col-pay"), "hàng HN đã chi nhưng chưa có ảnh: không có 📎").toBe("✓ Đã TT · 02/10/2026");
+    expect(o(xe, "col-pay"), "hàng HN đã chi nhưng chưa có ảnh: không có 📎").toBe("✓ Đã TT 02/10/2026");
     // Không nút, không đường dẫn, không ảnh: xem ảnh ủy nhiệm chi chỉ còn ở trang Hóa đơn đầu vào (invoice:input:pay).
     expect(thung.querySelectorAll("td.col-pay button, td.col-pay a, td.col-pay img, [role=dialog]")).toHaveLength(0);
     expect(thung.textContent).toMatch(/Hóa đơn đầu vào/);

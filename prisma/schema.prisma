@@ -705,6 +705,9 @@ model InputInvoiceEntry {
   paidSnapshot   Json?
   // Ảnh HIỆN TẠI — trỏ InputInvoiceProof.id, KHÔNG FK (tránh vòng FK hai chiều); dịch vụ giữ toàn vẹn.
   currentProofId Int?
+  // HÓA ĐƠN VAT hiện tại (chủ repo 2026-10-06: "nếu có VAT thì cho thêm ô bỏ VAT vào") — trỏ InputInvoiceProof.id có
+  // loai = 'vat', KHÔNG FK (như currentProofId). ĐỘC LẬP với đã chi: đưa trước hay sau khi tích đều được, bỏ tích không rút.
+  currentVatProofId Int?
   // "Ngày hóa đơn" là NGÀY THUẦN: ghi nửa đêm UTC của đúng ngày đã nhập, đọc bằng toISOString().slice(0, 10).
   invoiceDate    DateTime? @db.Date
   accountingNote String? // cùng tên PersonnelRecord.accountingNote — Nhật ký dùng chung nhãn
@@ -745,6 +748,8 @@ model InputInvoiceProof {
   retiredById    Int?
   retiredByName  String?
   retiredReason  String? // "thay" | "go-anh" | "bo-danh-dau"
+  // 'chi' = ảnh ủy nhiệm chi (mặc định — mọi dòng có trước 2026-10-06 tối); 'vat' = hóa đơn VAT (ảnh hoặc PDF).
+  loai           String            @default("chi")
 
   @@index([entryId])
 }

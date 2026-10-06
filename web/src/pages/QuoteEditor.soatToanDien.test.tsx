@@ -526,7 +526,7 @@ describe("Cột THANH TOÁN ở màn soạn chỉ xem — tích ĐÃ CHI ở tra
       expect(k.querySelector("table.excel-table"), `không thấy lưới ${cat} — bài thành vô nghĩa`).not.toBeNull();
       const th = [...k.querySelectorAll("table.excel-table thead th")].map((x) => (x.textContent || "").trim());
       expect(th, `lưới ${cat} thiếu cột THANH TOÁN`).toContain("THANH TOÁN");
-      expect(k.querySelectorAll('button[data-xl="thanh-toan"], td.col-pay button, td.col-pay input, td.col-pay a'), `lưới ${cat} có nút / ô tích thanh toán`).toHaveLength(0);
+      expect(k.querySelectorAll('button[data-xl="thanh-toan"], td.col-pay button:not(.pay-xem), td.col-pay input, td.col-pay a'), `lưới ${cat} có nút / ô tích thanh toán`).toHaveLength(0);
       expect(k.querySelector('tr[data-row="0"] td.col-pay')?.textContent, `lưới ${cat}`).toContain("✓ Đã TT 20/09/2026");
     };
     await moKhoi("hcm");

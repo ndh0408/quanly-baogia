@@ -39,8 +39,8 @@ describe("daChiTheoRid — luật thuần", () => {
   ] }, { category: "hanoi", items: [{ kind: "item", rid: "z", paid: true }] }];
   it("khoản thắng cờ JSON cũ; chỉ hàng đã chi; bỏ nhóm / thiếu rid / bản trùng / bảng hanoi cũ trong trang", () => {
     expect(daChiTheoRid("sheet", bang, khoan)).toEqual([
-      { rid: "a", paidAt: "2026-10-06T02:00:00.000Z", paidByName: "Kế toán", coAnh: true, paidById: 9 },
-      { rid: "c", paidAt: "2026-09-02T00:00:00.000Z", paidByName: null, coAnh: false, paidById: 5 },
+      { rid: "a", paidAt: "2026-10-06T02:00:00.000Z", paidByName: "Kế toán", coAnh: true, paidById: 9, laVat: false, coHdVat: false, hdVatLuc: null },
+      { rid: "c", paidAt: "2026-09-02T00:00:00.000Z", paidByName: null, coAnh: false, paidById: 5, laVat: false, coHdVat: false, hdVatLuc: null },
     ]);
   });
 });
@@ -121,7 +121,7 @@ describe.runIf(dbAvailable)("GET /api/quotes/:id/khoan-chi — đã chi từng h
     expect(Object.keys(sheet).sort(), "hàng chưa chi / đã bỏ tích không được hiện là đã chi").toEqual(["r-json", "r-tich"]);
     expect(sheet["r-tich"]).toMatchObject({ paidByName: `${TAG} ketoan`, coAnh: true });
     expect(Date.parse(sheet["r-tich"].paidAt)).toBeGreaterThan(Date.now() - 600_000);
-    expect(sheet["r-json"]).toEqual({ rid: "r-json", paidAt: "2026-09-15T04:00:00.000Z", paidByName: `${TAG} admin`, coAnh: true });
+    expect(sheet["r-json"]).toEqual({ rid: "r-json", paidAt: "2026-09-15T04:00:00.000Z", paidByName: `${TAG} admin`, coAnh: true, laVat: false, coHdVat: false, hdVatLuc: null });
     expect(r.body.hn.map((x) => x.rid)).toEqual(["hn-1"]);
     expect(r.body.hn[0]).toMatchObject({ paidByName: `${TAG} ketoan`, coAnh: false });
   });

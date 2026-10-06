@@ -12,6 +12,8 @@ import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, createImagePool, undoRedoKey } from "../lib/gridUndo";
 import type { DaChiTheoRid } from "../lib/daChiHang";
 import type { DaChiHang } from "../lib/api";
+import { OThanhToan } from "./OThanhToan";
+import { XemChungTu, type LoaiChungTu } from "./XemChungTu";
 import { doanBoCot } from "../lib/doanBoCot";
 import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM, TB_TU_TAT_NHOM } from "../lib/khoaThanhTienNhom";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
@@ -35,8 +37,9 @@ export type GridTableProps = {
   internalNote: boolean;
   approveCol?: boolean;
   canApprove?: boolean;
-  /** Cột THANH TOÁN của bảng nội bộ — CHỈ XEM (2026-10-06): "✓ Đã TT dd/mm/yyyy" + người tích (+ 📎 khi có ảnh).
-   *  Tích / ảnh chỉ ở trang Hóa đơn đầu vào của kế toán; lưới không có nút, không ghi gì vào hàng. */
+  /** Cột THANH TOÁN của bảng nội bộ — CHỈ XEM (2026-10-06): "✓ Đã TT dd/mm/yyyy" + người tích, trạng thái hóa đơn VAT
+   *  (components/OThanhToan.tsx); 📎 / 🧾 chỉ MỞ XEM chứng từ hiện tại (XemChungTu). Tích / đưa ảnh / HĐ VAT chỉ ở trang Hóa
+   *  đơn đầu vào của kế toán; lưới không ghi gì vào hàng. */
   payCol?: boolean;
   /** Trạng thái ĐÃ CHI hiệu lực theo `rid` (lib/daChiHang — GET /quotes/:id/khoan-chi, tươi theo realtime). Không có
    *  (chưa nạp / nạp lỗi) → đọc cờ lớp phủ máy chủ gắn trên hàng lúc nạp báo giá (`paid`/`paidAt`/`hasPaidProof`). */
@@ -335,6 +338,9 @@ function GridTableInner(props: GridTableProps) {
   // Ảnh đang xem lớn. Phải xem TRONG app: ảnh của lưới luôn là data-URL (fileToImg nén bằng canvas)
   // mà trình duyệt CHẶN điều hướng cấp cao nhất tới data:, nên window.open chỉ mở ra tab trắng.
   const [zoom, setZoom] = useState<string | null>(null);
+  // Hộp xem chứng từ của cột Thanh toán (📎 ảnh ủy nhiệm chi / 🧾 hóa đơn VAT) — rid + loại + tên hàng lúc bấm.
+  const [xemCt, setXemCt] = useState<{ rid: string; loai: LoaiChungTu; ten: string } | null>(null);
+  const dongXemCt = useCallback(() => setXemCt(null), []);
   useEscClose(() => setZoom(null), zoom != null);
 
   // "_stt" nằm trong vùng CHỌN được (kéo/quét/Ctrl+A/Shift+mũi tên/copy) nhưng KHÔNG nhập được —
@@ -2553,6 +2559,10 @@ function GridTableInner(props: GridTableProps) {
         const f = el.getAttribute("data-fx-cot") || "";
         const fx = items[i].formulas?.[f];
         if (fx) peekFx(fx, fmtField(i, f, (items[i] as Record<string, unknown>)[f]));
+      } else if (vai === "xem-ct") {
+        const ridTho = (items[i] as Record<string, unknown>).rid;
+        const rid = typeof ridTho === "string" ? ridTho.trim() : "";
+        if (rid) setXemCt({ rid, loai: el.getAttribute("data-loai") === "vat" ? "vat" : "chi", ten: String((items[i] as Record<string, unknown>).name ?? "") });
       } else if (vai === "phong-anh" || vai === "xoa-anh") {
         const k = Number(el.getAttribute("data-k"));
         if (vai === "xoa-anh") removeImage(i, k);
@@ -2883,21 +2893,10 @@ function GridTableInner(props: GridTableProps) {
     const it = items[i] as Record<string, unknown> | undefined;
     if (!it) return null;
     if (daChi) { const rid = typeof it.rid === "string" ? it.rid.trim() : ""; return rid ? daChi.get(rid) ?? null : null; }
-    return it.paid === true ? { rid: "", paidAt: typeof it.paidAt === "string" ? it.paidAt : null, paidByName: null, coAnh: it.hasPaidProof === true } : null;
+    return it.paid === true ? { rid: "", paidAt: typeof it.paidAt === "string" ? it.paidAt : null, paidByName: null, coAnh: it.hasPaidProof === true, paid: true } : null;
   };
-  const oThanhToan = (i: number) => {
-    const h = daChiCua(i);
-    if (!h) return <span className="pay-chua" title="Chưa thanh toán — kế toán đánh dấu ở trang Hóa đơn đầu vào">—</span>;
-    const ngay = h.paidAt ? M.fmtDate(h.paidAt) : "";
-    const tieuDe = `Kế toán đã đánh dấu ĐÃ CHI${ngay ? ` ngày ${ngay}` : ""}${h.paidByName ? ` — ${h.paidByName}` : ""}${h.coAnh ? " · có ảnh chứng từ" : ""}. Xem / sửa ở trang Hóa đơn đầu vào.`;
-    return (
-      <span className="pay-da" title={tieuDe}>
-        <span className="ap-date">✓ Đã TT{ngay ? ` ${ngay}` : ""}</span>
-        {h.coAnh ? <span role="img" aria-label="Có ảnh chứng từ"> 📎</span> : null}
-        {h.paidByName ? <span className="pay-nguoi">{h.paidByName}</span> : null}
-      </span>
-    );
-  };
+  // 📎 / 🧾 bấm được khi map mang `nguon` (báo giá + phía) — mở hộp XemChungTu (chỉ xem, máy chủ kiểm quyền + ghi nhật ký).
+  const oThanhToan = (i: number) => <OThanhToan h={daChiCua(i)} chungTu={(items[i] as Record<string, unknown>).chungTu} onBam={daChi?.nguon ? xuLyBam : undefined} />;
   const imagesCell = (i: number) => {
     const imgs = (items[i].images || []) as string[];
     return (
@@ -3172,6 +3171,9 @@ function GridTableInner(props: GridTableProps) {
           <input name="showImages" type="checkbox" checked={!!showImages} onChange={(e) => onShowImages(e.target.checked)} />
           <span>Hiện cột <strong>Hình ảnh</strong> (chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span>
         </label>
+      )}
+      {xemCt && daChi?.nguon && (
+        <XemChungTu quoteId={daChi.nguon.quoteId} side={daChi.nguon.side} rid={xemCt.rid} loai={xemCt.loai} tenHang={xemCt.ten} onDong={dongXemCt} />
       )}
       {zoom && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Xem ảnh lớn" onClick={() => setZoom(null)}>
