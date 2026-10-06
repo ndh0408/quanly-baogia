@@ -406,6 +406,16 @@ export const diffCounts = (rows: DiffRow[]) => ({
   removed: rows.filter((r) => r.kind === "removed").length,
 });
 
+const laDongNhom = (it: M.Item) => it.kind === "section" || it.kind === "subsection";
+/** Chênh từ nửa đồng trở lên mới là "đổi tiền" — dưới mức đó tổng làm tròn ra cùng một số. */
+export const khacTien = (a: number, b: number) => Math.abs(a - b) >= 0.5;
+
+/** Nguyên nhân (a) của `doiChieuNhapExcel`: các hàng NỐI vào thuộc nhóm cuối của sheet đích nên được nhân Số Lượng nhóm đó.
+ *  `soLuong`: Số Lượng nhóm đúng như ô đang hiện (cũng là hệ số ×N). `trongTep` → `sauNap`: tiền của chính các hàng đó khi đứng
+ *  một mình (như trong file) → sau khi nằm trong nhóm. `chiPhanDau`: file có dòng nhóm riêng nên chỉ phần đứng trước dòng nhóm
+ *  đầu tiên của file rơi vào nhóm cũ. */
+export type NhomCuoiNhan = { ten: string; nhomPhu: boolean; soLuong: string; trongTep: number; sauNap: number; chiPhanDau: boolean };
+
 /**
  * Cờ "Hiện Thành Tiền nhóm" và ĐỐI CHIẾU TIỀN của MỘT sheet trong file SAU KHI nạp — MỘT chỗ tính cho bảng xem trước của hộp
  * "Nhập từ Excel" và cho hộp xác nhận lúc nạp: hai nơi phải nói cùng một điều, không thì đối chiếu tiền nói một đằng, nạp thật
@@ -415,18 +425,29 @@ export const diffCounts = (rows: DiffRow[]) => ({
  * `mode` "append" = Nối vào cuối, còn lại = Thay toàn bộ. `mode` "skip" chỉ để xem, không nạp → không có gì được bật, và mọi
  * tổng tính theo cờ của chính file như trước (tính theo cờ "sẽ bật" thì sheet bỏ qua lại hiện "Tổng tiền chưa khớp" oan).
  *
- *  · `hangSauNap`: TOÀN BỘ hàng của bảng sau khi nạp (Nối: cả hàng cũ + hàng mới); `hangNap`: riêng các hàng lấy từ file.
+ *  · `hangSauNap`: TOÀN BỘ hàng của bảng sau khi nạp (Nối: hàng cũ rồi tới hàng mới ở CUỐI); `hangNap`: riêng các hàng lấy từ
+ *    file. Nối thì phần đứng trước `hangNap` trong `hangSauNap` chính là bảng TRƯỚC khi nạp.
  *  · `co`: cờ HIỆU LỰC sau nạp; `tuBat`: cờ vừa được bật vì nhập; `nguonNhom`: nhóm SL > 1 đến từ file hay chỉ có sẵn ở sheet
  *    đích (Nối vào sheet cũ "tắt + nhóm SL > 1" bằng file không có nhóm nào).
  *  · `nhanSauNap`: tổng của bảng đích sau nạp có nhân Số Lượng nhóm không = cờ hiệu lực — TRỪ bảng mà tổng KHÔNG BAO GIỜ nhân
  *    hệ số nhóm (`tongKhongNhanNhom`: bảng Hà Nội, tổng là `extraTableSum` chỉ cộng hạng mục; cờ ở đó chỉ quyết định ô Thành
  *    Tiền của dòng nhóm hiện số đã nhân hay để trống). Mọi tổng trong hộp đi theo nó, để hộp nói đúng con số màn gọi sẽ hiện.
- *  · `importedTotal`: tổng phần lấy từ file theo `nhanSauNap` — thứ mà bảng sẽ ghi; `fileTotal`: tổng ghi trong file (nếu có).
- *  · `moneyMismatch`: hai tổng đó lệch quá ngưỡng. `lechDoHeSoNhom`: phần lệch sinh ra CHỈ vì hai bên hiểu Số Lượng nhóm khác
- *    nhau — tính theo cờ của chính FILE (cách file tự cộng tổng của nó) thì vẫn khớp tổng ghi trong file. Gặp khi sheet sau nạp
- *    nhân hệ số mà file không (ô vừa TỰ BẬT, hoặc sheet đích đang bật và Thay / Nối không tắt nó), hoặc ngược lại (bảng Hà Nội
- *    không nhân mà file nhân). Đó là chủ ý: chỉ cảnh báo, không đưa vào hộp xác nhận. Lệch mà tổng theo cờ trong file CŨNG không
- *    khớp là lệch THẬT (đọc thiếu dòng, sai cột…) nên vẫn là rủi ro như trước, kể cả khi ô có tự bật.
+ *  · `importedTotal` ("sau nạp" của thẻ đối chiếu): phần tổng của bảng mà LẦN NẠP NÀY đem lại, tính theo `nhanSauNap` bằng đúng
+ *    hàm tổng của lưới. Thay / sheet mới: tổng các hàng lấy từ file (bảng chỉ còn chúng). NỐI: phần tổng bảng THẬT SỰ tăng thêm =
+ *    tổng(bảng sau nạp, cờ sau nạp) − tổng(bảng trước nạp, cờ trước nạp). Cộng riêng các hàng của file (hệ số bắt đầu ×1) như
+ *    trước đây thì sót hai thứ chỉ Nối mới có, và thẻ báo "Khớp 200.000" trong khi tổng sheet tăng 800.000:
+ *      (a) `nhomCuoiNhan` — hàng của file đứng trước dòng nhóm đầu tiên của file thuộc nhóm CUỐI của sheet đích (lưới không mở
+ *          nhóm mới cho chúng) nên được nhân Số Lượng nhóm đó;
+ *      (b) `hangSanCoDoi` — cờ đổi vì nạp (ô vừa tự bật) làm tổng các hàng SẴN CÓ của sheet đổi theo.
+ *    Bảng Hà Nội không nhân hệ số nhóm nên không bao giờ có (a) / (b).
+ *  · `tongHangTep`: riêng các hàng của file cộng lại theo `nhanSauNap`, hệ số bắt đầu ×1 (= `importedTotal` khi không có (a) / (b)).
+ *  · `fileTotal`: tổng ghi trong file (nếu có). `lechSauNap`: "sau nạp" lệch tổng đó quá ngưỡng. `lechThat`: lệch THẬT — chính các
+ *    hàng của file theo CẢ HAI cờ (của file, tức cách file tự cộng tổng, và sau nạp) đều không khớp tổng ghi trong file (đọc thiếu
+ *    dòng, sai cột…): rủi ro như trước, kể cả khi ô có tự bật hay có (a) / (b), và kể cả khi (a) / (b) tình cờ bù đúng phần
+ *    thiếu. `moneyMismatch` = một trong hai — thẻ đối chiếu không được nói "Khớp".
+ *  · `lechDoHeSoNhom`: lệch mà KHÔNG phải lệch thật, tức sinh ra CHỈ vì hệ số nhóm: (a), (b), hoặc `lechDoCoTep` — hai bên hiểu Số
+ *    Lượng các nhóm CỦA FILE khác nhau: sheet sau nạp nhân hệ số mà file không (ô vừa TỰ BẬT, hoặc sheet đích đang bật và Thay /
+ *    Nối không tắt nó), hoặc ngược lại (bảng Hà Nội không nhân mà file nhân). Đó là chủ ý: chỉ cảnh báo, không đưa vào hộp xác nhận.
  */
 export function doiChieuNhapExcel(o: {
   fs: Pick<ImportedSheet, "groupSubtotal" | "totals">;
@@ -445,11 +466,47 @@ export function doiChieuNhapExcel(o: {
   const co = boQua ? coFile : coHieuLuc.co;
   const tuBat = !boQua && coHieuLuc.tuBat;
   const nhanSauNap = boQua ? coFile : co && !o.tongKhongNhanNhom;
-  const importedTotal = M.sheetSubtotalGrouped(o.hangNap, o.usesDays, nhanSauNap);
+  const tong = (hang: M.Item[], nhan: boolean) => M.sheetSubtotalGrouped(hang, o.usesDays, nhan);
+  // Các hàng của file khi đứng MỘT MÌNH (hệ số bắt đầu ×1): theo cờ sau nạp, và theo cờ của chính file (cách file tự cộng tổng).
+  const tepTheoCoSau = tong(o.hangNap, nhanSauNap);
+  const tepTheoCoTep = tong(o.hangNap, coFile);
+  let importedTotal = tepTheoCoSau;
+  let nhomCuoiNhan: NhomCuoiNhan | null = null;
+  let hangSanCoDoi: { truoc: number; sau: number } | null = null;
+  if (cheDo === "noi") {
+    const truoc = o.hangSauNap.slice(0, Math.max(0, o.hangSauNap.length - o.hangNap.length));
+    // Cờ TRƯỚC nạp tính như màn gọi đang hiện — cùng phép với "Tổng hiện tại" của hộp (bảng Hà Nội: không bao giờ nhân).
+    const nhanTruoc = !o.tongKhongNhanNhom && !!o.target?.groupSubtotal;
+    const truocCoCu = tong(truoc, nhanTruoc), truocCoMoi = tong(truoc, nhanSauNap);
+    importedTotal = tong(o.hangSauNap, nhanSauNap) - truocCoCu;
+    if (khacTien(truocCoCu, truocCoMoi)) hangSanCoDoi = { truoc: truocCoCu, sau: truocCoMoi };
+    // (a): hàng của file trước dòng nhóm đầu tiên của file. Có nhân hay không là do CHÍNH hàm tổng nói (cờ sau nạp tắt, hay
+    // nhóm cuối SL ≤ 1 thì hai con số bằng nhau) — không tự suy luật riêng.
+    const nhomDauTep = o.hangNap.findIndex(laDongNhom);
+    const hangDau = nhomDauTep < 0 ? o.hangNap : o.hangNap.slice(0, nhomDauTep);
+    let nhomCuoi: M.Item | undefined;
+    for (let i = truoc.length - 1; i >= 0 && !nhomCuoi; i--) if (laDongNhom(truoc[i])) nhomCuoi = truoc[i];
+    if (nhomCuoi && hangDau.length) {
+      const trongTep = tong(hangDau, nhanSauNap);
+      const sauNap = tong([...truoc, ...hangDau], nhanSauNap) - truocCoMoi;
+      if (khacTien(trongTep, sauNap)) nhomCuoiNhan = {
+        ten: String(nhomCuoi.name || "").trim(), nhomPhu: nhomCuoi.kind === "subsection",
+        soLuong: M.fmtNumCell(nhomCuoi.quantity, !!nhomCuoi.quantityExact), trongTep, sauNap, chiPhanDau: nhomDauTep >= 0,
+      };
+    }
+  }
   const fileTotal = o.fs.totals?.subtotal ?? null;
-  const lech = (tong: number) => fileTotal != null && Math.abs(tong - fileTotal) > Math.max(2, Math.abs(fileTotal) * 0.005);
-  const moneyMismatch = lech(importedTotal);
-  const lechDoHeSoNhom = moneyMismatch && !lech(M.sheetSubtotalGrouped(o.hangNap, o.usesDays, coFile));
+  const lech = (t: number) => fileTotal != null && Math.abs(t - fileTotal) > Math.max(2, Math.abs(fileTotal) * 0.005);
+  // Lệch THẬT xét trên chính HÀNG CỦA FILE, không trên "sau nạp": Nối mà (a) / (b) tình cờ bù đúng phần đọc thiếu (tệp ghi 400.000,
+  // đọc được một hàng 200.000, nối vào nhóm cuối SL 2 → sau nạp cũng 400.000) thì lỗi đọc vẫn phải lộ ra, không thành "Khớp".
+  const lechThat = lech(tepTheoCoSau) && lech(tepTheoCoTep);
+  const lechSauNap = lech(importedTotal);
+  const moneyMismatch = lechSauNap || lechThat;
+  const lechDoHeSoNhom = moneyMismatch && !lechThat;
+  const lechDoCoTep = lechDoHeSoNhom && lech(tepTheoCoSau);
   const nguonNhom: "file" | "sheet đích" = coNhomNhanHeSo(o.hangNap) ? "file" : "sheet đích";
-  return { co, tuBat, nhanSauNap, importedTotal, fileTotal, moneyMismatch, lechDoHeSoNhom, nguonNhom };
+  return {
+    co, tuBat, nhanSauNap, importedTotal, tongHangTep: tepTheoCoSau, fileTotal,
+    moneyMismatch, lechSauNap, lechThat, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nguonNhom,
+  };
 }

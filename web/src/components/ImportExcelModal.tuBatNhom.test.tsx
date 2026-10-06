@@ -336,3 +336,169 @@ describe("nhập Excel vào bảng HÀ NỘI (AccountHnView: Thay KHÔNG gán c�
     expect(loiXacNhan.join(" | ")).toMatch(/tổng sau nạp khác tổng trong Excel/);
   });
 });
+
+// NỐI VÀO CUỐI — người soát độc lập báo: sheet cũ đã lưu "tắt" [Nhóm cũ (SL 3), Cũ 1×100.000], nối tệp CHỈ có hạng mục [Mới
+// 1×200.000], dòng Cộng của tệp 200.000. Cờ tự bật (đúng luật); "Mới" nằm dưới "Nhóm cũ" nên đóng góp 600.000, tổng sheet 100.000
+// → 900.000. Bản cũ cộng riêng hàng của tệp (hệ số bắt đầu ×1) nên thẻ hiện xanh "Khớp 200.000 · Excel 200.000 · sau nạp
+// 200.000". Nay "sau nạp" của Nối = phần tổng sheet THẬT SỰ tăng thêm, và thẻ nói rõ từng nguyên nhân: (a) hàng nối vào nằm
+// trong nhóm cuối ×N, (b) bật Thành Tiền nhóm đổi tổng các hàng sẵn có. Cảnh báo vàng, không chặn; lệch thật vẫn đỏ.
+/** Tệp một sheet với hàng tuỳ ý (các ca Nối). */
+const tepHang = (items: ImportedItem[], coFile: boolean, tongFile: number | null): ImportResult => ({
+  warnings: [],
+  sheets: [{
+    index: 0, name: "Décor", templateCode: "marico_decor", templateName: "GN (không ngày)",
+    hasDays: false, numberSubs: false, groupSubtotal: coFile, showImages: false, warnings: [],
+    columns: { _stt: "B", name: "C", unit: "E", quantity: "F", unitPrice: "G", _amount: "H", notes: "I" },
+    headerRow: 6, firstRow: 7, lastRow: 6 + items.length,
+    stats: { rows: items.length, items: items.filter((x) => x.kind === "item").length, sections: items.filter((x) => x.kind === "section").length, subsections: 0, subs: 0, infos: 0, formulas: 0, formulasDropped: 0 },
+    items,
+    ...(tongFile != null ? { totals: { subtotal: tongFile } } : {}),
+  }],
+});
+
+describe("NỐI vào sheet có nhóm cuối SL > 1 — 'sau nạp' là phần tổng sheet THẬT SỰ tăng thêm", () => {
+  const dichCu = (sl: number) => [
+    { kind: "section", name: "Nhóm cũ", quantity: sl, unitPrice: 0 },
+    { kind: "item", name: "Cũ", unit: "cái", quantity: 1, unitPrice: 100_000 },
+  ] as unknown as M.Item[];
+  const moi: ImportedItem = { kind: "item", name: "Mới", unit: "cái", quantity: 1, unitPrice: 200_000, row: 7 };
+  const nhomMoi: ImportedItem = { kind: "section", name: "Nhóm mới", quantity: 1, unitPrice: 0, row: 7 };
+  const tien = (n: number) => M.fmtMoney(n);
+  /** (a): hàng nối vào rơi vào nhóm cuối của sheet. */
+  const CAU_A = /^Các hàng nối vào nằm trong nhóm “Nhóm cũ” \(Số Lượng 3\) ở cuối sheet nên được nhân ×3: /;
+  type Hop = Awaited<ReturnType<typeof moHop>>;
+  const cauA = (h: Hop) => h.dongBao().filter((t) => /^Các hàng nối vào/.test(t));
+  /** (b): bật cờ làm đổi tổng các hàng sẵn có. */
+  const cauB = (h: Hop) => h.dongBao().filter((t) => /^Bật Thành Tiền nhóm làm tổng các hàng sẵn có đổi /.test(t));
+  const doiChieu = (h: Hop) => {
+    const the = h.the("Đối chiếu tiền")!;
+    return { lop: the.className, chinh: the.querySelector("strong")!.textContent, phu: the.querySelector("small")!.textContent };
+  };
+
+  it("ca người soát: sheet TẮT + nhóm cuối SL 3, tệp không có dòng nhóm → KHÔNG 'Khớp': vàng, sau nạp 800.000, đủ (a) 200.000 → 600.000 và (b) 100.000 → 300.000; nạp không hỏi", async () => {
+    const h = await moHop(tepHang([moi], false, 200_000), { groupSubtotal: false, items: dichCu(3) }, { cheDo: "append" });
+    expect(h.tongSauNap(), "tổng sheet 100.000 → 900.000 (cách lưới tính — không đổi)").toBe(tien(900_000));
+    const d = doiChieu(h);
+    expect(d.chinh, "bản cũ: 'Khớp 200.000' trong khi tổng sheet tăng 800.000").toBe(`Lệch +${tien(600_000)}`);
+    expect(d.phu).toBe(`Excel ${tien(200_000)} · sau nạp ${tien(800_000)}`);
+    expect(d.lop, "lệch chỉ do hệ số nhóm → vàng").toMatch(/\bwarn\b/);
+    expect(d.lop).not.toMatch(/\bok\b|danger/);
+    const a = cauA(h);
+    expect(a, "phải nói hàng nối vào bị nhân ×3").toHaveLength(1);
+    expect(a[0]).toMatch(CAU_A);
+    expect(a[0]).toContain(`${tien(200_000)} trong tệp → ${tien(600_000)} sau nạp`);
+    const b = cauB(h);
+    expect(b, "phải nói tổng hàng sẵn có đổi vì bật cờ").toHaveLength(1);
+    expect(b[0]).toContain(`đổi ${tien(100_000)} → ${tien(300_000)}`);
+    expect(h.tuBat(), "vẫn nói việc tự bật").toHaveLength(1);
+    expect(h.dongBao().some((t) => /Tổng tiền chưa khớp/.test(t)), "tệp tự khớp — không phải lệch thật").toBe(false);
+    const payload = await h.nap();
+    expect(payload, "cảnh báo vàng không chặn").toBeTruthy();
+    expect(loiXacNhan, "cảnh báo vàng không đi qua hộp xác nhận (như các lệch do hệ số nhóm khác)").toEqual([]);
+    expect(payload!.plans[0]).toMatchObject({ mode: "append" });
+    expect(payload!.plans[0].items, "hộp chỉ NÓI, không đổi hàng nạp").toHaveLength(1);
+  });
+
+  it("sheet đích ĐANG BẬT + nhóm cuối SL 3 → chỉ (a): sau nạp 600.000, vàng; không có (b), không có dòng 'file không nhân hệ số'", async () => {
+    const h = await moHop(tepHang([moi], false, 200_000), { groupSubtotal: true, items: dichCu(3) }, { cheDo: "append" });
+    expect(h.tongSauNap()).toBe(tien(900_000));
+    const d = doiChieu(h);
+    expect(d.chinh, "lệch này có từ trước khi tự bật: bản cũ vẫn 'Khớp 200.000'").toBe(`Lệch +${tien(400_000)}`);
+    expect(d.phu).toBe(`Excel ${tien(200_000)} · sau nạp ${tien(600_000)}`);
+    expect(d.lop).toMatch(/\bwarn\b/);
+    expect(cauA(h)).toHaveLength(1);
+    expect(cauA(h)[0]).toContain(`${tien(200_000)} trong tệp → ${tien(600_000)} sau nạp`);
+    expect(cauB(h), "cờ không đổi → hàng sẵn có không đổi").toEqual([]);
+    expect(h.tuBat()).toEqual([]);
+    expect(h.dongBao().some((t) => /Sheet đích đang bật Thành Tiền nhóm/.test(t)), "tệp không có nhóm nào — nguyên nhân là (a), đã nói").toBe(false);
+    expect(h.dongBao().some((t) => /Tổng tiền chưa khớp/.test(t))).toBe(false);
+    await h.nap();
+    expect(loiXacNhan).toEqual([]);
+  });
+
+  it("tệp có hạng mục đầu RỒI mới tới nhóm riêng (SL 2, tệp không nhân), sheet đích đang bật → (a) chỉ cho phần đầu, kèm dòng 'Sheet đích đang bật…' cho nhóm của tệp", async () => {
+    const tepTron: ImportedItem[] = [
+      moi,
+      { kind: "section", name: "Nhóm B", quantity: 2, unitPrice: 0, row: 8 },
+      { kind: "item", name: "X", unit: "cái", quantity: 1, unitPrice: 50_000, row: 9 },
+    ];
+    const h = await moHop(tepHang(tepTron, false, 250_000), { groupSubtotal: true, items: dichCu(3) }, { cheDo: "append" });
+    expect(doiChieu(h)).toMatchObject({ phu: `Excel ${tien(250_000)} · sau nạp ${tien(700_000)}`, lop: expect.stringMatching(/\bwarn\b/) });
+    const a = cauA(h);
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatch(/^Các hàng nối vào \(phần đứng trước dòng nhóm đầu tiên của tệp\) nằm trong nhóm “Nhóm cũ” \(Số Lượng 3\) ở cuối sheet/);
+    expect(a[0]).toContain(`${tien(200_000)} trong tệp → ${tien(600_000)} sau nạp`);
+    expect(h.dongBao().some((t) => /Sheet đích đang bật Thành Tiền nhóm/.test(t)), "nhóm SL 2 của tệp: tệp không nhân mà sheet nhân").toBe(true);
+    expect(cauB(h)).toEqual([]);
+    await h.nap();
+    expect(loiXacNhan).toEqual([]);
+  });
+
+  it("tệp MỞ ĐẦU bằng dòng nhóm của chính nó → không có (a) (hàng mới không rơi vào nhóm cũ); chỉ (b) khi cờ đổi", async () => {
+    const tepNhom = [nhomMoi, { ...moi, row: 8 }];
+    const tat = await moHop(tepHang(tepNhom, false, 200_000), { groupSubtotal: false, items: dichCu(3) }, { cheDo: "append" });
+    expect(cauA(tat)).toEqual([]);
+    expect(cauB(tat)).toHaveLength(1);
+    expect(cauB(tat)[0]).toContain(`đổi ${tien(100_000)} → ${tien(300_000)}`);
+    expect(doiChieu(tat)).toMatchObject({ phu: `Excel ${tien(200_000)} · sau nạp ${tien(400_000)}`, lop: expect.stringMatching(/\bwarn\b/) });
+    act(() => goc.unmount()); thung.remove();
+    thung = document.createElement("div"); document.body.appendChild(thung); goc = createRoot(thung);
+    const bat = await moHop(tepHang(tepNhom, false, 200_000), { groupSubtotal: true, items: dichCu(3) }, { cheDo: "append" });
+    expect(cauA(bat)).toEqual([]);
+    expect(cauB(bat)).toEqual([]);
+    expect(doiChieu(bat)).toMatchObject({ chinh: `Khớp ${tien(200_000)}`, lop: expect.stringMatching(/\bok\b/) });
+  });
+
+  it("nhóm cuối SL 1 → 'Khớp' như cũ, không có (a) / (b)", async () => {
+    const h = await moHop(tepHang([moi], false, 200_000), { groupSubtotal: false, items: dichCu(1) }, { cheDo: "append" });
+    expect(doiChieu(h)).toEqual({ lop: expect.stringMatching(/\bok\b/), chinh: `Khớp ${tien(200_000)}`, phu: `Excel ${tien(200_000)} · sau nạp ${tien(200_000)}` });
+    expect(cauA(h)).toEqual([]);
+    expect(cauB(h)).toEqual([]);
+  });
+
+  it("tệp không có dòng Tổng → thẻ nói 'Sau nạp: 800.000' (phần tăng thêm thật), vẫn nói (a) + (b)", async () => {
+    const h = await moHop(tepHang([moi], false, null), { groupSubtotal: false, items: dichCu(3) }, { cheDo: "append" });
+    expect(doiChieu(h).chinh).toBe(`Sau nạp: ${tien(800_000)}`);
+    expect(cauA(h)).toHaveLength(1);
+    expect(cauB(h)).toHaveLength(1);
+  });
+
+  it("bảng HÀ NỘI nối vào bảng có nhóm cuối SL 3 → tổng không nhân hệ số: 'Khớp 200.000', không cảnh báo (a) / (b) oan", async () => {
+    for (const coDich of [false, true]) {
+      const h = await moHop(tepHang([moi], false, 200_000), { groupSubtotal: coDich, items: dichCu(3) }, { ...HN, cheDo: "append" });
+      expect(h.tongSauNap(), `cờ đích ${coDich}: extraTableSum chỉ cộng hạng mục`).toBe(tien(300_000));
+      expect(doiChieu(h), `cờ đích ${coDich}`).toMatchObject({ chinh: `Khớp ${tien(200_000)}`, lop: expect.stringMatching(/\bok\b/) });
+      expect(cauA(h)).toEqual([]);
+      expect(cauB(h)).toEqual([]);
+      await h.nap();
+      expect(loiXacNhan).toEqual([]);
+      act(() => goc.unmount()); thung.remove();
+      thung = document.createElement("div"); document.body.appendChild(thung); goc = createRoot(thung);
+    }
+  });
+
+  it("lỗi tệp THẬT (tệp ghi 150.000, hàng cộng ra 200.000) → vẫn ĐỎ + hộp xác nhận; (a) / (b) vẫn được nói, không nuốt lệch thật", async () => {
+    const h = await moHop(tepHang([moi], false, 150_000), { groupSubtotal: false, items: dichCu(3) }, { cheDo: "append" });
+    const d = doiChieu(h);
+    expect(d.lop).toMatch(/danger/);
+    expect(d.phu).toBe(`Excel ${tien(150_000)} · sau nạp ${tien(800_000)}`);
+    const [dongDo] = h.dongBao().filter((t) => /^Tổng tiền chưa khớp/.test(t));
+    expect(dongDo, "lệch thật phải còn dòng đỏ").toBeTruthy();
+    expect(dongDo, "nêu riêng tổng các hàng đọc được để thấy đúng chỗ lệch của tệp (150.000 ≠ 200.000)")
+      .toBe(`Tổng tiền chưa khớp: Excel là ${tien(150_000)}, sau nạp là ${tien(800_000)}; riêng các hàng đọc được trong tệp cộng lại ${tien(200_000)}. Xem các dòng màu vàng trước khi nạp.`);
+    expect(cauA(h)).toHaveLength(1);
+    expect(cauB(h)).toHaveLength(1);
+    await h.nap();
+    expect(loiXacNhan.join(" | ")).toMatch(/1 sheet có tổng sau nạp khác tổng trong Excel/);
+  });
+
+  it("(a) TÌNH CỜ bù đúng phần đọc thiếu (tệp ghi 400.000, đọc được 1 hàng 200.000, nhóm cuối SL 2 → sau nạp 400.000) → KHÔNG 'Khớp': đỏ + hộp xác nhận", async () => {
+    const h = await moHop(tepHang([moi], false, 400_000), { groupSubtotal: true, items: dichCu(2) }, { cheDo: "append" });
+    expect(doiChieu(h)).toEqual({ lop: expect.stringMatching(/danger/), chinh: "Chưa khớp", phu: `Excel ${tien(400_000)} · sau nạp ${tien(400_000)}` });
+    expect(h.dongBao()).toContain(`Tổng tiền chưa khớp: Excel là ${tien(400_000)}, sau nạp là ${tien(400_000)}; riêng các hàng đọc được trong tệp cộng lại ${tien(200_000)}. Xem các dòng màu vàng trước khi nạp.`);
+    await h.nap();
+    const hoi = loiXacNhan.join(" | ");
+    expect(hoi, "vẫn hỏi xác nhận — nói đúng: Excel khác các hàng đọc được").toMatch(/1 sheet có tổng trong Excel khác tổng các hàng đọc được trong tệp/);
+    expect(hoi, "không nói 'sau nạp khác Excel' khi hai số trùng nhau").not.toMatch(/tổng sau nạp khác tổng trong Excel/);
+  });
+});

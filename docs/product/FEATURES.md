@@ -131,6 +131,20 @@ nhóm…"). Lệch THẬT — tổng theo cờ trong file cũng không khớp �
 Sheet chọn **Bỏ qua** chỉ để xem: không bật gì, tổng tính theo cờ của file. Máy chủ, Excel, PDF không
 đổi: tổng vẫn tính theo cờ đã lưu.
 
+Ở chế độ **Nối vào cuối**, "sau nạp" trong thẻ đối chiếu là phần tổng sheet **thật sự tăng thêm**
+(tổng sau nạp trừ tổng trước nạp, cùng hàm tổng của lưới), không phải tổng riêng các hàng của file.
+Hàng nối vào cuối vẫn thuộc nhóm cuối của sheet như trước; hộp chỉ nói ra bằng số tiền, cảnh báo vàng,
+không chặn, hai thứ mà riêng Nối mới có:
+
+- hàng của file đứng trước dòng nhóm đầu tiên của file nằm trong nhóm cuối của sheet nên được nhân Số
+  Lượng nhóm đó — "Các hàng nối vào nằm trong nhóm “…” (Số Lượng 3) ở cuối sheet nên được nhân ×3:
+  200.000 trong tệp → 600.000 sau nạp" (file mở đầu bằng dòng nhóm của chính nó thì không có câu này);
+- ô vừa tự bật làm đổi tổng các hàng sẵn có — "Bật Thành Tiền nhóm làm tổng các hàng sẵn có đổi
+  100.000 → 300.000".
+
+Lệch THẬT xét trên chính các hàng của file, nên vẫn đỏ + hỏi xác nhận, kể cả khi phần nhân thêm tình cờ
+bù đúng phần đọc thiếu. Bảng Hà Nội không nhân hệ số nhóm nên không có hai câu trên.
+
 Phần **Hà Nội** (và bảng phụ Chi phí HCM / Phí khách hàng) khác ở tiền: tổng bảng là `extraTableSum`
 — chỉ cộng hạng mục, **không bao giờ nhân** Số Lượng nhóm dù cờ bật, và các bảng nội bộ này không xuất
 Excel; cờ ở đó chỉ quyết định ô Thành Tiền của dòng nhóm hiện số đã nhân hay để trống. Nhập Excel vào
