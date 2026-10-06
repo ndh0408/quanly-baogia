@@ -6,7 +6,7 @@ lại stack, cách dựng máy, bảng lệnh npm hay cây thư mục — nhữn
 - [README.md](../../README.md) — công nghệ và hai bài toán khó của sản phẩm
 - [docs/development/SETUP.md](../development/SETUP.md) — dựng môi trường, bảng npm script
 - [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — hệ thống ghép lại thế nào
-- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (143 endpoint)
+- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (144 endpoint)
 
 QuanLY là **công cụ nội bộ** của Gia Nguyễn / Colorfull. Không có khách hàng ngoài,
 không có gói cước, không có self-service đăng ký: tài khoản do admin mời.
@@ -569,7 +569,7 @@ ghi đè ở hai mức:
 
 Cả hai được resolve lại **mỗi request** từ CSDL. Vì vậy **đừng đọc bảng vai trò như
 một danh sách cố định** — nguồn sự thật là
-[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 143 endpoint ở
+[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 144 endpoint ở
 [ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md), có
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI.
 
