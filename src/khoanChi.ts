@@ -393,8 +393,13 @@ export type DaChiHangDto = {
   /** Kế toán đã đưa HĐ VAT lên (cờ — tệp chỉ tải qua GET /:id/khoan-chi/:side/:rid/anh?loai=vat). */
   coHdVat: boolean;
   hdVatLuc: string | null;
+  /**
+   * Người gọi MỞ ĐƯỢC chứng từ (📎 / 🧾) của hàng này qua GET /:id/khoan-chi/:side/:rid/anh — cùng luật với endpoint đó
+   * (inputInvoiceService.duocXemChungTu). Chỉ là cờ để giao diện ẩn nút; máy chủ vẫn kiểm lại khi mở.
+   */
+  xemChungTu?: boolean;
 };
-export type KhoanXemHang = DaChiHangDto & { paid: boolean; paidById: number | null };
+export type KhoanXemHang = Omit<DaChiHangDto, "xemChungTu"> & { paid: boolean; paidById: number | null; loaiBang: string | null };
 
 /**
  * Trạng thái CHỈ XEM từng hàng của MỘT phía, theo `rid`: mọi hàng ĐANG hiệu lực đã chi, cộng hàng CHƯA chi mà kế toán đã đưa
@@ -409,7 +414,7 @@ export function khoanXemTheoRid(
 ): KhoanXemHang[] {
   const out: KhoanXemHang[] = [];
   const daGap = new Set<string>();
-  for (const { it } of hangCuaPhia(side, tables)) {
+  for (const { t, it } of hangCuaPhia(side, tables)) {
     const rid = chu(it.rid);
     if (!rid || daGap.has(rid)) continue;
     daGap.add(rid);
@@ -420,6 +425,7 @@ export function khoanXemTheoRid(
     out.push({
       rid, paid: tt.paid, paidAt: tt.paidAt, paidByName: tt.paidByName, coAnh: tt.paid && tt.hasPaidProof, paidById: tt.paidById,
       laVat: it.chungTu === "VAT", coHdVat: vatId != null, hdVatLuc: vatId != null ? isoHoacNull(vatLuc.get(vatId)) : null,
+      loaiBang: side === "hn" ? "hanoi" : chu(t.category),
     });
   }
   return out;
@@ -431,7 +437,7 @@ export function daChiTheoRid(
   khoan: Map<string, Pick<KhoanChiNap, "paid" | "paidAt" | "paidById" | "paidByName" | "currentProofId" | "currentVatProofId">>,
   vatLuc?: ReadonlyMap<number, Date | string | null>,
 ): (DaChiHangDto & { paidById: number | null })[] {
-  return khoanXemTheoRid(side, tables, khoan, vatLuc).filter((h) => h.paid).map(({ paid: _p, ...h }) => h);
+  return khoanXemTheoRid(side, tables, khoan, vatLuc).filter((h) => h.paid).map(({ paid: _p, loaiBang: _l, ...h }) => h);
 }
 
 /**

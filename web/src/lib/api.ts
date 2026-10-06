@@ -159,6 +159,8 @@ export type DaChiHang = {
   paid?: boolean;
   /** Đã có hóa đơn VAT + lúc đưa lên. */
   coHdVat?: boolean; hdVatLuc?: string | null;
+  /** Người đang xem MỞ ĐƯỢC 📎 / 🧾 của hàng này (admin, chủ, thành viên được giao vùng đó, kế toán). Vắng = không. */
+  xemChungTu?: boolean;
 };
 export type DaChiBaoGiaResp = { quoteId: number; sheet: DaChiHang[]; hn: DaChiHang[]; vatChuaChi?: { sheet: DaChiHang[]; hn: DaChiHang[] } };
 /** Chứng từ HIỆN TẠI của một hàng, xem từ bảng nội bộ (GET /quotes/:id/khoan-chi/:side/:rid/anh). */

@@ -18,7 +18,7 @@
 import type { Request } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma, type TxClient } from "../db.js";
-import { can, canOnQuote, PERMISSIONS as P } from "../permissions.js";
+import { can, canOnQuote, quoteScopesFor, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../httpError.js";
 import { audit } from "../audit.js";
 import { emitChange } from "../sse.js";
@@ -136,7 +136,7 @@ export async function khoanDaChiCuaBaoGia(tx: TxClient, quoteId: number): Promis
 export async function daChiCuaBaoGia(req: Request): Promise<{
   quoteId: number; sheet: DaChiHangDto[]; hn: DaChiHangDto[]; vatChuaChi: { sheet: DaChiHangDto[]; hn: DaChiHangDto[] };
 }> {
-  const { id, phia } = await kiemXemBangNoiBo(req);
+  const { id, phia, q } = await kiemXemBangNoiBo(req);
   const khoan = await docKhoanChiTrongTx(prisma, id);
   // Lúc đưa HĐ VAT lên — một câu, chỉ siêu dữ liệu (không dataUrl).
   const vatIds = [...khoan.values()].map((e) => e.currentVatProofId).filter((x): x is number => x != null);
@@ -154,6 +154,7 @@ export async function daChiCuaBaoGia(req: Request): Promise<{
   const dto = (side: PhiaKhoanChi, paid: boolean): DaChiHangDto[] => (theoPhia.get(side) ?? []).filter((h) => h.paid === paid).map((h) => ({
     rid: h.rid, paidAt: h.paidAt, paidByName: h.paidByName ?? (h.paidById != null ? ten.get(h.paidById) ?? null : null), coAnh: h.coAnh,
     laVat: h.laVat, coHdVat: h.coHdVat, hdVatLuc: h.hdVatLuc,
+    xemChungTu: duocXemChungTu(req, q, h.loaiBang),
   }));
   // `sheet` / `hn` GIỮ NGHĨA CŨ (chỉ hàng ĐÃ CHI): bundle cũ còn mở trong tab coi mọi phần tử là "đã chi". Hàng CHƯA chi mà
   // đã có HĐ VAT đi riêng ở `vatChuaChi` — bundle cũ bỏ qua khoá lạ, không hiện nhầm thành "✓ Đã TT".
@@ -166,12 +167,35 @@ export async function daChiCuaBaoGia(req: Request): Promise<{
  * presentQuoteForAccountHn) chỉ phía "hn"; mọi người đọc được báo giá khác thấy cả hai phía (presentQuote /
  * presentQuoteForInternal đều trả bảng nội bộ + bảng HN). Báo giá đã xoá mềm: 404 (extension lọc `deletedAt`).
  */
-async function kiemXemBangNoiBo(req: Request): Promise<{ id: number; phia: PhiaKhoanChi[] }> {
+type BaoGiaQuyen = { id: number; createdById: number; members: { userId: number; scopes: string[] }[] };
+const docBaoGiaQuyen = (id: number) =>
+  prisma.quote.findFirst({ where: { id }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } }) as Promise<BaoGiaQuyen | null>;
+
+async function kiemXemBangNoiBo(req: Request): Promise<{ id: number; phia: PhiaKhoanChi[]; q: BaoGiaQuyen }> {
   const id = Number(req.params.id);
-  const q = await prisma.quote.findFirst({ where: { id }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
+  const q = await docBaoGiaQuyen(id);
   if (!q) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "read", q)) throw httpError(403, "Bạn không có quyền xem báo giá này");
-  return { id, phia: can(req.session, P.QUOTE_HN_FILL) ? ["hn"] : ["sheet", "hn"] };
+  return { id, phia: can(req.session, P.QUOTE_HN_FILL) ? ["hn"] : ["sheet", "hn"], q };
+}
+
+/** Kế toán của trang Hóa đơn đầu vào — xem chứng từ mọi khoản như ở trang đó (global, không cần quote:read). */
+const laKeToanChungTu = (req: Request) => can(req.session, P.INVOICE_PAGE) && can(req.session, P.INVOICE_INPUT_PAY);
+
+/**
+ * AI MỞ ĐƯỢC CHỨNG TỪ (ảnh ủy nhiệm chi / HĐ VAT) của một hàng bảng nội bộ — chủ repo 2026-10-06: "admin, chủ báo giá, và
+ * người được thêm vào báo giá khi được cho phép". HẸP HƠN quyền xem cột Thanh toán (chữ trạng thái vẫn theo canOnQuote read):
+ *   · kế toán (invoice:page + invoice:input:pay — admin cũng có) → mọi hàng;
+ *   · còn lại: PHẠM VI hiệu lực trên báo giá (permissions.quoteScopesFor — người tạo / quote:update:all = đủ 4 vùng; thành
+ *     viên = đúng `scopes` được giao) phải chứa LOẠI BẢNG của hàng ("hcm" / "khach" / "hanoi"). Thành viên chỉ-xem (scopes
+ *     rỗng), thành viên chỉ "main", người chỉ có quote:read:all / quote:internal:view mà không thuộc báo giá → KHÔNG.
+ *   · Account Hà Nội được giao (hnWorkflow thêm họ làm thành viên scopes ["hanoi"]) → xem được hàng HÀ NỘI — "người được thêm
+ *     vào báo giá cho phần đó"; phía "sheet" vẫn bị chặn trước ở kiemXemBangNoiBo.
+ */
+function duocXemChungTu(req: Request, q: BaoGiaQuyen, loaiBang: string | null): boolean {
+  if (laKeToanChungTu(req)) return true;
+  const pv = quoteScopesFor(req.session, q);
+  return !!pv && !!loaiBang && (pv as string[]).includes(loaiBang);
 }
 
 /** Lớp phủ cho hàng THÔ của danh sách báo giá (nhánh bảng nội bộ của listQuotes) — để "Đã TT x/y" đếm theo khoản. */
@@ -574,22 +598,37 @@ export async function docAnhKhoanChi(req: Request): Promise<KetQuaAnh> {
  * soạn, Account HN, màn chỉ-xem nội bộ) mở được chứng từ HIỆN TẠI của hàng: ảnh ủy nhiệm chi (`loai=chi`) hoặc hóa đơn VAT
  * (`loai=vat`). CHỈ XEM — không lịch sử (bản đã rút chỉ kế toán xem), không sửa / gỡ.
  *
- * QUYỀN = cột Thanh toán (kiemXemBangNoiBo — đúng GET /:id: canOnQuote read; account HN chỉ phía "hn"), CỘNG: hàng phải ĐANG
+ * QUYỀN (thu hẹp theo chủ repo 2026-10-06 — xem duocXemChungTu): kế toán (invoice:input:pay) mọi hàng; người khác phải qua
+ * cột Thanh toán (kiemXemBangNoiBo — canOnQuote read; account HN chỉ phía "hn") VÀ có phạm vi trên báo giá chứa loại bảng của
+ * hàng (chủ / quote:update:all / thành viên được giao vùng đó) — người chỉ có quyền xem chung → 403. CỘNG: hàng phải ĐANG
  * nằm trong phía đó của báo giá (bản ĐẦU của rid — chủ khoản, cùng luật khoanXemTheoRid); khoản mồ côi (hàng đã xoá) hay rid
  * đoán mò là 404 — không có đường nào đọc tệp của hàng mà người gọi không nhìn thấy. Ảnh ủy nhiệm chi chỉ khi hàng ĐANG đã
  * chi (trạng thái hiệu lực); hàng chưa có khoản đọc dự phòng ảnh JSON cũ của đúng bản đầu. Mỗi lần xem ghi nhật ký
  * `quote.internal.proof-view` (`noiBo: true`), không chép ảnh.
  */
 export async function docChungTuNoiBo(req: Request): Promise<{ dataUrl: string; mime: string | null; loai: LoaiChungTu; uploadedAt: string | null; uploadedByName: string | null }> {
-  const { id: quoteId, phia } = await kiemXemBangNoiBo(req);
   const side = String(req.params.side) as PhiaKhoanChi;
   const rid = String(req.params.rid).trim();
   const loai: LoaiChungTu = laLoaiVat(req.query.loai) ? "vat" : "chi";
-  if (!phia.includes(side)) throw httpError(403, "Bạn không có quyền xem chứng từ của phần này");
+  let quoteId: number, q: BaoGiaQuyen;
+  if (laKeToanChungTu(req)) {
+    // Kế toán: như trang Hóa đơn đầu vào (không có quote:read). Báo giá đã xoá mềm → 404 (xem ở trang của họ).
+    quoteId = Number(req.params.id);
+    const bg = await docBaoGiaQuyen(quoteId);
+    if (!bg) throw httpError(404, "Không tìm thấy báo giá");
+    q = bg;
+  } else {
+    const k = await kiemXemBangNoiBo(req);
+    if (!k.phia.includes(side)) throw httpError(403, "Bạn không có quyền xem chứng từ của phần này");
+    quoteId = k.id; q = k.q;
+  }
   const khongThay = () => loiCoMa(404, "khong-thay-anh", loai === "vat" ? "Dòng này chưa có hóa đơn VAT" : "Dòng này chưa có ảnh ủy nhiệm chi");
 
   const hang = [...hangCuaPhia(side, await bangCuaPhia(prisma, quoteId, side))].find((h) => typeof h.it.rid === "string" && h.it.rid.trim() === rid);
   if (!hang) throw loiCoMa(404, "khong-thay-hang", "Không tìm thấy dòng này trong báo giá");
+  if (!duocXemChungTu(req, q, side === "hn" ? "hanoi" : typeof hang.t.category === "string" ? hang.t.category : null)) {
+    throw loiCoMa(403, "khong-xem-chung-tu", "Chỉ quản trị, chủ báo giá, kế toán và người được giao phần này mới xem được chứng từ thanh toán.");
+  }
   const e = await prisma.inputInvoiceEntry.findUnique({ where: { quoteId_side_rid: { quoteId, side, rid } }, select: { id: true, paid: true, paidAt: true, paidById: true, paidByName: true, currentProofId: true, currentVatProofId: true } });
 
   let tep: { id: number | null; dataUrl: string; mime: string | null; uploadedAt: Date | null; uploadedByName: string | null } | null = null;
