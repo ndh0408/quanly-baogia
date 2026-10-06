@@ -1296,7 +1296,9 @@ function GridTableInner(props: GridTableProps) {
 
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
-  // Gõ ≥2 ký tự vào ô Hạng Mục → tra danh mục (không dấu) và mở dropdown ngay dưới ô.
+  // Gõ ≥2 ký tự vào ô Hạng Mục của hàng MỤC (tenHang) → tra danh mục (không dấu) và mở dropdown ngay dưới ô. Ô tên của
+  // hàng nhóm / nhóm con / dòng thông tin (tenNhom) gõ thì KHÔNG mở — Alt+↓ (onGridKeyDown, lưới có fxBar) thì mở được
+  // ở mọi ô tên (data-f="name").
   const sugTimer = useRef(0);
   const nameSuggest = (i: number, el: HTMLTextAreaElement) => {
     // Gõ liên tục thì đừng tra danh mục từng phím: mỗi lần có kết quả là một lần setState, mà
@@ -1323,9 +1325,10 @@ function GridTableInner(props: GridTableProps) {
   const applySug = (s: Sug, k: number) => {
     const en = s.items[k]; if (!en) return;
     pushUndo();
-    // Hàng NHÓM cũng gõ tên được và mở gợi ý (gõ ≥ 2 ký tự hoặc Alt+↓): gợi ý điền cả Số Lượng, nên phải đi cùng luật tự
-    // bật như gõ / dán vào ô SL — không thì nhóm thành SL > 1 mà ô "Thành Tiền nhóm" đang tắt và không khoá (tổng sai im
-    // lặng). Chụp hệ số nhóm TRƯỚC khi điền để báo giá cũ "tắt + SL 3" mà gợi ý không đổi SL không bị bật hộ.
+    // Hàng NHÓM / nhóm con cũng mở được gợi ý — CHỈ bằng Alt+↓ (gõ tên nhóm đi tenNhom, không gọi nameSuggest): gợi ý
+    // điền cả Số Lượng, nên phải đi cùng luật tự bật như gõ / dán vào ô SL — không thì nhóm thành SL > 1 mà ô "Thành Tiền
+    // nhóm" đang tắt và không khoá (tổng sai im lặng). Chụp hệ số nhóm TRƯỚC khi điền để báo giá cũ "tắt + SL 3" mà gợi ý
+    // không đổi SL không bị bật hộ.
     const nhomTruoc = chupNhom(s.i, s.i);
     fillItemFromEntry(items[s.i] as Record<string, unknown>, en);
     autoEnableGroupSub(s.i, s.i, nhomTruoc);

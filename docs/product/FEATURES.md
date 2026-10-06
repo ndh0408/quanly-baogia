@@ -94,7 +94,9 @@ và lock nút đó lại" — lưới giữ ba luật:
 - **Tự bật — chỉ khi người dùng ĐƯA nhóm SL > 1 vào**, qua các đường:
   - **gõ / dán / điền** (Ctrl+D, Ctrl+R, kéo ô điền) vào ô Số Lượng của hàng nhóm hoặc nhóm con;
   - **cắt / dán** hàng nhóm mang SL > 1 vào bảng;
-  - **chọn gợi ý danh mục** điền Số Lượng cho hàng nhóm (Alt+↓, hoặc gõ tên rồi chọn);
+  - **chọn gợi ý danh mục** điền Số Lượng cho hàng nhóm / nhóm con. Trên hàng nhóm, gợi ý chỉ mở
+    bằng **Alt+↓** ở ô tên nhóm — gõ tên nhóm KHÔNG mở gợi ý (gõ ≥ 2 ký tự tự mở chỉ có ở hàng mục;
+    hàng mục không mang hệ số nhóm nên chọn gợi ý ở đó không bật ô);
   - **Ctrl+Z / Ctrl+Y** trả nhóm SL > 1 về khi ô đang tắt, và **công thức** tham chiếu (SL nhóm `=D2`)
     đẩy nhóm lên > 1 — hai đường này người dùng không trực tiếp gõ SL nhóm nên có lời báo (toast);
   - **nhập Excel** — xem bên dưới.

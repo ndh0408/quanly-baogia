@@ -3,10 +3,11 @@
  * ============================================================================
  * Ô "HIỆN THÀNH TIỀN NHÓM" — HAI KẼ HỞ CÒN LẠI SAU VÒNG 3 (soát cuối, 2026-09-30).
  *
- * (1) GỢI Ý DANH MỤC TRÊN Ô HẠNG MỤC CỦA HÀNG NHÓM. Hàng nhóm cũng gõ được tên và mở gợi ý theo rạp (gõ ≥ 2 ký tự,
- *     hoặc Alt+↓ như Excel mở dropdown). Chọn một gợi ý là điền cả Số Lượng (m² = W×H, hoặc SL của mục) vào chính hàng
- *     đó. Đường này trước đây KHÔNG đi qua luật tự bật của gõ / dán: nhóm SL 1 → gợi ý điền SL 3, ô đang tắt →
- *     "tắt + nhóm SL 3" KHÔNG khoá, tổng sai im lặng (nhỏ hơn thật đúng 3 lần).
+ * (1) GỢI Ý DANH MỤC TRÊN Ô HẠNG MỤC CỦA HÀNG NHÓM. Ô tên của hàng nhóm / nhóm con mở được gợi ý theo rạp bằng Alt+↓
+ *     (như Excel mở dropdown) — CHỈ đường đó: gõ tên nhóm không mở gợi ý (gõ ≥ 2 ký tự tự mở chỉ có ở hàng mục). Chọn
+ *     một gợi ý là điền cả Số Lượng (m² = W×H, hoặc SL của mục) vào chính hàng đó. Đường này trước đây KHÔNG đi qua
+ *     luật tự bật của gõ / dán: nhóm SL 1 → gợi ý điền SL 3, ô đang tắt → "tắt + nhóm SL 3" KHÔNG khoá, tổng sai im
+ *     lặng (nhỏ hơn thật đúng 3 lần).
  *
  * (2) HOÀN TÁC LÀM Ô TỰ TẮT. Ctrl+Z một sửa đổi cũ trên báo giá "tắt + nhóm SL 3" mà người dùng đã tích tay (hoặc gõ SL
  *     làm ô tự bật) trả cờ về mốc = TẮT; nhánh BẬT lại đã có toast, nhánh TẮT thì im — ô tích tự bỏ + tổng rớt về số không
@@ -174,6 +175,31 @@ describe("gợi ý danh mục điền Số Lượng cho hàng NHÓM → đi cùn
     await chonGoiY(o, 1);
     expect(items[1].quantity).toBe(3);
     expect(ghiCo).not.toHaveBeenCalled();
+  });
+
+  // FEATURES.md (mục Ô "Hiện Thành Tiền nhóm") liệt kê đường này là "Alt+↓ trên ô tên nhóm". Bản trước của tài liệu và
+  // chú thích applySug còn ghi "hoặc gõ tên rồi chọn" — sai: ô tên hàng nhóm (data-xl="ten-nhom") đi tenNhom, không gọi
+  // nameSuggest. Bài này chốt đúng điều tài liệu nói; đổi hành vi thì sửa cả tài liệu.
+  it("trên hàng NHÓM / NHÓM CON gợi ý CHỈ mở bằng Alt+↓ — gõ tên nhóm không mở (đối chứng cùng lưới: hàng MỤC gõ tên thì mở)", async () => {
+    datDanhMuc([mucRap("Quầy bắp", 3, 1)]);
+    const items = [nhom({ name: "" }), nhomCon({ name: "" }), muc({ name: "" })];
+    const { o } = moLuoi(items, false, { fxBar: true });
+    const moGoiY = () => !!document.querySelector(".vs-auto .vs-item");
+    /** Gõ như người dùng: phím chữ đầu (gõ là đè, vào chế độ gõ) rồi cả cụm chữ, chờ quá hẹn giờ tra 150ms + promise danh mục. */
+    const goTen = async (row: number) => { vao(o(row, "name")); phim(o(row, "name"), "q"); go(o(row, "name"), "quay bap"); await cho(280); };
+    await goTen(0);
+    expect(moGoiY(), "gõ tên NHÓM mà mở gợi ý → tài liệu (chỉ Alt+↓) sai").toBe(false);
+    await goTen(1);
+    expect(moGoiY(), "gõ tên NHÓM CON mà mở gợi ý → tài liệu (chỉ Alt+↓) sai").toBe(false);
+    await goTen(2);
+    expect(moGoiY(), "đối chứng hỏng: hàng MỤC gõ tên phải mở gợi ý — không thì hai câu trên vô nghĩa").toBe(true);
+    phim(o(2, "name"), "Escape");   // đóng gợi ý của hàng mục
+    await cho(50);
+    expect(moGoiY()).toBe(false);
+    vao(o(0, "name"));
+    phim(o(0, "name"), "ArrowDown", { alt: true });
+    await cho(280);
+    expect(moGoiY(), "Alt+↓ trên ô tên nhóm (chữ đã gõ ở trên) phải mở gợi ý").toBe(true);
   });
 });
 
