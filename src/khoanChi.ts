@@ -372,6 +372,31 @@ export function phuKeToan<T>(out: T, khoan: Map<string, Pick<KhoanChiNap, "paid"
   return out;
 }
 
+/**
+ * Một hàng ĐÃ CHI (trạng thái HIỆU LỰC, KT-3) — phần CHỈ XEM cho cột "Thanh toán" của bảng nội bộ ở màn soạn / Account HN
+ * / màn chỉ-xem nội bộ (GET /api/quotes/:id/khoan-chi). Không mang ảnh, không mang Ngày HĐ / ghi chú kế toán / version:
+ * người xem chỉ cần biết "đã chi chưa, ngày nào, ai tích". `coAnh` chỉ là cờ — ảnh vẫn chỉ mở ở trang Hóa đơn đầu vào.
+ */
+export type DaChiHangDto = { rid: string; paidAt: string | null; paidByName: string | null; coAnh: boolean };
+
+/**
+ * Các hàng ĐANG hiệu lực đã chi của MỘT phía, theo `rid`. `paidById` đi kèm (chỉ nội bộ máy chủ) để nơi gọi tra tên cho
+ * hàng cờ JSON cũ (khoản mới đã lưu sẵn `paidByName`). Rid trùng (dữ liệu cũ): chỉ bản ĐẦU — khoản thuộc bản đầu (xem
+ * chuanHoaRidTrung), và màn hình tra theo rid nên không phân biệt được các bản sau. Hàng thiếu rid bỏ qua (không tra được).
+ */
+export function daChiTheoRid(side: string, tables: unknown, khoan: Map<string, Pick<KhoanChiNap, "paid" | "paidAt" | "paidById" | "paidByName" | "currentProofId">>): (DaChiHangDto & { paidById: number | null })[] {
+  const out: (DaChiHangDto & { paidById: number | null })[] = [];
+  const daGap = new Set<string>();
+  for (const { it } of hangCuaPhia(side, tables)) {
+    const rid = chu(it.rid);
+    if (!rid || daGap.has(rid)) continue;
+    daGap.add(rid);
+    const tt = trangThaiHieuLuc(khoan.get(khoaKhoanChi(side, rid)), it);
+    if (tt.paid) out.push({ rid, paidAt: tt.paidAt, paidByName: tt.paidByName, coAnh: tt.hasPaidProof, paidById: tt.paidById });
+  }
+  return out;
+}
+
 /** Cờ JSON cũ đúng lúc tạo khoản — `legacySeed` (để `backfillKhoanChi --kiem` bắt bản app cũ còn ghi JSON). */
 export type HatGiongJson = { paid: boolean; paidAt: string | null; paidById: number | null; hasProof: boolean };
 export function hatGiongJson(it: Record<string, any> | null | undefined): HatGiongJson {

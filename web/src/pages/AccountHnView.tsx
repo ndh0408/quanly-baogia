@@ -9,6 +9,7 @@ import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../compone
 import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap } from "../lib/localDraft";
 import { useTrangAnToan } from "../lib/phienBan";
+import { useDaChiBaoGia } from "../lib/daChiHang";
 
 // MÀN CỦA ACCOUNT HÀ NỘI — từ 2026-09-15 là một TRÌNH SOẠN ĐẦY ĐỦ của riêng họ.
 //
@@ -57,6 +58,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   // Dải "Có bản mới" (lib/phienBan.ts): bấm "Tải bản mới" khỏi hỏi lại khi không còn giá HN nào chưa lưu;
   // không cho TỰ tải (mất bảng đang mở, vị trí cuộn, lịch sử Ctrl+Z — như trình soạn).
   useTrangAnToan(() => !dirtyRef.current, { tuTai: false });
+  const daChi = useDaChiBaoGia(quoteId);   // cột Thanh toán CHỈ XEM của bảng HN (kế toán tích ở trang Hóa đơn đầu vào)
   const mark = () => {
     // L61 (đợt 3): hộp hỏi trong component con (lưới "Xóa nhiều hàng", "Xoá sheet Hà Nội") trả lời SAU khi
     // view đã gỡ vẫn gọi về đây — bật cờ `__editorDirty` DÙNG CHUNG của trang đang mở và hẹn giờ ghi bản
@@ -343,7 +345,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       )}
 
       <HnTables moMacDinh tables={hnTables} templates={templates} companyId={q.companyId}
-        editable={editable && !saving} canApprove={false} onMarkDirty={mark} />
+        editable={editable && !saving} canApprove={false} onMarkDirty={mark} daChi={daChi?.hn} />
 
       <div className="ahn-grand-card"><span className="ahn-grand-label">Tổng tất cả {hnTables.length} sheet Hà Nội</span><span className="ahn-grand-val">{M.fmtMoney(tong)}</span></div>
 

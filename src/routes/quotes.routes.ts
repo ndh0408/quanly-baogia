@@ -44,7 +44,7 @@ import {
   duplicateQuote,
 } from "../services/quoteService.js";
 import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
-import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay } from "../services/inputInvoiceService.js";
+import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay, daChiCuaBaoGia } from "../services/inputInvoiceService.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -330,6 +330,15 @@ router.get(
     b: z.coerce.number().int().min(0),
   }) }),
   asyncHandler(async (req: Request, res: Response) => res.json(await diffVersionsService(req)))
+);
+
+// ĐÃ CHI từng hàng bảng nội bộ của MỘT báo giá — CHỈ XEM (cột "Thanh toán" ở màn soạn / Account HN, chủ repo
+// 2026-10-06). Quyền + phần thấy được y GET /:id (canOnQuote read; account HN chỉ phía "hn") — xem daChiCuaBaoGia.
+// Không ảnh, không Ngày HĐ / ghi chú kế toán. Việc tích vẫn ở PUT /input-invoices/… của kế toán.
+router.get(
+  "/:id/khoan-chi",
+  validate({ params: idParam }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await daChiCuaBaoGia(req)))
 );
 
 // APPROVAL trail for a quote

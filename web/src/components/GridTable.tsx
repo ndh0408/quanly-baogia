@@ -10,6 +10,8 @@ import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, createImagePool, undoRedoKey } from "../lib/gridUndo";
+import type { DaChiTheoRid } from "../lib/daChiHang";
+import type { DaChiHang } from "../lib/api";
 import { doanBoCot } from "../lib/doanBoCot";
 import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM, TB_TU_TAT_NHOM } from "../lib/khoaThanhTienNhom";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
@@ -33,9 +35,12 @@ export type GridTableProps = {
   internalNote: boolean;
   approveCol?: boolean;
   canApprove?: boolean;
-  payCol?: boolean;                // cột THANH TOÁN nội bộ per-hàng (bảng nội bộ)
-  canPay?: boolean;                // có quyền quote:internal:pay → bấm được
-  onPayRow?: (item: ItemK) => void; // mở dialog tích thanh toán + ảnh cho 1 hàng
+  /** Cột THANH TOÁN của bảng nội bộ — CHỈ XEM (2026-10-06): "✓ Đã TT dd/mm/yyyy" + người tích (+ 📎 khi có ảnh).
+   *  Tích / ảnh chỉ ở trang Hóa đơn đầu vào của kế toán; lưới không có nút, không ghi gì vào hàng. */
+  payCol?: boolean;
+  /** Trạng thái ĐÃ CHI hiệu lực theo `rid` (lib/daChiHang — GET /quotes/:id/khoan-chi, tươi theo realtime). Không có
+   *  (chưa nạp / nạp lỗi) → đọc cờ lớp phủ máy chủ gắn trên hàng lúc nạp báo giá (`paid`/`paidAt`/`hasPaidProof`). */
+  daChi?: DaChiTheoRid | null;
   /** Ba cột CHỈ của bảng nội bộ (Chi phí HCM · Phí khách hàng · Hà Nội) — người dùng yêu cầu 2026-09-25:
    *  NS (chữ tự do như ô ghi chú) · CHỨNG TỪ (VAT / HĐNS / TM) · LƯU KHO (tích chọn). Lưới chính không bật. */
   cotNoiBo?: boolean;
@@ -247,7 +252,7 @@ let demCat = 0;
 const CAT_DA_XONG = new Set<string>();
 
 function GridTableInner(props: GridTableProps) {
-  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
+  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, daChi, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   const idLyDoKhoaNhom = useId();   // nối ô tích "Thành Tiền nhóm" với dòng giải thích khi bị khoá (nhiều lưới/trang → id riêng)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
@@ -2544,7 +2549,6 @@ function GridTableInner(props: GridTableProps) {
       if (vai === "xoa-dong") removeRow(i);
       else if (vai === "xem-tt") revealAmount(i, el);
       else if (vai === "xem-gia-nhom") revealSectionPrice(i, el);
-      else if (vai === "thanh-toan") onPayRow?.(items[i]);
       else if (vai === "xem-fx") {
         const f = el.getAttribute("data-fx-cot") || "";
         const fx = items[i].formulas?.[f];
@@ -2732,11 +2736,11 @@ function GridTableInner(props: GridTableProps) {
   const extraCols = (internalNote ? 1 : 0) + (cotNoiBo ? 3 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   // Chữ ký dòng cho DongNho: cấu hình cột (đổi là vẽ lại MỌI dòng) + mọi trường dòng hiển thị.
-  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, canPay, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, !!onPayRow].join("|");
+  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, !!daChi, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer].join("|");
   const chuKy = (i: number, them: string) => {
     const it = items[i] as Record<string, unknown>;
     return [cauHinhSig, i, them, it.kind, it.label, it.name, it.detail, it.unit, it.quantity, it.quantityExact, it.days, it.unitPrice,
-      it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, it.paid, it.paidAt, it.hasPaidProof,
+      it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, payCol ? JSON.stringify(daChiCua(i)) : "",
       JSON.stringify(it.formulas || null), JSON.stringify(it._fxWarn || null), JSON.stringify(it._fxLoi || null),
       ((it.images as string[] | undefined) || []).map((x) => x.length).join(",")].join("\u0001");
   };
@@ -2874,6 +2878,26 @@ function GridTableInner(props: GridTableProps) {
     const cur = (items[i].images || []) as string[];
     ghiSua(); (items[i] as Record<string, unknown>).images = cur.filter((_, idx) => idx !== k); onChange(); setImgVer((v) => v + 1);
   };
+  // ── Cột THANH TOÁN — CHỈ XEM (xem prop `payCol`/`daChi`). ──
+  const daChiCua = (i: number): DaChiHang | null => {
+    const it = items[i] as Record<string, unknown> | undefined;
+    if (!it) return null;
+    if (daChi) { const rid = typeof it.rid === "string" ? it.rid.trim() : ""; return rid ? daChi.get(rid) ?? null : null; }
+    return it.paid === true ? { rid: "", paidAt: typeof it.paidAt === "string" ? it.paidAt : null, paidByName: null, coAnh: it.hasPaidProof === true } : null;
+  };
+  const oThanhToan = (i: number) => {
+    const h = daChiCua(i);
+    if (!h) return <span className="pay-chua" title="Chưa thanh toán — kế toán đánh dấu ở trang Hóa đơn đầu vào">—</span>;
+    const ngay = h.paidAt ? M.fmtDate(h.paidAt) : "";
+    const tieuDe = `Kế toán đã đánh dấu ĐÃ CHI${ngay ? ` ngày ${ngay}` : ""}${h.paidByName ? ` — ${h.paidByName}` : ""}${h.coAnh ? " · có ảnh chứng từ" : ""}. Xem / sửa ở trang Hóa đơn đầu vào.`;
+    return (
+      <span className="pay-da" title={tieuDe}>
+        <span className="ap-date">✓ Đã TT{ngay ? ` ${ngay}` : ""}</span>
+        {h.coAnh ? <span role="img" aria-label="Có ảnh chứng từ"> 📎</span> : null}
+        {h.paidByName ? <span className="pay-nguoi">{h.paidByName}</span> : null}
+      </span>
+    );
+  };
   const imagesCell = (i: number) => {
     const imgs = (items[i].images || []) as string[];
     return (
@@ -2941,11 +2965,7 @@ function GridTableInner(props: GridTableProps) {
       </>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
       {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" data-oc="approved" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
-      {payCol && <td className="col-pay">{canPay
-        ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} data-xl="thanh-toan" onClick={xuLyBam}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
-        : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
-        {(items[i] as Record<string, unknown>).paid && (items[i] as Record<string, unknown>).paidAt ? <span className="ap-date"> {M.fmtDate(String((items[i] as Record<string, unknown>).paidAt))}</span> : null}
-        {(items[i] as Record<string, unknown>).hasPaidProof ? <span title="Có ảnh chứng từ"> 📎</span> : null}</td>}
+      {payCol && <td className="col-pay">{oThanhToan(i)}</td>}
       {editable && <td className="col-action"><button className="rm-row" title="Xóa hàng" data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
     </>
   );
