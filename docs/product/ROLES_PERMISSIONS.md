@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 145 endpoint
+# Ma trận phân quyền — toàn bộ 143 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -19,6 +19,10 @@ Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/ar
 > Từ 137 lên 138 ngày 2026-09-01: thêm `POST /users/:id/mfa-reset` — đường phục hồi cho
 > người mất cả điện thoại lẫn mã dự phòng (trước đó chỉ chữa được bằng SQL tay trên production).
 > (xem [ADR 0006](../adr/0006-go-spa-vanilla-cu.md)).
+> Từ 145 xuống 143 ngày 2026-10-06: gỡ bốn route thanh toán theo hàng bảng nội bộ
+> (`POST /:id/extra/:sheetId/:rid/pay`, `GET …/proof`, `POST /:id/hn/:rid/pay`, `GET /:id/hn/:rid/proof`),
+> thêm hai route kế toán của trang Hóa đơn đầu vào (`PUT /input-invoices/:quoteId/:side/:rid`, `GET …/proof`)
+> — tích "đã chi" + ảnh chứng từ chuyển từ màn soạn báo giá sang kế toán.
 >
 > CI chạy `--check`; thêm/xoá route mà quên cập nhật bảng này là **đỏ pipeline**. Một endpoint không
 > có trong ma trận là một endpoint chưa ai soát quyền.
@@ -59,29 +63,27 @@ Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`
 > Giới hạn tần suất: `/login` + `/token` 10 lần/15 phút mỗi IP (`skipSuccessfulRequests`); `/forgot-password` 5/15 phút.
 > Chống dò tài khoản: bcrypt luôn chạy với dummy hash; `/forgot-password` trả 200 **trước** khi làm việc nền.
 
-## `/api/quotes` — 32 endpoint
+## `/api/quotes` — 29 endpoint
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
-| GET | `/` | ✓ | `quote:read:*` | all/own | `quoteScopeWhereOrThrow` | bộ lọc (trạng thái nhiều · người tạo · công ty · ngày · tổng tiền · ghi chú/màu) **AND** với phạm vi quyền, không bao giờ mở rộng nó · tìm nhiều từ không dấu · sắp xếp 10 cột · **view lược** (account HN, tài khoản chi phí) giữ cách tìm cũ, bỏ mọi bộ lọc chạm trường họ không thấy (tổng tiền, ghi chú, người tạo, khách danh mục) và chỉ sắp theo 4 cột cũ | $ PII | AUTH-002 · `ql-loc-danh-sach` | **VÁ** |
+| GET | `/` | ✓ | `quote:read:*` | all/own ⁴ | `quoteScopeWhereOrThrow` | bộ lọc (trạng thái nhiều · người tạo · công ty · ngày · tổng tiền · ghi chú/màu) **AND** với phạm vi quyền, không bao giờ mở rộng nó · tìm nhiều từ không dấu · sắp xếp 10 cột · **view lược** (account HN, tài khoản chi phí) giữ cách tìm cũ, bỏ mọi bộ lọc chạm trường họ không thấy (tổng tiền, ghi chú, người tạo, khách danh mục) và chỉ sắp theo 4 cột cũ | $ PII | AUTH-002 · `ql-loc-danh-sach` | **VÁ** |
 | GET | `/facets` | ✓ | `quote:read:*` | all/own | `quoteScopeWhereOrThrow` — **view bị lược 403** (account HN, tài khoản chi phí: đếm theo người tạo / ghi chú là cách dò thứ họ không được thấy) | — | số đếm cho bộ lọc Danh sách báo giá: mỗi nhóm (trạng thái, người tạo, công ty, ghi chú/màu) đếm theo mọi bộ lọc KHÁC của nó, chỉ trong phạm vi quyền của người xem | PII | `ql-loc-danh-sach` | OK |
 | GET | `/next-number` | ✓ | `quote:create` | — | — | — | — | AUTHZ-007 | **VÁ** |
 | GET | `/assignable-users` | ✓ | `quote:create` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/projects` | ✓ | `user:manage`\|`invoice:read`\|`invoice:page` **hoặc** `quote:read:own` | all/own | — | chỉ `converted` | $ PII | AUTH-005 | **VÁ** |
-| GET | `/input-invoices` | ✓ | `invoice:page` | global | — | mọi hàng bảng nội bộ **đã duyệt**: Chi phí HCM / Phí KH theo hàng (`item.approved`), Báo giá HN khi `hnStatus = approved`; báo giá xoá mềm bị loại · bản cũ của bảng HN còn trong trang bị bỏ (đếm hai lần) · **không** mang `paidProof` · chỉ đọc, không chạm `Quote.updatedAt` | $ PII | `hoa-don-dau-vao` | OK |
+| GET | `/input-invoices` | ✓ | `invoice:page` | global ⁵ | — | mọi hàng bảng nội bộ **đã duyệt**: Chi phí HCM / Phí KH theo hàng (`item.approved`), Báo giá HN khi `hnStatus = approved`; báo giá xoá mềm bị loại · bản cũ của bảng HN còn trong trang bị bỏ (đếm hai lần) · mỗi dòng mang trường kế toán của khoản (đã chi theo trạng thái HIỆU LỰC — khoản thắng cờ JSON cũ —, ngày HĐ, ghi chú, `version`, siêu dữ liệu ảnh), khoá dòng `quoteId:side:rid`, thiếu / trùng `rid` → `coTheGhi = false` · **không** mang ảnh (`paidProof` / `dataUrl`) · đọc + hợp các hàng có khoản kế toán (Cần chú ý: chưa duyệt · HN chưa duyệt · không còn hàng · báo giá đã xoá — dòng báo giá đã xoá chỉ xem), không chạm `Quote.updatedAt` | $ PII | `hoa-don-dau-vao` | OK |
+| PUT | `/input-invoices/:quoteId/:side/:rid` | ✓ | `invoice:page` vào; **theo từng trường**: `paid` / `paidProof` → `invoice:input:pay`, `invoiceDate` / `accountingNote` → `invoice:edit` (thiếu quyền của BẤT KỲ trường nào → 403, không ghi gì) | global ⁵ | định vị (báo giá, `side` = `sheet`\|`hn`, `rid`), đọc lại hàng TƯƠI dưới `Quote FOR SHARE`: không có hàng lẫn khoản → 404 · `rid` trùng trong phía → 409 `hang-trung-ma` · phản hồi chỉ mang trường kế toán của ĐÚNG khoản đó (không tổng tiền báo giá, không thông tin khách, không ảnh) | TÍCH MỚI chỉ cho hàng đã duyệt (HCM / Phí KH theo hàng; HN khi `hnStatus = approved`) → 409 `hang-chua-duyet`; khoản đã có thì sửa / bỏ tích được cả khi hàng đã rời tập đó · báo giá xoá mềm → 409 `bao-gia-da-xoa` · khoá lạc quan RIÊNG của khoản (`baseVersion` lệch → 409 `khoan-chi-da-doi`) · ảnh: regex toàn chuỗi + giải base64 + magic bytes (400 / 413 / 415), tối đa 20 ảnh một khoản, CHỈ THÊM (thay / gỡ / bỏ tích chỉ rút `retiredAt`) · bảng riêng `InputInvoiceEntry` / `InputInvoiceProof`: **không** bump `Quote.updatedAt`, không sinh `QuoteVersion` · audit `quote.internal.pay` / `unpay` / `ke-toan` (before/after không chép ảnh) · SSE `inputInvoice` một lần sau commit | $ **PII** | `hddv-khoan-chi-ghi` · `hddv-dong-thoi` · `rbacscope-extra-idor` · `qua-proof-dataurl` | OK |
+| GET | `/input-invoices/:quoteId/:side/:rid/proof` | ✓ | `invoice:page` vào; service đòi thêm `invoice:input:pay` | global ⁵ | ảnh phải thuộc ĐÚNG khoản (`?proofId=` mở một ảnh cũ đã rút); chưa có khoản → đọc dự phòng ảnh trong JSON cũ của hàng (`rid` trùng → 409) | đọc được cả khoản của báo giá đã xoá mềm (bằng chứng chỉ-đọc) · mỗi lần xem ghi audit `quote.internal.proof-view` (chỉ định danh, không chép ảnh) | **PII** | `hddv-khoan-chi-ghi` · `rbacscope-extra-idor` | OK |
 | POST | `/sheets/:sheetId/sign` | ✓ | `quote:sign:all`\|`:own` | all/own | qua `sheet.quote.createdById` | chỉ `converted`, chưa xoá | — | — | OK |
 | POST | `/sheets/:sheetId/customer-decision` | ✓ | `quote:send` | own | `canOnQuote(update)` | chưa xoá · đã xuất HĐ → 409 | — | — | OK |
 | PUT | `/sheets/:sheetId/invoice` | ✓ | `invoice:read`\|`page` vào; `invoice:edit`/`pay` **theo từng field** | global | qua sheet→quote | chỉ `converted` | $ | — | OK |
-| POST | `/:id/extra/:sheetId/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | `FOR UPDATE` khoá hàng · báo giá xoá mềm → 404 | $ | `rbacscope-extra-idor` | **VÁ** |
-| GET | `/:id/extra/:sheetId/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | báo giá xoá mềm → 404 · ghi audit `quote.internal.proof-view` | **PII** | `rbacscope-extra-idor` | **VÁ** |
-| POST | `/:id/hn/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** phạm vi `hanoi` (account phụ) | hàng bảng HN nằm ở `Quote.hnTables` nên KHÔNG có `:sheetId` · `FOR UPDATE` khoá hàng Quote | $ | `quote-hn-cap-bao-gia` | OK |
-| GET | `/:id/hn/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` | ghi audit `quote.internal.proof-view` (cờ `hn`) | **PII** | `quote-hn-cap-bao-gia` | OK |
 | GET | `/hn/accounts` | ✓ | `quote:hn:manage` | global | — | chỉ user `active` | PII | — | OK |
-| GET | `/:id` | ✓ | `quote:read:*` | all/own | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
-| POST | `/` | ✓ | `quote:create` | — | route **+** service · khách (danh mục) gắn vào phải tồn tại và `customer:read` được (400 / 403) | — | — | AUTH-001 · `ql-doi-khach-hang` | **VÁ** |
-| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` · **đổi khách hàng (danh mục)**: khách mới phải tồn tại và người đổi `customer:read` được (400 / 403) — CHỈ kiểm khi giá trị ĐỔI, nên lần Lưu thường mang lại `customerId` cũ không bị chặn; ghi `khachHang` (mã + tên) trước/sau vào audit `quote.update` | khoá khi đã xuất hoá đơn (`daXuatHoaDon`); `converted`/`lost` sửa được bởi người có `quote:send` + khoá lạc quan | $ | `quotes.workflow` · `ql-doi-khach-hang` | OK |
+| GET | `/:id` | ✓ | `quote:read:*` | all/own ⁴ | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
+| POST | `/` | ✓ | `quote:create` | — | route **+** service · khách (danh mục) gắn vào phải tồn tại và `customer:read` được (400 / 403) | cờ `paid*` giả trong payload bị cắt với MỌI người (hàng mới luôn chưa chi); `approved*` chỉ được tôn trọng khi người tạo có `quote:internal:approve` (cả `hnTables`), người khác → hàng mới chưa duyệt | — | AUTH-001 · `ql-doi-khach-hang` · `hddv-luu-khong-mat-khoan-chi` | **VÁ** |
+| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` · **đổi khách hàng (danh mục)**: khách mới phải tồn tại và người đổi `customer:read` được (400 / 403) — CHỈ kiểm khi giá trị ĐỔI, nên lần Lưu thường mang lại `customerId` cũ không bị chặn; ghi `khachHang` (mã + tên) trước/sau vào audit `quote.update` | khoá khi đã xuất hoá đơn (`daXuatHoaDon`); `converted`/`lost` sửa được bởi người có `quote:send` + khoá lạc quan · cờ đã chi cũ trong JSON hàng **đóng băng** cho mọi người · hàng ĐÃ CHI (khoản kế toán thắng cờ JSON) không biến mất qua Lưu — xoá hàng / bảng / trang → **400** `hang-da-chi`; đổi số tiền của nó mà thiếu `invoice:input:pay` → 400 · hàng đã trả (cờ JSON cũ) thiếu `rid` → 400 `hang-da-chi-thieu-ma`; `rid` trùng / dính khoảng trắng trong CSDL được chuẩn hoá trước reconcile (mỗi hàng giữ cờ của chính nó) · khoá `Quote` FOR NO KEY UPDATE ngay sau `QuoteSheet`, rồi mới đọc khoản | $ | `quotes.workflow` · `ql-doi-khach-hang` · `hddv-luu-khong-mat-khoan-chi` · `hddv-dong-thoi` · `hddv-rid-trung` | OK |
 | POST | `/:id/hn/assign` | ✓ | `quote:hn:manage` | own | `canOnQuote(update)` | — | — | — | OK |
-| PUT | `/:id/hn` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chặn khi đã gửi/duyệt | $ | — | OK |
+| PUT | `/:id/hn` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chặn khi đã gửi/duyệt · hàng HN ĐÃ CHI không biến mất qua Lưu → 400 `hang-da-chi` · hàng đã trả thiếu `rid` → 400 `hang-da-chi-thieu-ma` | $ | `hddv-luu-khong-mat-khoan-chi` · `hddv-rid-trung` | OK |
 | POST | `/:id/hn/submit` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chỉ `assigned`/`rejected` | — | — | OK |
 | POST | `/:id/hn/review` | ✓ | `quote:hn:manage` | own | `canOnQuote(update)` | chỉ `submitted` | — | — | OK |
 | POST | `/:id/mark-converted` | ✓ | `quote:send` | all/own | `canOnQuote(update)` | CAS chống đua terminal · **account phụ 403** | $ | `quotes.workflow` | OK |
@@ -92,15 +94,42 @@ Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`
 | GET | `/:id/approvals` | ✓ | `quote:read:*` | all/own | `loadAuthorizedQuote` | — | — | — | OK |
 | PUT | `/:id/members` | ✓ | người tạo **hoặc** `quote:update:all` | own | so `createdById` | nhận `members[{userId,scopes}]` (client cũ gửi `memberIds` = đủ 4 vùng) | PII | — | OK |
 | PUT | `/:id/list-note` | ✓ | `quote:update:*` (chủ / thành viên có vùng / `update:all`) | all/own | `loadAuthorizedQuote(update)` — **view bị lược 403** (account HN, tài khoản chi phí), thành viên chỉ-xem 403 | bảng riêng `QuoteListNote` nên **KHÔNG** bump `Quote.updatedAt` (không đá văng khoá lạc quan của người đang soạn), không sinh `QuoteVersion`, **không khoá** khi đã xuất hoá đơn · báo giá xoá mềm → 404 · ghi audit `quote.list-note` | — | `ql-ghi-chu-danh-sach` | OK |
-| DELETE | `/:id` | ✓ | `quote:delete:*` | all/own | `canOnQuote(delete)` | **`converted` không ai xoá được** | — | `quotes.workflow` | OK |
-| POST | `/:id/duplicate` | ✓ | `quote:create` **và** đọc được nguồn | own | `canOnQuote(read)` | **account phụ 403** (bản sao sẽ đứng tên người bấm + mang mã dự án của họ) | $ | — | OK |
+| DELETE | `/:id` | ✓ | `quote:delete:*` | all/own | `canOnQuote(delete)` | **`converted` không ai xoá được** · báo giá có khoản kế toán ĐÃ CHI → 400 `bao-gia-co-khoan-da-chi` (kiểm + xoá mềm trong một transaction dưới `Quote FOR UPDATE`) | — | `quotes.workflow` · `hddv-luu-khong-mat-khoan-chi` | OK |
+| POST | `/:id/duplicate` | ✓ | `quote:create` **và** đọc được nguồn | own | `canOnQuote(read)` | **account phụ 403** (bản sao sẽ đứng tên người bấm + mang mã dự án của họ) · khoản kế toán KHÔNG đi theo bản sao | $ | `hddv-luu-khong-mat-khoan-chi` | OK |
 
-⁴ `quote:internal:*` là **năng lực**, không phải phạm vi. Phạm vi báo giá do `assertQuoteInScope`
-(`src/services/quoteService.ts`) áp. Hàm này **cố ý** hỏi action `read` cho **cả** đường ghi `/pay`:
-`quote:internal:pay` mới là cổng GHI, còn `read` chỉ trả lời "được đụng tới báo giá nào". Siết lên
-`canOnQuote(update)` sẽ khoá đúng tài khoản chi phí (chỉ có `quote:read:own`; tư cách thành viên
-không suy ra `quote:update:*`) — đó là đổi **chính sách**, và `rbacscope-extra-idor` đã chốt hành vi
-hiện tại lại để lần sau ai đổi thì thấy đỏ.
+⁴ `quote:internal:view` là **năng lực thu hẹp view**, không phải phạm vi. Phạm vi báo giá vẫn do
+`quote:read:*` + `canOnQuote(read)` / `quoteScopeWhereOrThrow` áp như với mọi người (tài khoản chi phí
+thường chỉ có `quote:read:own` — chủ hoặc thành viên). Có `quote:internal:view` thì phản hồi đi qua
+`presentQuoteForInternal` (`src/quoteUtils.ts`): chỉ còn các bảng nội bộ, không giá bán / khách / tổng;
+danh sách bỏ mọi bộ lọc chạm trường họ không thấy, `GET /facets` → 403. Từ 2026-10-06 nó **chỉ để
+xem**: cột thanh toán của màn này là chữ "✓ Đã TT · ngày" đọc từ lớp phủ khoản kế toán (hàng chưa có
+khoản thì theo cờ JSON cũ); tích đã chi, xem ảnh ủy nhiệm chi, ngày HĐ / ghi chú KT đều không còn đường
+nào cho tài khoản chi phí — đặc quyền tối thiểu, vì ảnh là PII bên thứ ba. `quote:internal:pay` cũ không
+còn chỗ nào kiểm (bảng khoá quyền bên dưới); `rbacscope-extra-idor` chốt: bốn route cũ trả 404 với mọi
+người kể cả admin, tài khoản chi phí (kể cả là thành viên, kể cả "xem hết") nhận 403 ở cả hai route kế
+toán.
+
+⁵ `global` ở ba route Hóa đơn đầu vào là **cố ý** — cùng tiền lệ `PUT /sheets/:sheetId/invoice` (trang Hóa
+đơn đầu ra) và mục `/api/personnel` (`/:id/accounting-note`, `/:id/payment`): kế toán không có
+`quote:read:*`, không qua `canOnQuote` / `loadAuthorizedQuote`, nên `GET /api/quotes/:id` của kế toán vẫn
+**403** (bảng diễn viên bên dưới). Bù lại bằng T.NGUYÊN trên ĐÚNG hàng: TÍCH MỚI chỉ cho hàng thuộc tập
+trang (đã duyệt, báo giá chưa xoá), quyền kiểm theo TỪNG TRƯỜNG, và phản hồi không bao giờ mang tổng tiền
+báo giá, thông tin khách hay ảnh.
+
+### Khoá quyền của tiền nội bộ và hai trang hoá đơn (2026-10-06)
+
+| Khoá | Nhãn (`src/permissions.ts`) | Mặc định | Dùng ở đâu |
+|---|---|---|---|
+| `invoice:page` | Xem trang Hóa đơn đầu ra + đầu vào (kế toán) | Kế toán, Admin | cổng vào hai trang và ba route `/input-invoices…` |
+| `invoice:edit` | Sửa hóa đơn | Kế toán, Admin | đầu ra: số HĐ / ngày HĐ / PO / CTy…; đầu vào: **Ngày hóa đơn** + **Ghi chú kế toán** |
+| `invoice:pay` | Đánh dấu thanh toán (ngày thu tiền) | Kế toán, Admin | CHỈ ngày **THU** tiền (tiền VÀO) ở trang đầu ra — không dùng cho tiền RA |
+| `invoice:input:pay` | Hóa đơn đầu vào: tích ĐÃ CHI + ảnh chứng từ | Kế toán, Admin | **MỚI.** Tích / bỏ tích đã chi, đính / thay / gỡ / XEM ảnh ủy nhiệm chi; ở đường Lưu báo giá: người có nó được đổi số lượng / đơn giá / số ngày của hàng đã chi. Không thuộc `ADMIN_ONLY_PERMISSIONS`; `invoice:manage` (cũ) bắc cầu ra `edit` + `pay` nhưng **không** ra khoá này |
+| `quote:internal:view` | Xem CHỈ bảng nội bộ (ẩn báo giá) | cấp riêng (tài khoản chi phí) | view lược ⁴ — chỉ xem |
+| `quote:internal:pay` | [CŨ — không còn tác dụng] Thanh toán từng dòng nội bộ | — | Rời ma trận phân quyền (trang Phân quyền không còn hiện ô này), không chỗ nào kiểm. Hằng số giữ lại (như `product:*`, `role:assign`) để vai trò / tài khoản đang lưu khoá này vẫn lưu lại được |
+
+Vai trò `accountant` hoặc tài khoản kế toán đã bị **ghi đè quyền** (bảng `RolePermission` / quyền riêng
+từng người) thì KHÔNG tự nhận `invoice:input:pay` — ghi đè thay hẳn bộ mặc định. Hỏng theo hướng đóng
+(không mất dữ liệu, nhưng kế toán chưa tích được): admin tích ô mới ở trang Phân quyền / Quản lý nhân viên.
 
 ## `/api/customers` — 8 endpoint
 
@@ -179,7 +208,7 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 |---|---|---|---|---|---|---|---|---|---|
 | POST | `/admin/backup.dump` | ✓ | `settings:manage` | global | — | limiter 5/15ph · audit · `no-store` · dọn temp khi ngắt · POST để qua cổng CSRF | **SEC toàn bộ CSDL** | ADM-001 | **VÁ** |
 | GET | `/admin/stats` | ✓ | `settings:manage` | global | — | — | — | — | OK |
-| POST | `/admin/purge-soft-deleted` | ✓ | `settings:manage` | global | `none:{}` chặn xoá bản còn bị tham chiếu | lỗi nổi lên, không nuốt | — | — | OK |
+| POST | `/admin/purge-soft-deleted` | ✓ | `settings:manage` | global | `none:{}` chặn xoá bản còn bị tham chiếu — gồm báo giá còn khoản kế toán (`inputInvoiceEntries: { none: {} }`, FK `RESTRICT` là lưới thứ hai) | lỗi nổi lên, không nuốt | — | `hddv-luu-khong-mat-khoan-chi` | OK |
 | GET | `/settings/` | ✓ | `settings:manage` | global | — | — | SEC | — | OK |
 | GET | `/settings/:key` | ✓ | allowlist `notif.channels`, còn lại `settings:manage` | global | — | — | SEC | — | OK |
 | PUT/DELETE | `/settings/:key` | ✓ | `settings:manage` | global | — | trần 64KB | SEC | — | OK |
@@ -271,7 +300,7 @@ oracle phân loại tài khoản) · `/api/auth/change-password` (xoay định d
 | **manager** (Account) | own+gửi | all | đọc+giá vốn | own | all | dự án own | nhật ký |
 | **account_hn** | **chỉ bảng HN được giao** | **403** | **403** | 403 | 403 | 403 | 403 |
 | **hr** | **403** | **403** | **403** | đọc all | 403 | 403 | 403 |
-| **accountant** | **403** | **403** | **403** | đọc all + đánh dấu TT | 403 | trang Hóa đơn đầu ra (nhập) + Hóa đơn đầu vào (xem) | 403 |
+| **accountant** | **403** | **403** | **403** | đọc all + đánh dấu TT | 403 | Hóa đơn đầu ra (nhập) + Hóa đơn đầu vào (đã chi · ảnh · ngày HĐ · ghi chú) | 403 |
 | **tài khoản bị gỡ sạch quyền** | **403** | **403** | **403** | **403** | **403** | **403** | **403** |
 | **account phụ** (được thêm vào 1 báo giá) | xem đủ · sửa đúng vùng được tick | theo quyền riêng | theo quyền riêng | theo quyền riêng | theo quyền riêng | **403** (lọc `createdById`) | theo quyền riêng |
 
@@ -301,8 +330,13 @@ Hợp đồng mới:
   lại bản CSDL rồi trả 200) — trừ người có `quote:hn:manage`.
 - Payload hình dạng **cũ** (`hnSheets`) bị **400** kèm hướng dẫn tải lại, KHÔNG hiểu thành "xoá hết
   bảng" — nếu không, một tab cũ bấm Lưu là mất sạch phần Hà Nội.
-- Hàng bảng HN có đường thanh toán riêng vì không còn `:sheetId`:
-  `POST /:id/hn/:rid/pay` và `GET /:id/hn/:rid/proof`.
+- Hàng bảng HN là khoản chi phía `hn` của trang Hóa đơn đầu vào: kế toán tích đã chi + ảnh ở
+  `PUT /input-invoices/:quoteId/hn/:rid` — định vị theo báo giá + `rid`, không cần `:sheetId`. Hai route
+  riêng cũ `POST /:id/hn/:rid/pay` / `GET /:id/hn/:rid/proof` đã gỡ (2026-10-06). Khoản đã có vẫn sửa /
+  bỏ tích được khi phần HN bị trả lại hay giao lại (dòng sang mục "Cần chú ý"); chỉ TÍCH MỚI mới đòi
+  `hnStatus = approved`. Ghi khoản không đụng `Quote.hnTables`, và `vanTayHn` chỉ băm trường người dùng
+  gõ (không có `paid*` / `hasPaidProof` của lớp phủ), nên tích một khoản không làm lệch `hnRev` của
+  account HN đang điền.
 - Trang **Quản lý dự án**: tổng HN là một số cho cả báo giá, **dồn vào dòng trang đầu**, các dòng
   sau để 0 — cộng cả cột vẫn ra đúng tổng, không nhân lên theo số trang.
 

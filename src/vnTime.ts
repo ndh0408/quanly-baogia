@@ -48,3 +48,15 @@ export function thangNgayVN(d?: Date) {
   const t = nowVN(d);
   return `${String(t.getUTCMonth() + 1).padStart(2, "0")}${String(t.getUTCDate()).padStart(2, "0")}`;
 }
+
+/**
+ * 'YYYY-MM-DD' là NGÀY LỊCH CÓ THẬT trong 2000–2100 — không nhận 2026-02-30, không nhận dd/mm/yyyy. Dùng cho các
+ * trường NGÀY THUẦN (cột @db.Date, vd Ngày hóa đơn của Hóa đơn đầu vào): không có giờ nên không có múi giờ.
+ */
+export function laNgayLich(s: unknown): s is string {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  if (y < 2000 || y > 2100) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}

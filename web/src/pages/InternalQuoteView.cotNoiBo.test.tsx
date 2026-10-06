@@ -72,16 +72,36 @@ describe("InternalQuoteView — ba cột NS · CHỨNG TỪ · LƯU KHO (chỉ �
     expect([o(xe, "col-ns"), o(xe, "col-chung-tu"), o(xe, "col-luu-kho")]).toEqual(["Chị Lan", "TM", "—"]);
   });
 
-  it("hàng nhóm không có ô; màn CHỈ ĐỌC — không một ô nhập / chọn / tích nào, kể cả khi có quyền thanh toán", async () => {
+  it("hàng nhóm không có ô; màn CHỈ ĐỌC — không một ô nhập / chọn / tích / nút nào, kể cả khi có quyền cũ quote:internal:pay", async () => {
     await mo(["quote:internal:view", "quote:internal:pay"]);
     const hangs = [...bang(0).querySelectorAll("tbody tr")];
     expect(hangs, "hàng nhóm lọt vào bảng").toHaveLength(2);
     expect(thung.textContent).not.toContain("không được hiện");
     expect(thung.querySelectorAll("table input, table select, table textarea")).toHaveLength(0);
+    // 2026-10-06: tích ĐÃ CHI + ảnh chứng từ rời màn này sang trang Hóa đơn đầu vào (kế toán, invoice:input:pay).
+    // quote:internal:pay không còn mở nút "Thanh toán" nào — kể cả ở bảng Hà Nội.
+    expect(thung.querySelectorAll("table button, table a"), "còn nút thanh toán trong bảng").toHaveLength(0);
     // Mỗi hàng đủ 8 ô, dòng Tổng cũng phủ đủ 8 cột (không lệch cột Thanh toán sang dưới LƯU KHO).
     for (const tr of hangs) expect(tr.querySelectorAll("td")).toHaveLength(8);
     const tong = [...bang(0).querySelectorAll("tfoot td")].reduce((n, td) => n + ((td as HTMLTableCellElement).colSpan || 1), 0);
     expect(tong).toBe(8);
+  });
+
+  it("cột Thanh toán chỉ là CHỮ từ lớp phủ khoản kế toán: '✓ Đã TT · ngày' + 📎; không mở được ảnh, câu chữ trỏ sang trang Hóa đơn đầu vào", async () => {
+    await mo(["quote:internal:view", "quote:internal:pay"], (q) => {
+      const s = (q.internalSheets as { tables: { items: Record<string, unknown>[] }[] }[])[0];
+      Object.assign(s.tables[0].items[1], { paid: true, paidAt: "2026-10-01T03:00:00.000Z", paidById: 7, hasPaidProof: true });
+      Object.assign((q.hnTables as { items: Record<string, unknown>[] }[])[0].items[0], { paid: true, paidAt: "2026-10-02T03:00:00.000Z" });
+    });
+    const [bd, st] = [...bang(0).querySelectorAll("tbody tr")];
+    expect(o(bd, "col-pay")).toBe("✓ Đã TT · 01/10/2026 📎");
+    expect(o(st, "col-pay")).toBe("—");
+    const [xe] = [...bang(1).querySelectorAll("tbody tr")];
+    expect(o(xe, "col-pay"), "hàng HN đã chi nhưng chưa có ảnh: không có 📎").toBe("✓ Đã TT · 02/10/2026");
+    // Không nút, không đường dẫn, không ảnh: xem ảnh ủy nhiệm chi chỉ còn ở trang Hóa đơn đầu vào (invoice:input:pay).
+    expect(thung.querySelectorAll("td.col-pay button, td.col-pay a, td.col-pay img, [role=dialog]")).toHaveLength(0);
+    expect(thung.textContent).toMatch(/Hóa đơn đầu vào/);
+    expect(thung.textContent).not.toMatch(/đánh dấu thanh toán từng hàng/);
   });
 
   it("bảng rỗng: ô \"(không có hàng)\" phủ đủ cả tám cột", async () => {

@@ -121,7 +121,7 @@ describe.runIf(dbAvailable)("PUT /quotes/:id/hn — account HN không giả mạ
     expect(row.paid, "account HN KHÔNG có quote:internal:pay → không được đánh dấu đã trả").toBe(false);
     expect(row.paidAt).toBe(null);
     expect(row.paidById, "không được vu cho người khác đã trả").toBe(null);
-    expect(row.paidProof, "ảnh chứng từ chỉ đi qua route /pay").toBe(null);
+    expect(row.paidProof, "cờ JSON đóng băng — ảnh chứng từ chỉ vào bảng khoản qua trang Hóa đơn đầu vào").toBe(null);
   });
 
   it("giả mạo approved/approvedAt/approvedBy → BỊ BỎ QUA", async () => {

@@ -19,8 +19,14 @@
 // hàng đã trả; admin mở báo giá sửa một lỗi chính tả rồi bấm Lưu; cả 40 hàng về `paid:false`,
 // mất luôn `paidAt` và `paidById`. Không có cảnh báo nào.
 //
-// `paidProof` CỐ Ý vẫn bị strip: ảnh chỉ đi qua route /pay, không đi qua đường lưu báo giá
-// (chống base64 chảy qua payload và chống giả mạo). reconcileExtraPayments luôn lấy ảnh từ CSDL.
+// `paidProof` CỐ Ý vẫn bị strip: ảnh không đi qua đường lưu báo giá (chống base64 chảy qua payload và chống
+// giả mạo). reconcileExtraPayments luôn lấy ảnh từ CSDL.
+//
+// ── TỪ 2026-10-06: CỜ CŨ ĐÓNG BĂNG CHO MỌI NGƯỜI ────────────────────────────
+// "Đã chi" + ảnh chứng từ chuyển sang kế toán ở trang Hóa đơn đầu vào (bảng RIÊNG InputInvoiceEntry). itemSchema
+// thôi khai paid/paidAt/paidById, và reconcileExtraPayments KHÔNG còn đọc payload: bốn cờ cũ luôn chép lại từ CSDL
+// cho MỌI người. Nên lỗi gốc ở trên không thể tái diễn theo bất kỳ đường nào — hai ca "người có quyền bỏ tích / tích
+// mới qua payload" bên dưới được ĐẢO: payload không còn đổi được cờ, kể cả của người có quyền tích.
 import { describe, it, expect } from "vitest";
 import { reconcileExtraPayments } from "../src/services/quoteService.js";
 import { QuoteUpdateSchema } from "../src/validators.js";
@@ -60,7 +66,7 @@ const sheetsGuiLen = (doi = (x) => x) =>
 describe("reconcileExtraPayments — giữ trạng thái đã thanh toán", () => {
   it("người CÓ quyền trả tiền bấm Lưu → KHÔNG được xoá cờ đã trả (đây là lỗi đã vá)", () => {
     const sheets = sheetsGuiLen();
-    reconcileExtraPayments(sheets, sheetsTuDB, /* canPay */ true, /* payerId */ 99);
+    reconcileExtraPayments(sheets, sheetsTuDB, { mienChotTien: true });
     const rows = sheets[0].extraTables[0].items;
 
     expect(rows[0].paid, "hàng r1 phải CÒN đánh dấu đã trả").toBe(true);
@@ -76,30 +82,32 @@ describe("reconcileExtraPayments — giữ trạng thái đã thanh toán", () =
 
   it("người KHÔNG có quyền trả tiền bấm Lưu → cũng giữ nguyên (nhánh này vốn đã đúng)", () => {
     const sheets = sheetsGuiLen();
-    reconcileExtraPayments(sheets, sheetsTuDB, /* canPay */ false, 99);
+    reconcileExtraPayments(sheets, sheetsTuDB, {});
     const rows = sheets[0].extraTables[0].items;
     expect(rows[0].paid).toBe(true);
     expect(rows[0].paidAt).toBe("2026-08-01T00:00:00Z");
     expect(rows[0].paidById).toBe(7);
   });
 
-  it("người CÓ quyền BỎ đánh dấu tường minh → phải bỏ thật", () => {
+  // ĐẢO 2026-10-06 — bỏ tích nay là việc của kế toán ở trang Hóa đơn đầu vào, không qua payload Lưu.
+  it("payload «bỏ đánh dấu» KHÔNG bỏ được cờ — kể cả người có quyền tích", () => {
     const sheets = sheetsGuiLen((its) => its.map((x) => (x.rid === "r1" ? { ...x, paid: false } : x)));
-    reconcileExtraPayments(sheets, sheetsTuDB, true, 99);
+    reconcileExtraPayments(sheets, sheetsTuDB, { mienChotTien: true });
     const rows = sheets[0].extraTables[0].items;
-    expect(rows[0].paid).toBe(false);
-    expect(rows[0].paidAt).toBe(null);
-    expect(rows[0].paidById).toBe(null);
+    expect(rows[0].paid).toBe(true);
+    expect(rows[0].paidAt).toBe("2026-08-01T00:00:00Z");
+    expect(rows[0].paidById).toBe(7);
     expect(rows[1].paid, "hàng khác KHÔNG bị ảnh hưởng").toBe(true);
   });
 
-  it("người CÓ quyền đánh dấu hàng MỚI → đóng dấu thời gian + người trả", () => {
+  // ĐẢO 2026-10-06 — tích mới cũng chỉ ở trang Hóa đơn đầu vào.
+  it("payload «đánh dấu hàng MỚI» KHÔNG đánh dấu được — kể cả người có quyền tích", () => {
     const sheets = sheetsGuiLen((its) => [...its, { kind: "item", name: "Phát sinh", quantity: 1, unitPrice: 50, rid: "r3", paid: true }]);
-    reconcileExtraPayments(sheets, sheetsTuDB, true, 99);
+    reconcileExtraPayments(sheets, sheetsTuDB, { mienChotTien: true });
     const r3 = sheets[0].extraTables[0].items.find((r) => r.rid === "r3");
-    expect(r3.paid).toBe(true);
-    expect(r3.paidById).toBe(99);
-    expect(r3.paidAt).toBeTruthy();
+    expect(r3.paid).toBe(false);
+    expect(r3.paidById).toBe(null);
+    expect(r3.paidAt).toBe(null);
   });
 });
 
@@ -137,7 +145,7 @@ describe("reconcileExtraPayments — sửa giá hàng đã trả", () => {
   it("người KHÔNG có quyền trả tiền sửa đơn giá → TỪ CHỐI, và KHÔNG đụng tới cờ/ảnh", () => {
     const sheets = guiSuaGia(2, 9_000_000);
     let loi;
-    try { reconcileExtraPayments(sheets, dbCoSoTien, false, 42); } catch (e) { loi = e; }
+    try { reconcileExtraPayments(sheets, dbCoSoTien, {}); } catch (e) { loi = e; }
     expect(loi, "sửa giá hàng đã trả phải bị chặn, không được nuốt im lặng").toBeTruthy();
     expect(loi.status).toBe(400);
     expect(loi.message).toContain("Thuê cẩu");
@@ -148,12 +156,12 @@ describe("reconcileExtraPayments — sửa giá hàng đã trả", () => {
   });
 
   it("sửa SỐ LƯỢNG cũng bị chặn", () => {
-    expect(() => reconcileExtraPayments(guiSuaGia(50, 1_000_000), dbCoSoTien, false, 42)).toThrowError(/đã thanh toán/);
+    expect(() => reconcileExtraPayments(guiSuaGia(50, 1_000_000), dbCoSoTien, {})).toThrowError(/đã chi/);
   });
 
   it("KHÔNG sửa gì → đi qua nguyên vẹn, giữ cờ và ẢNH (chốt không bắt oan)", () => {
     const sheets = guiSuaGia(2, 1_000_000);
-    reconcileExtraPayments(sheets, dbCoSoTien, false, 42);
+    reconcileExtraPayments(sheets, dbCoSoTien, {});
     const r = sheets[0].extraTables[0].items[0];
     expect(r.paid).toBe(true);
     expect(r.paidAt).toBe("2026-08-01T00:00:00Z");
@@ -162,9 +170,9 @@ describe("reconcileExtraPayments — sửa giá hàng đã trả", () => {
     expect(Number(r.unitPrice)).toBe(1_000_000);
   });
 
-  it("người CÓ quyền trả tiền vẫn đổi được số tiền (luồng kế toán không bị siết)", () => {
+  it("người CÓ quyền tích (invoice:input:pay — mienChotTien) vẫn đổi được số tiền", () => {
     const sheets = guiSuaGia(3, 1_500_000);
-    reconcileExtraPayments(sheets, dbCoSoTien, true, 99);
+    reconcileExtraPayments(sheets, dbCoSoTien, { mienChotTien: true });
     const r = sheets[0].extraTables[0].items[0];
     expect(Number(r.unitPrice)).toBe(1_500_000);
     expect(Number(r.quantity)).toBe(3);

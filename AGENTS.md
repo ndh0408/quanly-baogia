@@ -66,6 +66,17 @@ quy là làm hỏng công việc của người khác.
 - **Công thức**: `=5x3`, `=SUM(H3:H8)`, tham chiếu ô, `$` tuyệt đối.
 - **Bảng nội bộ** (chi phí HCM / báo giá HN / phí khách) **không được** lọt vào
   file Excel gửi khách.
+- **Dữ liệu kế toán hàng nội bộ** (trang Hóa đơn đầu vào: đã chi + ảnh chứng từ, ngày HĐ, ghi chú
+  KT) nằm ở bảng `InputInvoiceEntry` / `InputInvoiceProof`: **đường Lưu báo giá không ghi** hai bảng
+  đó (chỉ `src/services/inputInvoiceService.ts` và công cụ `src/khoanChiBackfill.ts` ghi); hàng
+  **ĐÃ CHI không xoá được qua đường Lưu** (xoá hàng / bảng / trang → 400 `hang-da-chi`); ảnh chứng
+  từ **không bao giờ bị xoá** — thay / gỡ / bỏ tích chỉ RÚT (`retiredAt`), FK `RESTRICT`; đường Lưu
+  viết mới phải **khoá `Quote` (FOR NO KEY UPDATE) trước khi đọc khoản** — kế toán ghi dưới `Quote FOR
+  SHARE`, đọc trước khi khoá là có khe đua — và gọi **`chuanHoaRidTrung` trên bản CSDL TRƯỚC mọi
+  reconcile** (rid trùng / dính khoảng trắng trong dữ liệu cũ làm cờ + ảnh dời hàng hoặc rơi im) cùng
+  chốt `hangVetThieuRid` (hàng đã trả thiếu rid → 400 `hang-da-chi-thieu-ma`). Bản đồ `prior` của
+  reconcile lấy bản ĐẦU khi trùng. Bất biến KT-1…KT-8: chú thích đầu `src/khoanChi.ts` và
+  `src/services/inputInvoiceService.ts`.
 
 ## Chốt chặn — đừng vô hiệu hoá
 

@@ -4,6 +4,9 @@
 // đơn đầu vào. Máy chủ quyết định hàng nào vào và tính tiền (tests/hoa-don-dau-vao.test.js); bài này khoá phía
 // trình duyệt: lọc (kết hợp tự do), số tổng khớp đúng tập đang lọc, sắp xếp, phân trang về trang 1 khi đổi lọc,
 // và chỉ mời mở báo giá khi người xem MỞ ĐƯỢC báo giá (kế toán thường không có quote:read → không có ngõ cụt).
+// Bố cục 10 cột (2026-10-06, vừa laptop 1280px): Mã dự án | Khách hàng | Hạng mục (+ huy hiệu loại bảng) | NS | SL |
+// Đơn giá | Thành tiền | Chứng từ (+ Lưu kho) | Duyệt (ngày + người) | Kế toán. Phần ghi của cột Kế toán (hộp Khoản
+// chi) khoá ở InvoicesIn.keToan.test.tsx.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -24,13 +27,18 @@ import { ApiError } from "../lib/api";
 let n = 0;
 const hang = (over: Partial<InputInvoiceRow> = {}): InputInvoiceRow => {
   n++;
-  return {
+  const r: InputInvoiceRow = {
     key: `k${n}`, quoteId: 10 + n, quoteCode: `FP_A26_0${n}`, title: `Sự kiện ${n}`, status: "converted",
     customerCode: "KH1", customerName: "Sao Mai", companyName: "GN", createdByName: "Lan",
-    sheetId: 100 + n, sheetName: "Trang A", sheetCode: `FP_A26_0${n}_01`, category: "hcm", tableName: "Chi phí HCM",
+    sheetId: 100 + n, sheetName: "Trang A", sheetCode: `FP_A26_0${n}_01`, side: "sheet", category: "hcm", tableName: "Chi phí HCM",
     rid: `r${n}`, name: `Hạng mục ${n}`, detail: null, unit: null, quantity: 1, unitPrice: 1000, days: null, amount: 1000,
-    ns: null, chungTu: null, luuKho: false, approvedAt: "2026-09-20T03:00:00.000Z", approvedByName: "Admin", paid: false, paidAt: null, ...over,
+    ns: null, chungTu: null, luuKho: false, approvedAt: "2026-09-20T03:00:00.000Z", approvedByName: "Admin", paid: false, paidAt: null,
+    // Phần kế toán (KhoanChiDto): khoản chưa có dữ liệu.
+    version: 0, paidByName: null, hasPaidProof: false, proofs: [], paidAmount: null, tienDoi: false, invoiceDate: null,
+    accountingNote: null, keToanCapNhatLuc: null, keToanCapNhatBoi: null, nguon: "khong",
+    trangThaiHang: "binh-thuong", coTheGhi: true, lyDoKhoa: null, ...over,
   };
+  return { ...r, side: r.category === "hanoi" ? "hn" : r.side };
 };
 
 let root: Root | null = null;
@@ -51,7 +59,7 @@ beforeEach(() => { n = 0; h.loi = null; h.goi = 0; });
 afterEach(() => { if (root) act(() => root!.unmount()); root = null; document.body.innerHTML = ""; location.hash = ""; });
 
 const dong = () => [...hop.querySelectorAll("tbody tr")] as HTMLElement[];
-const ten = () => dong().map((r) => r.querySelectorAll("td")[3].querySelector("div")!.textContent);
+const ten = () => dong().map((r) => r.querySelectorAll("td")[2].querySelector("div")!.textContent);
 const stat = (nhan: string) => [...hop.querySelectorAll(".stat-card")].find((s) => s.querySelector(".stat-label")!.textContent === nhan)!.querySelector(".stat-value")!.textContent;
 function go(el: HTMLInputElement | HTMLSelectElement, v: string) {
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!;
@@ -113,18 +121,29 @@ describe("Trang Hóa đơn đầu vào", () => {
   it("hiện từng khoản: tiêu đề + số liệu đúng tập dữ liệu; mã dự án theo SHEET, loại bảng, chứng từ, người duyệt", async () => {
     await mo([hang({ name: "Thuê xe", quantity: 2, unitPrice: 500000, amount: 1000000, chungTu: "VAT", luuKho: true, ns: "Cty Xe", paid: true, paidAt: "2026-09-22T00:00:00.000Z", approvedByName: "Admin" })]);
     expect(hop.querySelector("h1")!.textContent).toBe("Hóa đơn đầu vào");
+    expect([...hop.querySelectorAll("thead th")].map((t) => t.textContent), "10 cột vừa laptop 1280px")
+      .toEqual(["Mã dự án", "Khách hàng", "Hạng mục", "NS", "SL", "Đơn giá", "Thành tiền", "Chứng từ", "Duyệt", "Kế toán"]);
     const o = dong()[0].querySelectorAll("td");
+    expect(o).toHaveLength(10);
     expect(o[0].textContent).toContain("FP_A26_01_01");
-    expect(o[2].textContent).toBe("Chi phí HCM");
-    expect(o[3].textContent).toContain("Thuê xe");
-    expect(o[4].textContent).toBe("Cty Xe");
-    expect(o[7].textContent).toBe("1.000.000");
-    expect(o[8].textContent).toBe("VAT");
-    expect(o[9].textContent).toBe("✓");
-    expect(o[10].textContent).toBe("20/09/2026");
-    expect(o[11].textContent).toBe("Admin");
-    expect(o[12].textContent).toContain("Đã TT");
-    expect(o[12].textContent).toContain("22/09/2026");
+    expect(o[2].querySelector("div")!.textContent).toBe("Thuê xe");
+    // Loại bảng thành HUY HIỆU ở dòng phụ của Hạng mục; tên bảng trùng tên mặc định ("Chi phí HCM") không lặp lại.
+    expect(o[2].querySelector(".extra-cat-badge")!.textContent).toBe("Chi phí HCM");
+    expect(o[2].textContent!.match(/Chi phí HCM/g), "tên bảng mặc định không in hai lần").toHaveLength(1);
+    expect(o[3].textContent).toBe("Cty Xe");
+    expect(o[6].textContent).toBe("1.000.000");
+    expect(o[7].querySelector(".status")!.textContent).toBe("VAT");
+    expect(o[7].textContent, "Lưu kho thành dòng phụ của Chứng từ").toContain("Lưu kho");
+    expect(o[8].textContent).toBe("20/09/2026Admin");   // ngày + người duyệt chung một cột
+    expect(o[9].textContent).toContain("✓ Đã chi · 22/09/2026");
+  });
+
+  it("tên bảng KHÁC tên mặc định và chi tiết hiện ở dòng phụ của Hạng mục; không có Lưu kho thì không có dòng phụ đó", async () => {
+    await mo([hang({ name: "Thuê sàn", tableName: "Sân khấu chính", detail: "6x4m", category: "khach", luuKho: false, chungTu: null })]);
+    const o = dong()[0].querySelectorAll("td");
+    expect(o[2].querySelector(".extra-cat-badge")!.textContent).toBe("Phí khách hàng");
+    expect(o[2].textContent).toContain("Sân khấu chính · 6x4m");
+    expect(o[7].textContent).not.toContain("Lưu kho");
   });
 
   it("số tổng tính trên TẬP ĐANG LỌC: tổng, đã thanh toán, chưa thanh toán, có VAT, số khoản", async () => {
@@ -163,7 +182,8 @@ describe("Trang Hóa đơn đầu vào", () => {
     await act(async () => { th.click(); });
     expect(ten()).toEqual(["C", "B", "A"]);
     expect(th.getAttribute("aria-sort")).toBe("descending");
-    const ngay = [...hop.querySelectorAll("th.sortable")].find((t) => t.textContent!.startsWith("Ngày duyệt")) as HTMLElement;
+    // "Duyệt" (ngày + người duyệt chung cột) vẫn sắp theo NGÀY duyệt.
+    const ngay = [...hop.querySelectorAll("th.sortable")].find((t) => t.textContent!.startsWith("Duyệt")) as HTMLElement;
     await act(async () => { ngay.click(); });
     expect(ngay.getAttribute("aria-sort")).toBe("ascending");
   });
@@ -176,8 +196,16 @@ describe("Trang Hóa đơn đầu vào", () => {
   });
 
   it("người đọc được báo giá → bấm dòng mở báo giá; nhưng bấm vào nút/ô nhập trong dòng thì không", async () => {
-    await mo([hang({ quoteId: 77 })], { me: ME_MO_DUOC });
+    await mo([hang({ quoteId: 77 })], { me: { ...ME_MO_DUOC, permissions: [...ME_MO_DUOC.permissions, "invoice:edit"] } });
     expect(dong()[0].className).toContain("qrow");
+    // Bấm nút ở cột Kế toán (và mọi phần tử bên trong nó): mở hộp Khoản chi, KHÔNG nhảy sang báo giá.
+    const nut = dong()[0].querySelector("button[data-ke-toan]") as HTMLButtonElement;
+    expect(nut, "người có invoice:edit thấy nút ở cột Kế toán").not.toBeNull();
+    await act(async () => { (nut.querySelector("span") as HTMLElement).click(); });
+    expect(location.hash).toBe("");
+    expect(hop.querySelector('[role="dialog"]'), "hộp Khoản chi đã mở").not.toBeNull();
+    await act(async () => { (hop.querySelector('[role="dialog"] .x') as HTMLButtonElement).click(); });
+    expect(hop.querySelector('[role="dialog"]')).toBeNull();
     await act(async () => { dong()[0].click(); });
     expect(location.hash).toBe("#/quotes/77");
   });

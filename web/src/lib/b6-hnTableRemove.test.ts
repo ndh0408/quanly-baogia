@@ -20,6 +20,13 @@
 // và đưa CẢ HAI đường xoá (Bảng nội bộ + bảng Hà Nội) qua cùng một lõi `removeTableFromList`.
 // KHÔNG tính `days`: `M.blankItem(true)` đặt sẵn days = 1 (shared/quote-math.ts:125) nên bảng mới
 // tinh của mẫu có cột Số Ngày sẽ bị coi là "có dữ liệu" và hỏi vô cớ.
+//
+// ── 2026-10-06: BẢNG CÓ HÀNG ĐÃ CHI THÌ CHẶN HẲN, KHÔNG HỎI ─────────────────────
+// Kế toán tích ĐÃ CHI ở trang Hóa đơn đầu vào; máy chủ từ chối mọi lần Lưu làm mất hàng đã chi (400
+// 'hang-da-chi'). Xoá DÒNG thì Ctrl+Z cứu được, xoá cả BẢNG thì không (ngăn hoàn tác đi cùng lưới bị
+// gỡ) — để người dùng xác nhận xoá rồi mới biết lúc Lưu là đẩy họ tới tải lại trang, mất phần chưa lưu
+// khác. Nên lõi chặn NGAY: hàng nào `paid === true` (giá trị LỚP PHỦ máy chủ gắn theo khoản) thì không
+// hỏi, không xoá, trả `chan` = số hàng để nơi gọi báo.
 import { describe, it, expect } from "vitest";
 import { extraTableHasData, removeTableFromList, removeExtraTableAt, type ExtraTable } from "../components/ExtraTables";
 import type { ItemK } from "./gridShared";
@@ -96,5 +103,47 @@ describe("removeTableFromList — LÕI DÙNG CHUNG cho bảng nội bộ và b�
     expect(await removeExtraTableAt(sheet, 0, async () => true)).toBe(true);
     expect(sheet.extraTables).toHaveLength(1);
     expect(sheet._activeExtra).toBe(0);
+  });
+});
+
+describe("removeTableFromList — CHẶN bảng có hàng kế toán đã đánh dấu ĐÃ CHI", () => {
+  const daChi = () => [
+    table([item({ name: "Xe tải", paid: true, paidAt: "2026-10-01T03:00:00.000Z", hasPaidProof: true }), item({ name: "Ăn trưa", paid: true }), item({ name: "Nước" })]),
+    table([item({ notes: "bảng thường" })]),
+  ];
+
+  it("không gọi hộp hỏi, không đụng mảng, giữ tab đang mở, trả `chan` = số hàng đã chi", async () => {
+    const tables = daChi();
+    let daHoi = false;
+    const r = await removeTableFromList(tables, 0, 1, async () => { daHoi = true; return true; });
+    expect(daHoi, "bảng có hàng đã chi vẫn mở hộp hỏi xoá").toBe(false);
+    expect(r).toEqual({ removed: false, active: 1, chan: 2 });
+    expect(tables).toHaveLength(2);
+    expect(tables[0].items).toHaveLength(3);
+  });
+
+  it("chỉ `paid === true` mới chặn: paid false / chỉ còn paidAt / hasPaidProof lẻ thì vẫn là bảng có dữ liệu — hỏi rồi xoá như cũ", async () => {
+    for (const o of [{ paid: false }, { paidAt: "2026-10-01T03:00:00.000Z" }, { hasPaidProof: true }, { paid: "true" }]) {
+      const tables = [table([item({ name: "Xe tải", ...o })]), table([item()])];
+      const hoi: ExtraTable[] = [];
+      const r = await removeTableFromList(tables, 0, 0, async (t) => { hoi.push(t); return true; });
+      expect(hoi, JSON.stringify(o)).toHaveLength(1);
+      expect(r, JSON.stringify(o)).toEqual({ removed: true, active: 0 });
+    }
+  });
+
+  it("bảng KHÁC trong danh sách có hàng đã chi không cản việc xoá bảng này", async () => {
+    const tables = daChi();
+    const r = await removeTableFromList(tables, 1, 1, async () => true);
+    expect(r).toEqual({ removed: true, active: 0 });
+    expect(tables).toHaveLength(1);
+  });
+
+  it("removeExtraTableAt (Bảng nội bộ) đi qua cùng chốt: trả false, không hỏi, báo số hàng cho nơi gọi", async () => {
+    const sheet = { extraTables: daChi(), _activeExtra: 1 };
+    const bao: number[] = [];
+    let daHoi = false;
+    expect(await removeExtraTableAt(sheet, 0, async () => { daHoi = true; return true; }, (n) => bao.push(n))).toBe(false);
+    expect([daHoi, bao, sheet.extraTables.length, sheet._activeExtra]).toEqual([false, [2], 2, 1]);
   });
 });

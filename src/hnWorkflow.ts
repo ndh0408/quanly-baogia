@@ -9,6 +9,8 @@ import { audit } from "./audit.js";
 import { canOnQuote, can, laAccountPhu, PERMISSIONS as P } from "./permissions.js";
 import { QUOTE_INCLUDE, sanitizeHnTables, hnRevCua } from "./quoteUtils.js";
 import { reconcileExtraPayments, reconcileHnApprovals } from "./services/quoteService.js";
+import { docKhoanChiTrongTx } from "./services/inputInvoiceService.js";
+import { tachRidTrung, tapDaChi, hangDaChiBiMat, loiHangDaChi, chuanHoaRidTrung, hangVetThieuRid, loiVetThieuRid } from "./khoanChi.js";
 
 const httpError = (status: number, message: string) => Object.assign(new Error(message), { status });
 
@@ -96,12 +98,12 @@ export async function saveHn(req: Request) {
   // CHỐT LẠI TRẠNG THÁI DO SERVER SỞ HỮU TRƯỚC KHI GHI.
   //
   // `sanitizeHnTables` persist NGUYÊN TRẠNG `approved*` và `paid*`/`paidProof` (nó chỉ chuẩn hoá
-  // hình dạng, không phán quyền), mà account Hà Nội KHÔNG có `quote:internal:approve` lẫn
-  // `quote:internal:pay`. Không chốt lại thì họ tự đóng dấu duyệt cho hàng của mình, tự tích "đã
-  // thanh toán", tự chọn ngày trả và tự trỏ `paidById` sang người khác, đồng thời nhét thẳng chuỗi
-  // `paidProof` vào cột Json (route /pay chặn ở 900KB + bắt buộc data-URL ảnh; đường này thì không).
+  // hình dạng, không phán quyền), mà account Hà Nội KHÔNG có `quote:internal:approve`. Không chốt lại
+  // thì họ tự đóng dấu duyệt cho hàng của mình, tự tích "đã thanh toán", tự chọn ngày trả và tự trỏ
+  // `paidById` sang người khác, đồng thời nhét thẳng chuỗi `paidProof` vào cột Json. Từ 2026-10-06 cờ
+  // đã-chi cũ ĐÓNG BĂNG cho mọi người (kế toán ghi ở bảng InputInvoiceEntry — src/khoanChi.ts).
   const userId = req.session.userId!;
-  const canPay = can(req.session, P.QUOTE_INTERNAL_PAY);
+  const mienChotTien = can(req.session, P.INVOICE_INPUT_PAY);
   const canApprove = can(req.session, P.QUOTE_INTERNAL_APPROVE);
 
   await prisma.$transaction(async (tx) => {
@@ -109,7 +111,7 @@ export async function saveHn(req: Request) {
     // không lấy khoá Quote là đổi một lỗ mất dữ liệu lấy một lỗ khác.
     //
     // CHỈ khoá hàng Quote, và KHÔNG đụng QuoteSheet sau đó: mọi đường ghi khác lấy khoá theo thứ tự
-    // QuoteSheet → Quote (updateQuote, markExtraTableRowPayment), nên lấy ngược chiều là deadlock.
+    // QuoteSheet → Quote (updateQuote, ghiVungNoiBoDuocGiao), nên lấy ngược chiều là deadlock.
     // Dùng $queryRaw chứ không `tx.quote.updateMany`: extension realtime ở src/db.ts coi updateMany
     // là WRITE nên bắn thêm một sự kiện SSE, mà SSE đã bắn thì rollback không rút lại được.
     await tx.$queryRaw`SELECT id FROM "Quote" WHERE id = ${id} FOR UPDATE`;
@@ -142,10 +144,24 @@ export async function saveHn(req: Request) {
 
     // Hai hàm reconcile nhận mảng "sheet" có `.extraTables`; bọc một phần tử là dùng lại được
     // nguyên vẹn, không phải đẻ bản sao thứ hai của luật (chúng không hề đọc sheet.id).
+    //
+    // Khoản kế toán đọc SAU khi đã khoá Quote (KT-5): kế toán tích dưới Quote FOR SHARE nên không chen giữa được.
+    const khoan = await docKhoanChiTrongTx(tx, id);
+    const hnDb = Array.isArray(tuoi.hnTables) ? tuoi.hnTables : [];
+    // rid trùng CÓ SẴN trong CSDL → ghép theo thứ tự với payload trước reconcile; hàng đã trả (cũ) thiếu rid → từ chối
+    // (src/khoanChi.ts chuanHoaRidTrung / hangVetThieuRid).
+    chuanHoaRidTrung("hn", hnDb, payload);
+    const thieuMa = hangVetThieuRid("hn", hnDb);
+    if (thieuMa.length) throw loiVetThieuRid(thieuMa);
+    tachRidTrung("hn", payload);                       // KT-6 — trước reconcile, khớp luật "kế thừa một lần"
+    const daChi = tapDaChi("hn", hnDb, khoan);
     const boc = [{ extraTables: payload }];
-    const bocDb = [{ extraTables: Array.isArray(tuoi.hnTables) ? tuoi.hnTables : [] }];
-    reconcileExtraPayments(boc, bocDb, canPay, userId);
+    const bocDb = [{ extraTables: hnDb }];
+    reconcileExtraPayments(boc, bocDb, { daChi, mienChotTien });
     reconcileHnApprovals(boc, bocDb, canApprove);
+    // KT-4: hàng ĐÃ CHI không được biến mất qua đường Lưu (400 nêu tên hàng — màn account HN chỉ toast, giữ phần gõ).
+    const mat = hangDaChiBiMat("hn", hnDb, payload, daChi);
+    if (mat.length) throw loiHangDaChi(mat);
 
     await tx.quote.update({
       where: { id },

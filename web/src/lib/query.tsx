@@ -50,6 +50,10 @@ export const KHOA_THEO_THUC_THE: Record<string, string[]> = {
   quote: ["quotes", "quoteFacets", "quoteProjects", "inputInvoices", "dashboard", "quote-internal", "audit", "personnel"],
   // Ghi chú + màu ở dòng Danh sách báo giá: chỉ danh sách báo giá hiện nó (xem RT_ENTITY ở src/db.ts).
   quoteNote: ["quotes", "quoteFacets"],
+  // Khoản chi của trang Hóa đơn đầu vào (đã chi + ảnh, ngày HĐ, ghi chú KT — src/services/inputInvoiceService.ts phát
+  // tay MỘT lần sau commit). Đổi: chính trang đó, màn chỉ-xem-nội-bộ của tài khoản chi phí (cột "✓ Đã TT"), cột
+  // "Đã TT x/y" của danh sách báo giá, và Nhật ký. KHÔNG đụng /quotes/projects, Dashboard: số tiền không đổi.
+  inputInvoice: ["inputInvoices", "quote-internal", "quotes", "audit"],
   customer: ["customers", "quotes", "quoteFacets", "quoteProjects", "inputInvoices", "dashboard", "audit"],
   user: ["users", "permissions", "perm-catalog", "quotes", "quoteFacets", "quoteProjects", "dashboard", "audit"],
 };

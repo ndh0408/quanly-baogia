@@ -30,6 +30,9 @@ bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object   =   khôi phục 
   đọc được vĩnh viễn**.
 - Thiếu **kho object** → mọi hàng chứng từ thanh toán trỏ vào object không tồn
   tại. Đây là **chứng từ tài chính**.
+- Ngoại lệ có chủ ý: ảnh ủy nhiệm chi của **khoản chi hàng bảng nội bộ** (trang Hóa đơn đầu vào, bảng
+  `InputInvoiceProof`, từ 2026-10-06) nằm **trong** CSDL — dump mang theo, không phụ thuộc kho object
+  (vì kho object production chưa có bản sao). Giá phải trả: dump phình theo số ảnh.
 
 Khoá phải được cất **ở nơi khác** với bản dump — khoá cần để dựng lại server được giữ ngoài repo, ở
 kho khoá của chủ repo (không bao giờ vào git). Để chung một chỗ thì kẻ lấy được

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
-import { GridTable, safeImgSrc } from "./GridTable";
-import { api, ApiError, type EditorTemplate } from "../lib/api";
-import { confirmModal, toast, useEscClose } from "../lib/ui";
+import { GridTable } from "./GridTable";
+import { type EditorTemplate } from "../lib/api";
+import { confirmModal, toast } from "../lib/ui";
 import { KhoiSheet } from "./KhoiSheet";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
@@ -56,10 +56,30 @@ export function extraTableHasData(t: ExtraTable | null | undefined): boolean {
     if (chu(r.ns) || chu(r.chungTu) || r.luuKho === true) return true;
     if (Array.isArray(it.images) && it.images.length > 0) return true;
     if (it.formulas && Object.keys(it.formulas).length > 0) return true;
-    // cờ duyệt (approveCol) + cờ thanh toán nội bộ (payCol, xem PayDialog bên dưới)
+    // cờ duyệt (approveCol) + cờ đã chi / ảnh chứng từ (LỚP PHỦ máy chủ gắn theo khoản kế toán — bảng có hàng
+    // `paid === true` thì removeTableFromList chặn hẳn trước khi tới đây; cờ lẻ còn lại vẫn đáng hỏi)
     return !!(it.approved || r.paid || r.hasPaidProof || r.paidAt);
   });
 }
+
+/** Số hàng kế toán đã đánh dấu ĐÃ CHI trong một bảng. `paid === true` là giá trị LỚP PHỦ máy chủ gắn theo khoản
+ *  (trang Hóa đơn đầu vào) — màn soạn không ghi được nó. Bỏ nhóm / nhóm con / dòng thông tin như máy chủ
+ *  (hangCuaPhia, src/khoanChi.ts). */
+export function soHangDaChi(t: ExtraTable | null | undefined): number {
+  return (t?.items || []).filter((it) => it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info"
+    && (it as unknown as Record<string, unknown>).paid === true).length;
+}
+
+/** Số hàng ĐÃ CHI trong bảng nội bộ của MỘT trang — chỉ Chi phí HCM / Phí KH, tức phía "sheet" của máy chủ: bản
+ *  "hanoi" cũ còn sót trong trang không thuộc phía nào (hangCuaPhia) nên không tính. Màn soạn chặn xoá trang theo nó. */
+export function soHangDaChiCuaTrang(extraTables: unknown[] | undefined): number {
+  return (Array.isArray(extraTables) ? (extraTables as ExtraTable[]) : [])
+    .reduce((n, t) => n + (t && EXTRA_CATS.some(([c]) => c === t.category) ? soHangDaChi(t) : 0), 0);
+}
+
+/** Câu báo khi chặn xoá sheet (bảng nội bộ / bảng Hà Nội / trang báo giá) có hàng ĐÃ CHI — một chỗ cho mọi nơi gọi. */
+export const loiXoaBangDaChi = (soHang: number) =>
+  `Không xoá được sheet: có ${soHang} khoản kế toán đã đánh dấu ĐÃ CHI — nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước.`;
 
 // LÕI DÙNG CHUNG của MỌI đường xoá bảng nội bộ: bảng đã có dữ liệu thì phải HỎI trước, huỷ thì
 // không đụng vào mảng; trả luôn chỉ số tab đang mở sau khi xoá.
@@ -67,13 +87,21 @@ export function extraTableHasData(t: ExtraTable | null | undefined): boolean {
 // AccountHnView — và trước đây màn HN CHÉP TAY lại toàn bộ logic (hasData + hỏi + splice + dịch
 // tab). Hai bản chép tay trôi khỏi nhau là chuyện thời gian: nới `extraTableHasData` ở một chỗ thì
 // bên kia vẫn xoá thẳng. Nay cả hai gọi chung hàm này.
+//
+// 2026-10-06 — CHẶN bảng có hàng ĐÃ CHI (kế toán đánh dấu ở trang Hóa đơn đầu vào): không hỏi, không xoá, trả
+// `chan` = số hàng đó để nơi gọi báo (loiXoaBangDaChi). Máy chủ vốn từ chối lần Lưu làm mất hàng đã chi (400
+// 'hang-da-chi'), nhưng xoá cả BẢNG thì Ctrl+Z không cứu được (xem removeExtraTableAt) — để tới lúc Lưu mới biết
+// là đẩy người dùng tới tải lại trang, mất luôn phần chưa lưu khác. Đo bằng cờ của lớp phủ, nên màn nạp TRƯỚC lần
+// tích không biết hàng đó đã chi — khi ấy lần Lưu vẫn bị máy chủ chặn đúng.
 export async function removeTableFromList(
   tables: ExtraTable[] | undefined,
   i: number,
   active: number,
   confirmRemove: (t: ExtraTable) => Promise<boolean>,
-): Promise<{ removed: boolean; active: number }> {
+): Promise<{ removed: boolean; active: number; chan?: number }> {
   if (!Array.isArray(tables) || !tables[i]) return { removed: false, active };
+  const chan = soHangDaChi(tables[i]);
+  if (chan > 0) return { removed: false, active, chan };
   if (extraTableHasData(tables[i]) && !(await confirmRemove(tables[i]))) return { removed: false, active };
   tables.splice(i, 1);
   let a = active || 0; if (a > i) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0;
@@ -84,39 +112,42 @@ export async function removeTableFromList(
 // không hỏi: bấm nhầm là mất cả cờ duyệt/thanh toán từng hàng lẫn phần tổng đổ sang Quản lý dự án,
 // mà Ctrl+Z không cứu được vì ngăn hoàn tác nằm TRONG GridTable của chính sheet vừa bị gỡ khỏi cây.
 // Tách khỏi component để kiểm thử được ngoài trình duyệt (web/ không có jsdom).
+// `baoChan`: bảng có hàng ĐÃ CHI bị lõi chặn → nhận số hàng để báo. Hàm này không tự toast (chạy được ngoài DOM).
 export async function removeExtraTableAt(
   sheet: { extraTables?: ExtraTable[]; _activeExtra?: number },
   i: number,
   confirmRemove: (t: ExtraTable) => Promise<boolean>,
+  baoChan?: (soHang: number) => void,
 ): Promise<boolean> {
   const r = await removeTableFromList(sheet.extraTables, i, sheet._activeExtra || 0, confirmRemove);
+  if (r.chan) baoChan?.(r.chan);
   if (r.removed) sheet._activeExtra = r.active;
   return r.removed;
 }
 
-export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, thanhChung }: {
+// Cột THANH TOÁN đã RỜI lưới này (2026-10-06): kế toán tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào
+// (InvoicesIn). GridTable vẫn còn khả năng payCol nhưng không ai truyền nữa — và KHÔNG thêm cột / dấu khoá / biểu
+// tượng nào cho hàng đã chi (chủ repo: "không nằm trong kia nữa"); người soạn chỉ gặp câu báo khi xoá / Lưu chạm
+// tới hàng đó.
+export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, onMarkDirty, thanhChung }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
   /**
    * PHẠM VI theo TỪNG LOẠI bảng — dành cho "account phụ" chỉ được giao một phần (vd chỉ bảng Hà
-   * Nội). CỐ Ý chỉ trả lời "có được giao loại này không", KHÔNG nhân với `editable`: cột THANH
-   * TOÁN cũng gác bằng nó, mà thanh toán là năng lực ĐỘC LẬP với việc báo giá còn sửa được hay
-   * không (kế toán vẫn tích được trên báo giá đã chốt). Không truyền → mọi loại đều trong phạm vi,
-   * hành vi y như trước (AccountHnView đang gọi như vậy). Là HÀM chứ không phải Set/mảng:
-   * gridPropsEqual bỏ qua prop hàm nên memo của lưới không bị phá.
+   * Nội). CỐ Ý chỉ trả lời "có được giao loại này không", KHÔNG nhân với `editable` — `suaDuoc`
+   * ghép hai điều kiện. Không truyền → mọi loại đều trong phạm vi, hành vi y như trước
+   * (AccountHnView đang gọi như vậy). Là HÀM chứ không phải Set/mảng: gridPropsEqual bỏ qua prop
+   * hàm nên memo của lưới không bị phá.
    */
   editableCat?: (cat: string) => boolean;
-  canPay?: boolean; quoteId?: number; onMarkDirty: () => void;
+  onMarkDirty: () => void;
   /** Thanh "+ Thêm hàng…" dùng chung ở đáy trang. Vắng = mỗi lưới tự vẽ tại chỗ (đường cũ). */
   thanhChung?: ThanhChung;
-  /** Mốc `updatedAt` MỚI sau khi route /pay bump — editor phải nhận để khỏi tự đâm 409 giả (xem ExtraPayDialog). */
-  onQuoteTouched?: (updatedAt: string) => void;
 }) {
   const [, setTick] = useState(0);
   const trongPhamVi = (cat: string) => (editableCat ? editableCat(cat) : true);
   const suaDuoc = (cat: string) => editable && trongPhamVi(cat);
   const redraw = () => setTick((t) => t + 1);
   const onChange = () => { onMarkDirty(); redraw(); };
-  const [payRow, setPayRow] = useState<ItemK | null>(null); // hàng đang mở dialog thanh toán
   /* Khối nào đang mở. Chưa đụng tới thì theo mặc định: ĐÓNG HẾT — trang soạn báo giá vốn đã dài,
      và tiêu đề đã nói đủ số sheet + số tiền nên đóng vẫn đọc được. Xem KhoiSheet.tsx. */
   const [mo, setMo] = useState<Record<string, boolean>>({});
@@ -161,7 +192,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
       "Xoá sheet nội bộ?",
       `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
       { danger: true, confirmText: "Xoá sheet" },
-    ).then((dong) => dong && songRef.current));
+    ).then((dong) => dong && songRef.current), (n) => toast(loiXoaBangDaChi(n), "error"));
     if (ok) onChange();
   };
 
@@ -246,8 +277,6 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                       onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}
                       usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false} cotNoiBo
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
-                      payCol canPay={!!canPay && !!quoteId && trongPhamVi(cat)}
-                      onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
                       groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
                       sheetTotalLine={false} />
                   </div>
@@ -258,90 +287,6 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
           })}
         </div>
       </div>
-      {payRow && quoteId && sheet.id != null && (
-        <ExtraPayDialog quoteId={quoteId} sheetId={sheet.id} item={payRow} onQuoteTouched={onQuoteTouched}
-          onClose={() => setPayRow(null)}
-          onSaved={(paid, hasProof) => { (payRow as Record<string, unknown>).paid = paid; (payRow as Record<string, unknown>).paidAt = paid ? new Date().toISOString() : null; (payRow as Record<string, unknown>).hasPaidProof = hasProof; setPayRow(null); redraw(); }} />
-      )}
     </>
   );
-}
-
-// Dialog tích "đã thanh toán" + up ẢNH chứng từ cho 1 HÀNG nội bộ (gọi API /pay — không lưu cả báo giá).
-export function ExtraPayDialog({ quoteId, sheetId, hn, item, onClose, onSaved, onQuoteTouched }: {
-  /** `hn` = hàng thuộc bảng Hà Nội (cấp báo giá, không có sheetId) → gọi cặp route /hn/:rid/*. */
-  quoteId: number; sheetId?: number | null; hn?: boolean; item: ItemK; onClose: () => void; onSaved: (paid: boolean, hasProof: boolean) => void;
-  onQuoteTouched?: (updatedAt: string) => void;
-}) {
-  const it = item as Record<string, unknown>;
-  const [paid, setPaid] = useState(!!it.paid);
-  const [proof, setProof] = useState<string | null>(null);      // ảnh MỚI chọn
-  const [existing, setExisting] = useState<string | null>(null); // ảnh đã có (fetch on-demand)
-  useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app
-  const [saving, setSaving] = useState(false);
-  const rid = String(it.rid);
-  useEffect(() => { if (it.hasPaidProof) (hn ? api.getHnProof(quoteId, rid) : api.getExtraProof(quoteId, sheetId as number, rid)).then((r) => setExisting(r.paidProof)).catch(() => {}); }, [quoteId, sheetId, hn, rid, it.hasPaidProof]);
-  const onFile = async (f: File | undefined) => {
-    if (!f) return;
-    if (!/^image\/(png|jpe?g|webp)$/.test(f.type)) { toast("Chỉ nhận ảnh PNG/JPG/WEBP", "error"); return; }
-    try { setProof(await compressImage(f)); } catch { toast("Không đọc được ảnh", "error"); }
-  };
-  const save = async () => {
-    setSaving(true);
-    try {
-      const r = hn
-        ? await api.markHnPay(quoteId, rid, paid, paid && proof ? proof : (paid ? undefined : ""))
-        : await api.markExtraPay(quoteId, sheetId as number, rid, paid, paid && proof ? proof : (paid ? undefined : ""));
-      // Route /pay BUMP `Quote.updatedAt` để chống lost-update chéo. Người tích ô này thường ĐANG MỞ
-      // chính báo giá đó, mà editor gửi `baseUpdatedAt` đã tải lúc Lưu — không nhận mốc mới thì lần
-      // Lưu kế tiếp ăn 409 "Báo giá vừa được người khác cập nhật" do CHÍNH HỌ, và phần vừa gõ có
-      // nguy cơ mất khi họ tải lại theo lời khuyên của thông báo.
-      if (r?.updatedAt) onQuoteTouched?.(r.updatedAt);
-      toast("Đã lưu thanh toán", "success");
-      onSaved(paid, paid ? (!!proof || !!existing) : false);
-    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); setSaving(false); }
-  };
-  const img = proof || existing;
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Thanh toán dòng nội bộ" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Thanh toán: {String(it.name || "(dòng nội bộ)").slice(0, 60)}</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
-        <div className="modal-body">
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-            <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} />
-            <span><strong>Đã thanh toán</strong> dòng này</span>
-          </label>
-          {paid && <div style={{ marginTop: 12 }}>
-            <label className="muted" style={{ fontSize: 13 }}>Ảnh chứng từ (tuỳ chọn):</label>
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => onFile(e.target.files?.[0])} style={{ display: "block", marginTop: 5 }} />
-            {img && <img src={safeImgSrc(img)} alt="chứng từ" style={{ maxWidth: "100%", maxHeight: 240, marginTop: 8, borderRadius: 8, border: "1px solid var(--line)" }} />}
-          </div>}
-        </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Hủy</button>
-          <button className="btn btn-primary" disabled={saving} onClick={save}>{saving ? "Đang lưu…" : "Lưu"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Nén ảnh client (≤1280px, JPEG 0.7) → base64 data URL (giống PaymentDialog nhân sự).
-function compressImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => {
-      const im = new Image();
-      im.onload = () => {
-        const max = 1280; let { width: w, height: h } = im;
-        if (w > max || h > max) { const s = max / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
-        const c = document.createElement("canvas"); c.width = w; c.height = h;
-        const ctx = c.getContext("2d"); if (!ctx) return reject(new Error("no ctx"));
-        ctx.drawImage(im, 0, 0, w, h);
-        resolve(c.toDataURL("image/jpeg", 0.7));
-      };
-      im.onerror = reject; im.src = String(r.result);
-    };
-    r.onerror = reject; r.readAsDataURL(file);
-  });
 }

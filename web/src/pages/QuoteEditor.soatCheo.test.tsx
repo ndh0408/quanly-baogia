@@ -226,6 +226,59 @@ describe("app#11 — duyệt HN khi dirty không được nuốt lượt lưu c�
     await bam(nut("Lưu"));
     expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt).toBe("2026-09-21T06:00:00.000Z");
   });
+
+  // Báo giá CŨ lưu quoteDate là thời điểm đầy đủ (excel#10): đường nạp đổi nó sang ngày VN (+7h, qua ngày khi ≥17:00
+  // UTC). Vân tay lúc nạp mà tính SAU bước đó thì ra 14/06, còn bản GET kiểm tra cắt ra 13/06 → lần nào cũng tưởng
+  // người khác đã lưu, không nhận mốc, lần Lưu kế tự đâm 409. (Chuyển từ bộ X2 của QuoteEditor.soatToanDien khi hộp
+  // thanh toán rời màn soạn 2026-10-06 — vẫn khoá đúng chỗ vanTayMain lấy TRƯỚC bước chuẩn hoá ngày.)
+  it("báo giá cũ có quoteDate là mốc giờ ≥17:00 UTC, chỉ phần HN đổi → vẫn nhận mốc MỚI", async () => {
+    const NGAY_CU = "2026-06-13T20:00:00.000Z";
+    h.getQuote.mockImplementationOnce(async () => baoGia({ quoteDate: NGAY_CU }));
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "approved", quoteDate: NGAY_CU, updatedAt: "2026-09-21T05:00:00.000Z" }));
+    await bam(nut("✓ Duyệt"));
+    await bam(nut("Lưu"));
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt, "quoteDate cũ làm vân tay lúc nạp lệch bản GET → 409 giả").toBe("2026-09-21T05:00:00.000Z");
+  });
+
+  // 2026-10-06: kế toán tích ĐÃ CHI ở trang Hóa đơn đầu vào. Lần ghi đó KHÔNG bump updatedAt và không đi qua màn
+  // soạn, nhưng mọi phản hồi GET mang cờ mới qua LỚP PHỦ (paid / paidAt / paidById / hasPaidProof theo khoản). Bản
+  // đang soạn còn cờ lúc nạp — đem các trường đó vào vân tay là tưởng có người lưu chen → không nhận mốc duyệt →
+  // lần Lưu kế tự đâm 409 GIẢ, chỉ vì kế toán vừa làm việc của họ.
+  const XE = { kind: "item", name: "Xe", unit: "chuyến", quantity: 1, unitPrice: 1000 };
+  const KE_TOAN_VUA_TICH = { paid: true, paidAt: "2026-09-21T04:00:00.000Z", paidById: 9, hasPaidProof: true };
+  const hnCo = (over: Record<string, unknown> = {}) => [{ name: "HN", templateId: 1, groupSubtotal: false, items: [{ ...XE, name: "Khung", rid: "r1", ...over }] }];
+  it("kế toán vừa tích ĐÃ CHI một hàng bảng nội bộ (chỉ trường kế toán đổi qua lớp phủ) → vẫn nhận mốc MỚI", async () => {
+    const noiBo = (over: Record<string, unknown> = {}) => [{ category: "hcm", name: "HCM", templateId: 1, groupSubtotal: false, items: [{ ...XE, rid: "e1", approved: true, ...over }] }];
+    h.getQuote.mockImplementationOnce(async () => baoGia({ sheets: [trang(101, { extraTables: noiBo() })] }));
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "approved", updatedAt: "2026-09-21T05:00:00.000Z", sheets: [trang(101, { extraTables: noiBo(KE_TOAN_VUA_TICH) })] }));
+    await bam(nut("✓ Duyệt"));
+    await bam(nut("Lưu"));
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt, "lớp phủ kế toán làm vân tay phần chính lệch → 409 giả").toBe("2026-09-21T05:00:00.000Z");
+  });
+
+  it("kế toán vừa tích ĐÃ CHI một hàng bảng Hà Nội (chỉ trường kế toán đổi qua lớp phủ) → vẫn nhận mốc MỚI", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo() }));
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "approved", hnTables: hnCo(KE_TOAN_VUA_TICH), updatedAt: "2026-09-21T05:00:00.000Z" }));
+    await bam(nut("✓ Duyệt"));
+    await bam(nut("Lưu"));
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt, "lớp phủ kế toán làm vân tay bảng HN lệch → 409 giả").toBe("2026-09-21T05:00:00.000Z");
+  });
+
+  it("đối chứng: kế toán tích VÀ account HN đổi giá cùng hàng → vẫn giữ mốc CŨ (bỏ trường kế toán không nuốt nội dung HN)", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo() }));
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "approved", hnTables: hnCo({ ...KE_TOAN_VUA_TICH, unitPrice: 9000 }), updatedAt: "2026-09-21T05:00:00.000Z" }));
+    await bam(nut("✓ Duyệt"));
+    await bam(nut("Lưu"));
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt).toBe(MOC_CU);
+  });
 });
 
 // app#12: hộp 409 hứa "được GIỮ LẠI" mà không kiểm ghiBanNhap có ghi được không.

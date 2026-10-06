@@ -11,7 +11,8 @@ import { taiLaiTrang } from "../lib/phienBan";
 async function guardLeave(): Promise<boolean> {
   const w = window as Window & { __editorDirty?: boolean };
   if (!w.__editorDirty) return true;
-  const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trong báo giá. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
+  // Cờ dùng chung của màn soạn báo giá, màn Account HN và hộp Khoản chi (Hóa đơn đầu vào) — câu hỏi không nói "báo giá".
+  const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trên trang này. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
   // FE-12: chọn bỏ → báo editor xoá bản nháp cục bộ (không thì lần mở sau lại hỏi khôi phục đúng phần
   // người dùng vừa quyết định bỏ).
   if (ok) { w.__editorDirty = false; window.dispatchEvent(new Event("editor:discard")); }

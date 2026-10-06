@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type * as M from "./quoteMath";
 import type { ImportedItem } from "./api";
-import { diffItems, giuTruongChiApp, toGridItems } from "./importApply";
+import { diffItems, giuTruongChiApp, khoanDaChiTrongSheetXoa, toGridItems } from "./importApply";
 
 type HangHn = M.Item & { rid?: string; paid?: boolean; paidAt?: string | null; paidById?: number | null; hasPaidProof?: boolean };
 const truoc = (): HangHn[] => [
@@ -140,5 +140,31 @@ describe("Thay toàn bộ giữ NS / CHỨNG TỪ / LƯU KHO của dòng khớp"
     // "Bàn…" (NS + HĐNS) + "Loa…" (chỉ lưu kho) = 2; "Bục…" chỉ có giá trị mặc định / chuỗi trắng.
     expect(r.noiBoMat).toBe(2);
     expect(giuTruongChiApp(cu().slice(0, 2), toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true }).noiBoMat, "mọi dòng có dữ liệu đều khớp").toBe(0);
+  });
+});
+
+// Soát 2026-10-06 (W1): hàng ĐÃ CHI sẽ biến mất khi nạp → máy chủ từ chối CẢ lần Lưu (400 'hang-da-chi', với mọi người)
+// → modal CHẶN ngay. Hai đường mất: "Thay toàn bộ" mà dòng không còn trong file, và xoá cả sheet.
+describe("W1: hàng ĐÃ CHI không được biến mất khi nạp Excel", () => {
+  it("giuTruongChiApp.daChiMat: tên hàng đã chi không ghép được (đã duyệt mà chưa chi thì không tính)", () => {
+    const r = giuTruongChiApp(truoc(), toGridItems(nhap, OPTS).items, { giuGhiChuNoiBo: true });
+    expect(r.daChiMat).toEqual(["Bàn bị khách xoá"]);
+    expect(r.trangThaiMat, "vẫn đếm cả hàng đã duyệt").toBe(2);
+  });
+  it("khoanDaChiTrongSheetXoa (màn soạn): hàng đã chi ở bảng nội bộ của trang sắp xoá; rid còn ở trang giữ lại thì không tính", () => {
+    const sheets = [
+      { items: [], extraTables: [{ category: "hcm", items: [{ rid: "p1", name: "Thuê xe", paid: true }, { rid: "p2", name: "Chưa chi" }] }, { category: "hanoi", items: [{ rid: "h", name: "HN cũ", paid: true }] }] },
+      { items: [], extraTables: [{ category: "khach", items: [{ rid: "p3", name: "Phí ship", paid: true }] }] },
+      { items: [], extraTables: [{ category: "hcm", items: [{ rid: "p3", name: "Phí ship (đã chuyển)", paid: true }] }] },
+    ];
+    expect(khoanDaChiTrongSheetXoa(sheets, [0]), "bản hanoi cũ trong trang không thuộc phía trang").toEqual(["Thuê xe"]);
+    expect(khoanDaChiTrongSheetXoa(sheets, [1]), "rid p3 còn ở trang 3").toEqual([]);
+    expect(khoanDaChiTrongSheetXoa(sheets, [1, 2])).toEqual(["Phí ship", "Phí ship (đã chuyển)"]);
+    expect(khoanDaChiTrongSheetXoa(sheets, [])).toEqual([]);
+  });
+  it("khoanDaChiTrongSheetXoa (màn Account HN): mỗi sheet là một bảng Hà Nội, hàng nằm thẳng ở items", () => {
+    const bang = [{ items: truoc() }, { items: [{ kind: "item", name: "Khác", rid: "x" }] }];
+    expect(khoanDaChiTrongSheetXoa(bang, [0])).toEqual(["Backdrop", "Bàn bị khách xoá"]);
+    expect(khoanDaChiTrongSheetXoa(bang, [1])).toEqual([]);
   });
 });

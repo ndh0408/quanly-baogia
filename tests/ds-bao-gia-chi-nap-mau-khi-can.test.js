@@ -9,7 +9,7 @@
 // nên bài này chạy được cả khi không có Postgres.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ mau: [], bangHn: [], goiMau: 0, goiGhiChu: 0 }));
+const h = vi.hoisted(() => ({ mau: [], bangHn: [], goiMau: 0, goiGhiChu: 0, goiKhoan: 0, khoan: [] }));
 
 vi.mock("../src/db.js", () => ({
   prisma: {
@@ -23,6 +23,9 @@ vi.mock("../src/db.js", () => ({
     // Ghi chú + màu ở dòng danh sách (QuoteListNote, 2026-09-30): CHỈ người đi nhánh đầy đủ của presentQuoteRow
     // đọc nó — hai nhánh lược (account HN / xem nội bộ) không có chỗ cho nó nên không được tốn thêm câu truy vấn.
     quoteListNote: { findMany: async () => { h.goiGhiChu++; return []; } },
+    // Khoản kế toán (trang Hóa đơn đầu vào, 2026-10-06): CHỈ nhánh internalOnly đếm "Đã TT x/y" theo khoản — MỘT câu
+    // `IN` cho cả trang; nhánh account HN không đếm đã chi nên không được tốn câu này.
+    inputInvoiceEntry: { findMany: async () => { h.goiKhoan++; return h.khoan; } },
     // Hai câu SQL thô của listQuotes: bảng nội bộ theo trang (FROM "QuoteSheet") và bảng HN cấp báo giá.
     $queryRaw: async (sql) => (sql.join("").includes('FROM "QuoteSheet"') ? [] : [{ quoteId: 5, tables: h.bangHn }]),
   },
@@ -41,6 +44,8 @@ const trinhBay = (r, perms) => presentQuoteRow(r, { hnOnly: perms.includes("quot
 beforeEach(() => {
   h.goiMau = 0;
   h.goiGhiChu = 0;
+  h.goiKhoan = 0;
+  h.khoan = [];
   h.mau = [];
   h.bangHn = [{ category: "hanoi", templateId: 1, items: [{ kind: "item", quantity: 2, unitPrice: 1_000_000, days: 3 }] }];
 });
@@ -52,6 +57,21 @@ describe("listQuotes — chỉ nạp danh sách mẫu khi nhánh trình bày th�
     expect(h.goiGhiChu, "nạp ghi chú thừa cho view lược — presentQuoteRow không trả nó").toBe(0);
     // Dữ liệu nhánh internalOnly cần vẫn đủ: bảng HN cấp báo giá vẫn được nạp để đếm hàng.
     expect(trinhBay(rows[0], ["quote:internal:view"]).internalRows).toBe(1);
+    expect(h.goiKhoan, "khoản kế toán: MỘT câu cho cả trang").toBe(1);
+  });
+
+  it("chỉ INTERNAL_VIEW → 'Đã TT x/y' đếm theo KHOẢN kế toán (khoản thắng cờ JSON cũ)", async () => {
+    h.bangHn = [{ category: "hanoi", templateId: 1, items: [
+      { kind: "item", rid: "h1", quantity: 1, unitPrice: 5, approved: true },
+      { kind: "item", rid: "h2", quantity: 1, unitPrice: 5, approved: true, paid: true },
+    ] }];
+    h.khoan = [
+      { quoteId: 5, side: "hn", rid: "h1", paid: true, paidAt: new Date("2026-10-05T03:00:00Z"), paidById: 2, currentProofId: null },
+      { quoteId: 5, side: "hn", rid: "h2", paid: false, paidAt: null, paidById: null, currentProofId: null },
+    ];
+    const { rows } = await listQuotes(req(["quote:internal:view"]));
+    const tb = trinhBay(rows[0], ["quote:internal:view"]);
+    expect([tb.internalRows, tb.internalPaidRows], "h1 đã chi theo khoản, h2 kế toán đã bỏ tích").toEqual([2, 1]);
   });
 
   it("HN_FILL + INTERNAL_VIEW → internalOnly thắng → không nạp mẫu", async () => {
@@ -68,6 +88,7 @@ describe("listQuotes — chỉ nạp danh sách mẫu khi nhánh trình bày th�
     const { rows } = await listQuotes(req(perms));
     expect(h.goiMau).toBe(1);
     expect(h.goiGhiChu, "account HN đi nhánh lược — không đọc ghi chú dòng").toBe(0);
+    expect(h.goiKhoan, "nhánh hnOnly không đếm đã chi — không đọc khoản").toBe(0);
     expect(trinhBay(rows[0], perms).hnTotal, "mẫu không ngày mà vẫn nhân 3 ngày").toBe(2_000_000);
   });
 

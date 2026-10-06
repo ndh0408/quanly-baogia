@@ -563,6 +563,10 @@ model Quote {
   members   QuoteMember[] // "account phụ": nhân viên được thêm vào để xem/sửa, có PHẠM VI riêng
   listNote  QuoteListNote? // ghi chú + màu ở dòng của Danh sách báo giá — bảng RIÊNG, xem model bên dưới
 
+  // Dữ liệu KẾ TOÁN của từng hàng bảng nội bộ (đã chi + ảnh chứng từ, ngày HĐ, ghi chú) — bảng RIÊNG,
+  // xem model InputInvoiceEntry. RESTRICT: báo giá còn khoản kế toán thì không xoá cứng được.
+  inputInvoiceEntries InputInvoiceEntry[]
+
   sentAt         DateTime?
   convertedAt    DateTime?
   // ===== DOANH THU THẬT SỰ CHỐT ĐƯỢC =====
@@ -663,6 +667,86 @@ model QuoteListNote {
   color         String?
   updatedByName String?
   updatedAt     DateTime @updatedAt
+}
+
+// KHOẢN CHI của trang Hóa đơn đầu vào (chủ repo 2026-10-06: "cái thanh toán bên đó là cho kế toán, không nằm
+// trong kia nữa") — MỘT hàng cho mỗi hàng bảng nội bộ đã có dữ liệu kế toán: đã chi + ảnh chứng từ (quyền
+// `invoice:input:pay`), Ngày hóa đơn + Ghi chú kế toán (quyền `invoice:edit`).
+//
+// VÌ SAO BẢNG RIÊNG chứ không phải thêm trường vào JSON hàng (`QuoteSheet.extraTables` / `Quote.hnTables`):
+//   · mọi đường Lưu báo giá VIẾT LẠI cả JSON — một đường Lưu nào đó (hoặc bản app cũ sau khi lùi ảnh, vốn
+//     lọc JSON theo danh sách trường được phép) sẽ xoá im dữ liệu kế toán mà nó không biết;
+//   · ghi lên `Quote`/`QuoteSheet` làm nhảy mốc khoá lạc quan (`Quote.updatedAt`) → đá văng người đang soạn —
+//     cùng lý do với QuoteListNote ở trên;
+//   · "Dọn rác" xoá cứng báo giá đã xoá mềm và cascade xuống QuoteSheet — chứng từ đi theo.
+// Bảng riêng + RESTRICT + ảnh chỉ-thêm loại cả ba về CẤU TRÚC.
+//
+// Định vị bằng (báo giá, PHÍA, rid): `side` = "sheet" (Chi phí HCM + Phí khách hàng của MỌI trang — gộp hai
+// loại để thao tác "Chuyển loại" hcm↔khach không làm khoản mồ côi) | "hn" (`Quote.hnTables`). `rid` là mã nội
+// bộ bền của hàng (src/services/quoteService.ts reconcileExtraApprovals). Kiểm ở lớp API, không CHECK (như
+// QuoteListNote.color).
+//
+// Bốn cờ cũ `paid/paidAt/paidById/paidProof` trong JSON hàng ĐÓNG BĂNG (không đường nào đổi được nữa) và vẫn
+// là nguồn dự phòng khi hàng chưa có khoản — luật duy nhất ở src/khoanChi.ts `trangThaiHieuLuc`.
+model InputInvoiceEntry {
+  id             Int       @id @default(autoincrement())
+  quoteId        Int
+  // RESTRICT, KHÔNG cascade: báo giá còn khoản thì "Dọn rác" phải bỏ qua nó (adminService) — FK là lưới thứ hai.
+  quote          Quote     @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  side           String
+  rid            String
+  paid           Boolean   @default(false)
+  paidAt         DateTime? // máy chủ đóng dấu lúc tích — không nhập lùi
+  paidById       Int? // KHÔNG FK: xoá tài khoản không kéo theo chứng từ
+  paidByName     String? // tên CHỤP lúc tích (như QuoteListNote.updatedByName)
+  // Hàng lúc TÍCH { name, unit, quantity, unitPrice, days, amount, category, tableName } — bằng chứng "chi cho
+  // cái gì, bao nhiêu"; trang so với số hiện tại để báo "Số tiền đã đổi sau khi chi". Null với khoản gieo từ
+  // cờ JSON cũ (không biết số lúc trả).
+  paidSnapshot   Json?
+  // Ảnh HIỆN TẠI — trỏ InputInvoiceProof.id, KHÔNG FK (tránh vòng FK hai chiều); dịch vụ giữ toàn vẹn.
+  currentProofId Int?
+  // "Ngày hóa đơn" là NGÀY THUẦN: ghi nửa đêm UTC của đúng ngày đã nhập, đọc bằng toISOString().slice(0, 10).
+  invoiceDate    DateTime? @db.Date
+  accountingNote String? // cùng tên PersonnelRecord.accountingNote — Nhật ký dùng chung nhãn
+  rowSnapshot    Json // hàng ở lần ghi gần nhất — để còn hiện được khi hàng đã rời báo giá
+  // Cờ JSON cũ đúng lúc tạo khoản { paid, paidAt, paidById, hasProof } — công cụ backfillKhoanChi --kiem dùng
+  // để bắt bản app CŨ (khe migrate → recreate, hoặc sau khi lùi ảnh) còn ghi JSON khi khoản đã có.
+  legacySeed     Json?
+  source         String    @default("trang") // "trang" | "json-cu"
+  version        Int       @default(0) // khoá lạc quan của RIÊNG khoản này — mỗi lần ghi + 1
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  updatedById    Int?
+  updatedByName  String?
+
+  proofs InputInvoiceProof[]
+
+  // Tiền tố quoteId phục vụ luôn mọi truy vấn theo báo giá — không cần chỉ mục thứ hai.
+  @@unique([quoteId, side, rid])
+}
+
+// ẢNH CHỨNG TỪ của khoản chi — CHỈ THÊM: mã ứng dụng không UPDATE `dataUrl`, không DELETE. Thay / gỡ ảnh hay
+// bỏ tích chỉ đặt `retiredAt` (ảnh cũ vẫn xem lại được). Nằm ở Postgres chứ chưa ở kho object vì kho object
+// production chưa có bản sao (docs/operations/DISASTER_RECOVERY.md), còn Postgres có dump trước mỗi deploy và
+// hằng đêm; `sha256`/`size`/`mime` đủ để chuyển kho về sau là việc cơ học.
+model InputInvoiceProof {
+  id             Int               @id @default(autoincrement())
+  entryId        Int
+  entry          InputInvoiceEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  dataUrl        String // đã qua regex + giải base64 + soát magic bytes (src/paymentProof.ts)
+  mime           String
+  size           Int // byte sau khi giải base64
+  sha256         String? // null nếu ảnh JSON cũ không giải được
+  source         String            @default("upload") // "upload" | "json-cu"
+  uploadedAt     DateTime          @default(now())
+  uploadedById   Int?
+  uploadedByName String?
+  retiredAt      DateTime?
+  retiredById    Int?
+  retiredByName  String?
+  retiredReason  String? // "thay" | "go-anh" | "bo-danh-dau"
+
+  @@index([entryId])
 }
 
 model QuoteVersion {

@@ -2565,7 +2565,29 @@ button.qn-text:hover {
   font-style: italic;
 }
 
-/* Hóa đơn ĐẦU VÀO — trang xem các hàng bảng nội bộ đã duyệt (dùng chung bộ lọc .inv-* ở trên). */
+/* Hóa đơn ĐẦU VÀO — các hàng bảng nội bộ đã duyệt + cột "Kế toán" (dùng chung bộ lọc .inv-* ở trên).
+   BỐ CỤC 10 CỘT vừa khung nội dung 972px ở 1280×720 (lab scratchpad wf-vua-laptop-hoa-don-vao: bản 13 cột cần 1567px, biến
+   thể C2 cần 939px): loại bảng vào dòng phụ của Hạng mục, Lưu kho vào dòng phụ của Chứng từ, ngày + người duyệt chung cột
+   "Duyệt", cột "Thanh toán" thành cột "Kế toán" DÍNH PHẢI. KHÔNG gắn .inv-table (kéo theo 5 cột khoá 772px). */
+.list-wrap > .list-table.inv-in-table {
+  /* public/style.css (≤920px) biến .list-table thành khối cuộn nowrap — .list-wrap đã cuộn ngang rồi (biến thể C4w).
+     overflow:hidden (bo góc) của .list-table phá position: sticky của cột Kế toán → visible; bo góc dời xuống ô góc. */
+  display: table;
+  overflow: visible;
+  white-space: normal;
+}
+.inv-in-table thead th:first-child {
+  border-top-left-radius: var(--radius);
+}
+.inv-in-table thead th:last-child {
+  border-top-right-radius: var(--radius);
+}
+.inv-in-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--radius);
+}
+.inv-in-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--radius);
+}
 .inv-in-table td {
   vertical-align: top;
 }
@@ -2587,6 +2609,273 @@ button.qn-text:hover {
   background: var(--warn-bg);
   color: var(--text);
   font-size: 13px;
+}
+.inv-in-goi-y {
+  margin: -6px 0 10px;
+  font-size: 13px;
+}
+/* Dòng phụ của Hạng mục: huy hiệu loại bảng + "tên bảng (khác tên mặc định) · chi tiết" — xuống dòng theo CỤM, huy hiệu
+   không làm đứt nửa cụm chữ. */
+.inv-in-hm .inv-in-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+}
+.inv-in-hm .extra-cat-badge {
+  font-size: 11px;
+  padding: 1px 7px;
+}
+.inv-in-duyet .inv-in-sub {
+  white-space: normal;
+}
+.inv-in-ct .inv-in-sub {
+  white-space: nowrap;
+}
+/* Sàn bề rộng cho cột chữ xuống dòng (không teo còn 1–2 từ mỗi dòng) + tầng mật độ laptop 821–1599px (gói c2css(1599)). */
+@media (min-width: 821px) {
+  .inv-in-table .inv-in-kh {
+    min-width: 112px;
+  }
+  .inv-in-table .inv-in-hm {
+    min-width: 136px;
+  }
+  .inv-in-ns {
+    min-width: 104px;
+  }
+}
+@media (min-width: 821px) and (max-width: 1599px) {
+  .inv-in-table th,
+  .inv-in-table td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .inv-in-table td {
+    font-size: 13px;
+  }
+  .inv-in-table th {
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+  .inv-in-table .status {
+    padding: 2px 8px;
+    font-size: 11.5px;
+    gap: 5px;
+  }
+  .inv-in-table td.num .inv-in-sub {
+    white-space: normal;
+  }
+}
+@media (min-width: 821px) and (max-width: 1365px) {
+  .inv-in-table .inv-in-kh {
+    min-width: 100px;
+  }
+  .inv-in-table .inv-in-hm {
+    min-width: 124px;
+  }
+  .inv-in-ns {
+    min-width: 96px;
+  }
+}
+/* CỘT "KẾ TOÁN" DÍNH PHẢI: ô thao tác LUÔN thấy được kể cả khi bảng tràn khung (dưới 1280px, dữ liệu dài, điện thoại cuộn
+   ngang trong .list-wrap). Bề rộng CỐ ĐỊNH (dòng 1 "✓ Đã chi · dd/mm/yyyy 📎" ~133px ở chữ 12px) — ghi chú dài không nới
+   được cột (xem .inv-in-kt-ghichu). Nền + bóng trái theo token sáng / tối: chữ các cột cuộn qua không lộ dưới ô. */
+.inv-in-table .inv-in-kt {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  width: 164px;
+  min-width: 164px;
+  background: var(--surface);
+  box-shadow: -6px 0 6px -4px rgba(20, 30, 50, 0.18);
+}
+.inv-in-table thead th.inv-in-kt {
+  z-index: 3;
+  background: var(--surface-2);
+}
+.inv-in-table tbody tr:hover > td.inv-in-kt {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .inv-in-table .inv-in-kt {
+  box-shadow: -6px 0 6px -4px rgba(0, 0, 0, 0.6);
+}
+@media (min-width: 821px) and (max-width: 1599px) {
+  .inv-in-table .inv-in-kt {
+    width: 150px;
+    min-width: 150px;
+  }
+  /* Dòng 1 "✓ Đã chi · dd/mm/yyyy" (nowrap) + đệm 4px hai bên của nút đẩy ô lên ~156px, bảng tràn ~2px ở 1280×720
+     (đo headless 2026-10-06). Đệm 2px: vừa 150px, vùng bấm vẫn là cả ô. Bộ chọn hai lớp: luật gốc của nút nằm SAU
+     khối này trong tệp, cùng độ đặc hiệu thì luật sau thắng. */
+  .inv-in-table .inv-in-kt-nut,
+  .inv-in-table .inv-in-kt-chu {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+}
+@media (max-width: 820px) {
+  .inv-in-table .inv-in-kt {
+    width: 140px;
+    min-width: 140px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+.inv-in-kt-nut,
+.inv-in-kt-chu {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+}
+/* Cả ô là MỘT nút (chạm ≥ 38px trên điện thoại), không viền tới khi rê chuột — bảng không thành một cột nút bấm dày đặc. */
+.inv-in-kt-nut {
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+.inv-in-kt-nut:hover {
+  border-color: var(--gold-d);
+  background: var(--surface-2);
+}
+.inv-in-kt-nut:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.inv-in-kt-nut > span,
+.inv-in-kt-chu > span {
+  display: block;
+}
+.inv-in-kt-tt {
+  white-space: nowrap;
+}
+.inv-in-kt-thieu,
+.inv-in-kt-canh {
+  color: var(--warn);
+}
+.inv-in-kt-canh {
+  margin-right: 4px;
+  font-weight: 700;
+}
+/* Ghi chú cắt MỘT dòng, đủ chữ ở title. `width: 0; min-width: 100%`: chữ không góp vào bề rộng tự nhiên của cột — ghi chú
+   1000 ký tự nowrap không được kéo cột Kế toán ra hết màn hình. */
+.inv-in-kt-ghichu {
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-soft);
+}
+/* Hộp "Khoản chi" (components/HopKhoanChi.tsx) — khung .modal-sm sẵn có; ≤640px mở TOÀN MÀN (bàn phím ảo + ảnh chứng từ). */
+.inv-in-hop .modal-body {
+  display: grid;
+  gap: 12px;
+}
+.inv-in-hop-dau {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+.inv-in-hop-dau dt {
+  color: var(--text-muted);
+}
+.inv-in-hop-dau dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.inv-in-hop .inv-in-hop-o {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.inv-in-hop .inv-in-hop-tick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.inv-in-hop-nhan {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+.inv-in-hop-lydo,
+.inv-in-hop-meta {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.inv-in-hop-canh {
+  color: var(--warn);
+  font-weight: 600;
+}
+.inv-in-hop-hang {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.inv-in-hop-anh img,
+.inv-in-hop-xem .pay-proof img {
+  max-width: 100%;
+  max-height: 40vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.inv-in-hop-truoc summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.inv-in-hop-truoc ul {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.inv-in-hop textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.inv-in-hop-dem {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+}
+@media (max-width: 820px) {
+  .inv-in-hop .btn {
+    min-height: 38px;
+  }
+}
+@media (max-width: 640.98px) {
+  .modal-backdrop.inv-in-hop-nen {
+    padding: 0;
+  }
+  .modal.inv-in-hop {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+  }
 }
 
 /* Ô bảng theo TRẠNG THÁI — theme-aware (thay #ffdede/#ffe0ee/#ffd6d6/#b91c1c/#0a7d28 inline) */

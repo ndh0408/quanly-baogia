@@ -119,19 +119,58 @@ export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: n
 
 // Hóa đơn ĐẦU VÀO (kế toán): mỗi HÀNG bảng nội bộ ĐÃ DUYỆT là một khoản chi cần hoá đơn đầu vào.
 // Máy chủ dựng bằng src/inputInvoices.ts (HangDauVao) — không bao giờ kèm ảnh ủy nhiệm chi.
-export type InputInvoiceRow = {
+//
+// PHẦN KẾ TOÁN (2026-10-06, src/khoanChi.ts KhoanChiDto): kế toán tích ĐÃ CHI + ảnh chứng từ, ghi Ngày hóa đơn + Ghi chú
+// kế toán ngay trên trang này (bảng riêng InputInvoiceEntry). `paid`/`paidAt` là trạng thái HIỆU LỰC (khoản thắng cờ
+// JSON cũ). `version` là mốc khoá lạc quan của RIÊNG khoản — gửi lại làm `baseVersion` khi ghi.
+export type PhiaKhoanChi = "sheet" | "hn";
+export type TrangThaiHangDauVao = "binh-thuong" | "chua-duyet" | "hn-chua-duyet" | "khong-con-hang" | "bao-gia-da-xoa";
+export type AnhChungTuMeta = {
+  id: number; uploadedAt: string | null; uploadedByName: string | null;
+  retiredAt: string | null; retiredReason: "thay" | "go-anh" | "bo-danh-dau" | string | null; source: string;
+  /** Ảnh HIỆN TẠI của khoản — các ảnh còn lại đã rút vào lịch sử (không bao giờ bị xoá). */
+  hienTai: boolean;
+};
+/** Phần kế toán của một dòng — cùng hình dạng ở GET /input-invoices và phản hồi PUT khoản chi. */
+export type KhoanChiDto = {
+  key: string; quoteId: number; side: PhiaKhoanChi; rid: string;
+  version: number;
+  paid: boolean; paidAt: string | null; paidByName: string | null; hasPaidProof: boolean;
+  proofs: AnhChungTuMeta[];
+  /** Số tiền LÚC TÍCH (null: chưa chi, hoặc khoản gieo từ cờ JSON cũ). */
+  paidAmount: number | null;
+  /** Đã chi mà số tiền hiện tại khác số lúc tích. */
+  tienDoi: boolean;
+  invoiceDate: string | null;          // 'YYYY-MM-DD' — ngày thuần, không múi giờ
+  accountingNote: string | null;
+  keToanCapNhatLuc: string | null; keToanCapNhatBoi: string | null;
+  nguon: "bang" | "json-cu" | "khong";
+};
+export type InputInvoiceRow = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "side"> & {
+  /** `quoteId:side:rid` khi hàng có rid duy nhất; hàng thiếu / trùng rid: khoá theo vị trí và `coTheGhi = false`. */
   key: string;
   quoteId: number; quoteCode: string; title: string; status: string;
   customerCode: string | null; customerName: string | null; companyName: string | null; createdByName: string | null;
   sheetId: number | null; sheetName: string | null; sheetCode: string | null;   // null ở hàng Hà Nội (bảng HN thuộc cả báo giá)
+  side: PhiaKhoanChi;
   category: "hcm" | "khach" | "hanoi"; tableName: string | null;
   rid: string | null; name: string; detail: string | null; unit: string | null;
   quantity: number; unitPrice: number; days: number | null; amount: number;
   ns: string | null; chungTu: "VAT" | "HDNS" | "TM" | null; luuKho: boolean;
   approvedAt: string | null; approvedByName: string | null;
-  paid: boolean; paidAt: string | null;
+  trangThaiHang: TrangThaiHangDauVao;
+  coTheGhi: boolean;
+  lyDoKhoa: string | null;
 };
 export type InputInvoicesResp = { data: InputInvoiceRow[]; meta: { quotes: number; truncated: boolean } };
+/** Thân PUT khoản chi — CHỈ trường đã đổi + `baseVersion`. `paidProof: null` = gỡ ảnh; KHÔNG BAO GIỜ gửi "". */
+export type ThanKhoanChi = {
+  baseVersion: number;
+  paid?: boolean;
+  paidProof?: string | null;
+  invoiceDate?: string | null;
+  accountingNote?: string | null;
+};
 
 // Quản lý dự án (increment 9) — báo giá đã chốt, mỗi sheet 1 dòng theo dõi hoá đơn.
 export type ProjectSheet = {
@@ -604,20 +643,20 @@ export const api = {
   quoteProjects: () => req<{ data: ProjectQuote[] }>("/quotes/projects"),
   // Hóa đơn ĐẦU VÀO — hàng bảng nội bộ đã duyệt (quyền invoice:page).
   inputInvoices: () => req<InputInvoicesResp>("/quotes/input-invoices"),
+  // Khoản chi của một hàng (kế toán): tích ĐÃ CHI + ảnh (invoice:input:pay), Ngày HĐ + ghi chú (invoice:edit).
+  // Định vị bằng (báo giá, phía, rid) — rid do client giữ nguyên văn nên phải encodeURIComponent.
+  ghiKhoanChi: (quoteId: number, side: PhiaKhoanChi, rid: string, body: ThanKhoanChi) =>
+    req<{ row: KhoanChiDto }>(`/quotes/input-invoices/${quoteId}/${side}/${encodeURIComponent(rid)}`, { method: "PUT", body: JSON.stringify(body) }),
+  // Ảnh ủy nhiệm chi theo yêu cầu (invoice:input:pay). `proofId` mở một ảnh cũ đã rút vào lịch sử.
+  anhKhoanChi: (quoteId: number, side: PhiaKhoanChi, rid: string, proofId?: number) =>
+    req<{ paidProof: string | null; proofId: number | null; retiredAt: string | null; nguon: "bang" | "json-cu" }>(
+      `/quotes/input-invoices/${quoteId}/${side}/${encodeURIComponent(rid)}/proof${proofId != null ? `?proofId=${proofId}` : ""}`),
   updateSheetInvoice: (sheetId: number, field: string, val: string | null) =>
     req<unknown>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [field]: val }) }),
   signSheet: (sheetId: number, signed: boolean) =>
     req<unknown>(`/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) }),
-  // Bảng nội bộ — thanh toán 1 HÀNG (tích + ảnh) + lấy ảnh on-demand.
-  markExtraPay: (quoteId: number, sheetId: number, rid: string, paid: boolean, paidProof?: string) =>
-    req<{ ok: boolean; rid: string; paid: boolean; updatedAt?: string }>(`/quotes/${quoteId}/extra/${sheetId}/${rid}/pay`, { method: "POST", body: JSON.stringify(paidProof !== undefined ? { paid, paidProof } : { paid }) }),
-  getExtraProof: (quoteId: number, sheetId: number, rid: string) =>
-    req<{ paidProof: string | null }>(`/quotes/${quoteId}/extra/${sheetId}/${rid}/proof`),
-  // Bảng HÀ NỘI ở cấp BÁO GIÁ (không thuộc trang nào) nên đường định vị không có sheetId.
-  markHnPay: (quoteId: number, rid: string, paid: boolean, paidProof?: string) =>
-    req<{ ok: boolean; rid: string; paid: boolean; updatedAt?: string }>(`/quotes/${quoteId}/hn/${rid}/pay`, { method: "POST", body: JSON.stringify(paidProof !== undefined ? { paid, paidProof } : { paid }) }),
-  getHnProof: (quoteId: number, rid: string) =>
-    req<{ paidProof: string | null }>(`/quotes/${quoteId}/hn/${rid}/proof`),
+  // (markExtraPay / getExtraProof / markHnPay / getHnProof ĐÃ GỠ 2026-10-06 cùng bốn route /pay · /proof theo báo giá:
+  // tích đã chi + ảnh chứng từ nay ở trang Hóa đơn đầu vào — ghiKhoanChi / anhKhoanChi ở trên.)
   // Thông báo (increment 6).
   listNotifications: () => req<{ data: Notif[] }>("/notifications?size=50"),
   markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),

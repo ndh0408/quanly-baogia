@@ -476,12 +476,12 @@ export function sanitizeExtraTables(tables: any, { valid = ["hcm", "khach"], boC
       // rid = id ỔN ĐỊNH cho từng hàng → server khớp được trạng thái DUYỆT khi non-admin lưu
       // (chống tự duyệt qua payload). approved/approvedAt/approvedBy do reconcileExtraApprovals
       // đặt TRƯỚC khi sanitize (chỉ admin được đổi) — ở đây chỉ persist nguyên trạng.
-      rid: (typeof it.rid === "string" && it.rid) ? it.rid : globalThis.crypto.randomUUID(),
+      rid: (typeof it.rid === "string" && it.rid.trim()) ? it.rid.trim() : globalThis.crypto.randomUUID(),
       approved: !!it.approved,
       approvedAt: it.approvedAt || null,
       approvedBy: it.approvedBy != null ? it.approvedBy : null,
-      // THANH TOÁN per-hàng — reconcileExtraPayments đặt TRƯỚC sanitize; persist nguyên trạng (ảnh giữ trong DB,
-      // presentQuote strip khi gửi client). Chỉ route /pay mới đổi paid/ảnh; quote-save không sửa được (chống giả).
+      // Cờ THANH TOÁN cũ (ĐÓNG BĂNG từ 2026-10-06) — reconcileExtraPayments chép lại từ CSDL TRƯỚC sanitize; persist nguyên
+      // trạng. "Đã chi" mới ở bảng InputInvoiceEntry (trang Hóa đơn đầu vào); quote-save không đổi được cờ cũ (chống giả).
       paid: !!it.paid,
       paidAt: it.paidAt || null,
       paidById: it.paidById != null ? it.paidById : null,

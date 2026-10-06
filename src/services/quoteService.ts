@@ -40,7 +40,13 @@ import { httpError } from "../httpError.js";
 import { sheetKhongDoi } from "../quoteSheetDiff.js";
 import { chuanHoaGhiChu, type MauGhiChu } from "../quoteListNote.js";
 import { docBoLoc, locTheoChieu, ghepLoc, orderByTheoCot, sapIdTheoTieuDe, COT_SAP_XEP_CU, type ChieuLoc, type NguCanhLoc } from "../quoteListFilter.js";
-import { hangHoaDonDauVao, type HangDauVao } from "../inputInvoices.js";
+import { hangHoaDonDauVao, hangKhoanBaoGiaDaXoa, type HangDauVao } from "../inputInvoices.js";
+// Hai câu SQL đọc bảng nội bộ ĐÃ CẮT ảnh chứng từ — sống ở src/bangNoiBoSql.ts để dịch vụ kế toán dùng chung mà không
+// import ngược vào tệp này [K4]. Export lại: listProjects / gdprService vẫn gọi qua đây như trước.
+import { bangNoiBoTheoSheet, bangHnTheoBaoGia } from "../bangNoiBoSql.js";
+export { bangNoiBoTheoSheet, bangHnTheoBaoGia };
+import { bangCuaSheets, hangCuaPhia, tapDaChi, hangDaChiBiMat, tachRidTrung, loiHangDaChi, loiCoMa, chuanHoaRidTrung, hangVetThieuRid, loiVetThieuRid, sapTheoThuTu } from "../khoanChi.js";
+import { docKhoanChiTrongTx, docKhoanChiTheoBaoGia, docAnhTheoKhoan, phuKeToanDanhSach, khoanDaChiCuaBaoGia } from "./inputInvoiceService.js";
 
 /**
  * Caller có VIEW BỊ LƯỢC — `GET /quotes/:id` chỉ trả cho họ một phần báo giá:
@@ -94,7 +100,8 @@ export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], is
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
       if (!t || (t.category !== "hcm" && t.category !== "khach")) continue;
       for (const it of (t.items || [])) {
-        if (it && it.rid) prior.set(it.rid, { approved: !!it.approved, approvedAt: it.approvedAt || null, approvedBy: it.approvedBy ?? null, tien: soTienHang(it) });
+        // BẢN ĐẦU thắng (rid trùng có sẵn đã được chuanHoaRidTrung tách ở đường Lưu; đây là lưới thứ hai).
+        if (it && it.rid && !prior.has(it.rid)) prior.set(it.rid, { approved: !!it.approved, approvedAt: it.approvedAt || null, approvedBy: it.approvedBy ?? null, tien: soTienHang(it) });
       }
     }
   }
@@ -150,10 +157,17 @@ export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], is
   }
 }
 
-// THANH TOÁN theo HÀNG bảng nội bộ (mọi loại): CHỈ người có quote:internal:pay được đặt `paid`. Gọi TRƯỚC
-// khi lưu để: không-quyền → GIỮ trạng thái thanh toán cũ theo `rid` (chống tự đánh dấu qua payload);
-// có-quyền → honor + đóng dấu paidAt/paidById. ẢNH (paidProof) LUÔN theo DB ở đây — chỉ route /pay ghi ảnh.
-export function reconcileExtraPayments(sheets: any[], existingSheets: any[], canPay: boolean, payerId: number) {
+// THANH TOÁN theo HÀNG bảng nội bộ (mọi loại) — từ 2026-10-06 KHÔNG còn ai đặt được qua đường Lưu.
+//
+// Việc "đã chi" + ảnh chứng từ chuyển sang kế toán ở trang Hóa đơn đầu vào, vào bảng RIÊNG InputInvoiceEntry
+// (src/services/inputInvoiceService.ts). Bốn cờ cũ `paid/paidAt/paidById/paidProof` còn nằm trong JSON hàng thì ĐÓNG
+// BĂNG (KT-2): hàm này LUÔN chép lại chúng theo `rid` từ bản CSDL cho MỌI người, hàng mới luôn chưa chi — payload
+// không đổi được chúng (zod cũng đã cắt, xem itemSchema ở src/validators.ts; đây là lớp thứ hai). Gọi TRƯỚC khi lưu.
+//
+// `opts.daChi` = tập rid ĐANG hiệu lực đã chi (khoản thắng cờ JSON — src/khoanChi.ts trangThaiHieuLuc), dùng cho chốt
+// SỐ TIỀN bên dưới; vắng thì lùi về cờ JSON của bản CSDL. `opts.mienChotTien` = người có quyền tích (invoice:input:pay)
+// — họ đổi được số tiền của hàng đã chi, trang kế toán sẽ báo "Số tiền đã đổi sau khi chi".
+export function reconcileExtraPayments(sheets: any[], existingSheets: any[], opts: { daChi?: Set<string>; mienChotTien?: boolean } = {}) {
   if (!Array.isArray(sheets)) return;
   // rid -> trạng thái thanh toán CỘNG số tiền tại thời điểm đó.
   //
@@ -168,10 +182,10 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
   //     giả mạo chứng từ tài chính, làm được bởi đúng lớp tài khoản mà lớp gác này sinh ra để chặn
   //     (account_hn đọc được rid trong payload trả về của chính họ).
   //
-  // Bất biến đóng lỗ đó: AI KHÔNG ĐƯỢC ĐẶT `paid` THÌ CŨNG KHÔNG ĐƯỢC ĐỔI SỐ TIỀN CỦA HÀNG ĐÃ TRẢ.
+  // Bất biến đóng lỗ đó: AI KHÔNG ĐƯỢC TÍCH "ĐÃ CHI" THÌ CŨNG KHÔNG ĐƯỢC ĐỔI SỐ TIỀN CỦA HÀNG ĐÃ CHI.
   // Hàng nào lấy trạng thái đã-trả mà số tiền lệch so với bản CSDL thì KHÔNG kế thừa gì — nó không
-  // còn là hàng đó nữa. Người có quyền `quote:internal:pay` không bị ràng buộc này (họ vốn đặt được
-  // `paid` trực tiếp), nên luồng kế toán bình thường không đổi.
+  // còn là hàng đó nữa. Người có quyền tích (`invoice:input:pay`, trước là `quote:internal:pay`) không bị
+  // ràng buộc này (`opts.mienChotTien`) — trang kế toán báo "Số tiền đã đổi sau khi chi" cho họ đối chiếu.
   //
   // Cộng thêm: mỗi rid chỉ được kế thừa MỘT lần. Gửi hai hàng cùng rid thì hàng thứ hai trở đi là
   // bản sao, không phải hàng gốc.
@@ -194,12 +208,12 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
   for (const s of (existingSheets || [])) {
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
       for (const it of (t?.items || [])) {
-        if (it && it.rid) prior.set(it.rid, { paid: !!it.paid, paidAt: it.paidAt || null, paidById: it.paidById ?? null, paidProof: it.paidProof ?? null, tien: soTien(it) });
+        // BẢN ĐẦU thắng — cùng luật với khoản kế toán (khoá theo bản đầu) và công cụ chuyển dữ liệu (src/khoanChi.ts).
+        if (it && it.rid && !prior.has(it.rid)) prior.set(it.rid, { paid: !!it.paid, paidAt: it.paidAt || null, paidById: it.paidById ?? null, paidProof: it.paidProof ?? null, tien: soTien(it) });
       }
     }
   }
   const daDung = new Set<string>();
-  const now = new Date().toISOString();
   for (const s of sheets) {
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
       for (const it of (t?.items || [])) {
@@ -209,7 +223,7 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
           if (daDung.has(it.rid)) p = null;                                   // bản sao của cùng một rid
           else {
             daDung.add(it.rid);
-            // Đổi số tiền của hàng ĐÃ TRẢ mà không có quyền đặt `paid` → TỪ CHỐI CẢ LẦN LƯU.
+            // Đổi số tiền của hàng ĐÃ CHI (hiệu lực) mà không có quyền tích → TỪ CHỐI CẢ LẦN LƯU.
             // `p.tien === null` = bản CSDL không ghi số tiền → không có gì để so, cho đi qua.
             //
             // ── VÌ SAO TỪ CHỐI, KHÔNG PHẢI "CẮT KẾ THỪA" ──────────────────────────────
@@ -228,31 +242,29 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
             // lần ghi bị chặn). Người dùng có đường thoát rõ ràng — nhờ kế toán bỏ đánh dấu trước.
             //
             // Điều kiện `p.tien !== null` giữ nguyên có chủ ý: hàng ghi từ trước khi
-            // `sanitizeExtraTables` chuẩn hoá (hoặc ghi qua route /pay) không có
+            // `sanitizeExtraTables` chuẩn hoá (hoặc ghi qua route /pay cũ) không có
             // `quantity`/`unitPrice` trong JSON, và chặn chúng sẽ khoá người dùng khỏi chính dữ
             // liệu hợp lệ của họ. Thiếu dữ liệu thì MỞ, có dữ liệu thì SIẾT.
-            if (!canPay && p.paid && p.tien !== null && p.tien !== soTien(it)) {
+            //
+            // "Đã chi" là trạng thái HIỆU LỰC (`opts.daChi`): kế toán đã BỎ tích thì cờ JSON cũ `paid:true` không
+            // còn khoá số tiền; khoản đã tích mà JSON chưa có cờ thì vẫn khoá.
+            const daChi = opts.daChi ? opts.daChi.has(it.rid) : p.paid;
+            if (!opts.mienChotTien && daChi && p.tien !== null && p.tien !== soTien(it)) {
               throw httpError(
                 400,
-                `Không sửa được số tiền của hàng đã thanh toán: "${String(it.name || "").slice(0, 80) || "(không tên)"}". ` +
-                  `Hàng này đã được đánh dấu ĐÃ TRẢ nên số lượng / đơn giá / số ngày phải giữ nguyên. ` +
-                  `Cần đổi thì nhờ người phụ trách thanh toán bỏ đánh dấu trước, rồi sửa và đánh dấu lại.`
+                `Không sửa được số tiền của hàng đã chi: "${String(it.name || "").slice(0, 80) || "(không tên)"}". ` +
+                  `Hàng này đã được kế toán đánh dấu ĐÃ CHI nên số lượng / đơn giá / số ngày phải giữ nguyên. ` +
+                  `Cần đổi thì nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước, rồi sửa.`
               );
             }
           }
         }
-        it.paidProof = p ? p.paidProof : null;  // ảnh không đi qua quote-save (chống base64 chảy + giả mạo)
-        if (!canPay) {
-          it.paid = p ? p.paid : false;
-          it.paidAt = p ? p.paidAt : null;
-          it.paidById = p ? p.paidById : null;
-        } else {
-          const want = !!it.paid;
-          if (want && (!p || !p.paid)) { it.paidAt = now; it.paidById = payerId; }
-          else if (want) { it.paidAt = p.paidAt || now; it.paidById = p.paidById ?? payerId; }
-          else { it.paidAt = null; it.paidById = null; }
-          it.paid = want;
-        }
+        // ĐÓNG BĂNG (KT-2): cả bốn cờ theo bản CSDL, cho MỌI người; hàng mới / bản sao = chưa chi. Ảnh không bao giờ
+        // đi qua đường Lưu (chống base64 chảy qua payload + giả mạo chứng từ).
+        it.paidProof = p ? p.paidProof : null;
+        it.paid = p ? p.paid : false;
+        it.paidAt = p ? p.paidAt : null;
+        it.paidById = p ? p.paidById : null;
       }
     }
   }
@@ -295,9 +307,22 @@ export async function createQuote(req: Request) {
   if (!(await templatesBelongToCompany(b.sheets, company.id))) {
     throw httpError(400, "Có mẫu báo giá không thuộc công ty đã chọn (hoặc đã ngừng dùng)");
   }
+  // rid TRÙNG trong một phía → hàng sau nhận rid mới (KT-6): khoản kế toán khoá theo rid, không được trỏ vào hai hàng.
+  tachRidTrung("sheet", bangCuaSheets(b.sheets));
   // Duyệt hàng (HCM/Khách) — tạo mới: ai KHÔNG có quyền duyệt nội bộ thì mọi hàng CHƯA duyệt; có quyền tick thì đóng dấu.
   reconcileExtraApprovals(b.sheets, [], can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
-  reconcileExtraPayments(b.sheets, [], can(req.session, P.QUOTE_INTERNAL_PAY), userId);
+  // Đã chi: báo giá mới chưa có gì để kế thừa → mọi hàng chưa chi (cờ thanh toán không đi qua đường Lưu nữa).
+  reconcileExtraPayments(b.sheets, [], {});
+  // Phần Hà Nội gõ ngay lúc tạo: cùng hai chốt như đường Lưu (trước đây cờ duyệt / đã trả giả trong payload được ghi
+  // nguyên trạng — `sanitizeHnTables` chỉ chuẩn hoá hình dạng, không phán quyền).
+  let hnTaoMoi: any[] | undefined;
+  if (b.hnTables !== undefined) {
+    tachRidTrung("hn", b.hnTables);
+    const bocHn = [{ extraTables: b.hnTables }];
+    reconcileExtraPayments(bocHn, [], {});
+    reconcileHnApprovals(bocHn, [], can(req.session, P.QUOTE_INTERNAL_APPROVE));
+    hnTaoMoi = sanitizeHnTables(bocHn[0].extraTables);
+  }
 
   // Client-supplied number: validate uniqueness across ALL rows (incl. soft-deleted)
   // BEFORE the write to return a clean 409.
@@ -411,9 +436,8 @@ export async function createQuote(req: Request) {
             // này trả lại nó. Mã thật được ghi ở lượt `update` bên dưới.
             ...draft, projectCode: null,
             quoteNumber: soTam, searchText: "", sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0),
-            // Phần Hà Nội gõ ngay lúc tạo. Cờ duyệt/thanh toán chưa thể có ở báo giá mới nên không
-            // cần reconcile — `sanitizeHnTables` đã loại mọi thứ ngoài hình dạng hợp lệ.
-            ...(b.hnTables !== undefined ? { hnTables: sanitizeHnTables(b.hnTables) } : {}),
+            // Phần Hà Nội gõ ngay lúc tạo — đã qua hai chốt cờ duyệt / đã chi ở đầu hàm (`hnTaoMoi`).
+            ...(hnTaoMoi !== undefined ? { hnTables: hnTaoMoi } : {}),
             sheets: { create: sheetsTaoMoi },
             members: { create: { userId, scopes: [...QUOTE_SCOPES], addedById: userId } },
           } as any,
@@ -584,7 +608,7 @@ export function reconcileHnApprovals(list: any[], listDb: any[], canApprove: boo
   for (const s of listDb || []) {
     for (const t of Array.isArray(s.extraTables) ? s.extraTables : []) {
       for (const it of t?.items || []) {
-        if (it && it.rid) prior.set(it.rid, { approved: !!it.approved, approvedAt: it.approvedAt || null, approvedBy: it.approvedBy ?? null });
+        if (it && it.rid && !prior.has(it.rid)) prior.set(it.rid, { approved: !!it.approved, approvedAt: it.approvedAt || null, approvedBy: it.approvedBy ?? null });
       }
     }
   }
@@ -659,6 +683,38 @@ export function reconcilePhamViTables(sheets: any[], carry: (Record<string, any>
 }
 
 /**
+ * RID của hàng mà account phụ KHÔNG được đụng chỉ thuộc về hàng đó (KT-6 + phạm vi account phụ).
+ *
+ * Account phụ đọc được rid của MỌI bảng (presentQuote trả đủ), nên chép được rid của một hàng ngoài phạm vi của họ —
+ * bảng loại không được giao, hay trang mà payload không nhắc tới — sang bảng của mình. Để nguyên cho `tachRidTrung` thì
+ * luật "hàng ĐẦU giữ rid" quyết theo VỊ TRÍ: hàng chép đặt ở trang đứng trước là hàng GỐC mất rid → khoản kế toán
+ * (khoá theo rid) dính sang hàng chép, hàng gốc thành "chưa chi" và kế toán chi lần hai. Ở đường có vùng "main" còn tệ
+ * hơn: bảng ngoài phạm vi được `reconcilePhamViTables` lấy lại từ CSDL SAU khi tách, nên hai hàng trùng rid xuống đĩa —
+ * và hàng chép đã kịp ăn theo dấu DUYỆT của hàng gốc (reconcileExtraApprovals kế thừa theo rid; duyệt là việc chỉ người
+ * có quote:internal:approve được làm). ĐO ĐƯỢC ở tests/hddv-luu-khong-mat-khoan-chi.test.js.
+ *
+ * Nên: hàng của payload (`bangPayload`) mang rid CHỈ có ở phần CSDL giữ nguyên (`bangGiu`) nhận rid MỚI — gọi TRƯỚC
+ * tachRidTrung và hai lần reconcile. Rid có cả ở phần được sửa (`bangSua`: dữ liệu cũ đã trùng sẵn) thì để luật hàng-đầu
+ * lo như trước: không cắt cờ của một hàng hợp lệ đang được round-trip. Mutate tại chỗ; trả số hàng đã đổi rid.
+ */
+function catRidMuonNgoaiPhamVi(bangPayload: unknown[], bangGiu: unknown[], bangSua: unknown[]): number {
+  const ridCua = (tables: unknown[]) => {
+    const s = new Set<string>();
+    for (const { it } of hangCuaPhia("sheet", tables)) if (typeof it.rid === "string" && it.rid.trim()) s.add(it.rid.trim());
+    return s;
+  };
+  const giu = ridCua(bangGiu);
+  if (!giu.size) return 0;
+  const sua = ridCua(bangSua);
+  let n = 0;
+  for (const { it } of hangCuaPhia("sheet", bangPayload)) {
+    const rid = typeof it.rid === "string" ? it.rid.trim() : "";
+    if (rid && giu.has(rid) && !sua.has(rid)) { it.rid = randomUUID(); n++; }
+  }
+  return n;
+}
+
+/**
  * Account phụ KHÔNG có vùng "main": ghi ĐÚNG những bảng nội bộ được giao, không đụng sheet.
  *
  * Đi theo khuôn `saveHn` (src/hnWorkflow.ts) chứ KHÔNG theo đường xoá-sheet-tạo-lại của
@@ -671,7 +727,11 @@ export function reconcilePhamViTables(sheets: any[], carry: (Record<string, any>
  */
 async function ghiVungNoiBoDuocGiao(tx: TxClient, id: number, ptSheets: any[], choPhep: Set<string>, req: Request) {
   await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
-  const sheetsDb: any[] = await tx.quoteSheet.findMany({ where: { quoteId: id }, orderBy: { id: "asc" }, select: { id: true, extraTables: true } });
+  const sheetsDb: any[] = await tx.quoteSheet.findMany({ where: { quoteId: id }, orderBy: { id: "asc" }, select: { id: true, order: true, extraTables: true } });
+  // KT-5: khoá Quote (SAU QuoteSheet — đúng thứ tự mọi đường ghi) RỒI mới đọc khoản kế toán. Kế toán ghi khoản dưới
+  // Quote FOR SHARE, nên từ đây tới lúc commit không ai tích chen vào được — chốt "hàng đã chi" bên dưới đọc bản tươi.
+  await tx.$queryRaw`SELECT id FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
+  const khoan = await docKhoanChiTrongTx(tx, id);
   // Sheet ĐÃ CHẾT (chủ báo giá vừa bấm Lưu → id đổi hết) → 409, tuyệt đối không im lặng trả 200.
   // Cùng suy đoán theo dấu vết như saveHn: id NHỎ HƠN mọi sheet hiện có = dấu vết xoá-tạo-lại.
   const idNhoNhat = sheetsDb.length ? Math.min(...sheetsDb.map((s) => s.id)) : 0;
@@ -682,20 +742,43 @@ async function ghiVungNoiBoDuocGiao(tx: TxClient, id: number, ptSheets: any[], c
   });
   if (coSheetChet) throw httpError(409, "Chủ báo giá vừa lưu lại nên các trang đã được tạo mới. Hãy tải lại trang rồi nhập lại phần của bạn (đừng đóng tab trước khi chép phần vừa gõ).");
 
+  // Ba phần cho chốt rid ngay dưới: CSDL GIỮ NGUYÊN (bảng ngoài phạm vi + trang payload không nhắc tới), CSDL ĐƯỢC SỬA
+  // (bảng trong phạm vi của trang có trong payload — payload thay hẳn chúng) và bảng MỚI của payload.
+  const bangGiu: any[] = [];
+  const bangSua: any[] = [];
+  const bangMoi: any[] = [];
   const toWrite = sheetsDb.map((sdb) => {
     const ps = (ptSheets || []).find((x: any) => Number(x?.id) === sdb.id);
     const dbAll = Array.isArray(sdb.extraTables) ? sdb.extraTables : [];
     // Payload KHÔNG nhắc tới trang này → giữ nguyên. (Chủ vừa thêm trang mới, hoặc client cũ.)
-    if (!ps) return { extraTables: dbAll };
+    if (!ps) { bangGiu.push(...dbAll); return { extraTables: dbAll }; }
     const giuNguyen = dbAll.filter((t: any) => t && !choPhep.has(t.category));
     const moi = sanitizeExtraTables((Array.isArray(ps.extraTables) ? ps.extraTables : []).filter((t: any) => t && choPhep.has(t.category))) || [];
+    bangGiu.push(...giuNguyen);
+    bangSua.push(...dbAll.filter((t: any) => t && choPhep.has(t.category)));
+    bangMoi.push(...moi);
     return { extraTables: [...giuNguyen, ...moi] };
   });
 
-  // Cờ duyệt / đã-thanh-toán / ảnh chứng từ vẫn theo CSDL trừ khi có quyền tương ứng — đúng bộ
-  // chốt mà đường lưu thường đang chạy, chỉ khác là chạy trên bản đã lọc theo phạm vi.
+  // rid TRÙNG CÓ SẴN trong CSDL (dữ liệu cũ): bản đầu theo thứ tự HIỂN THỊ giữ rid (chủ khoản kế toán), các bản sau nhận
+  // rid mới — bảng giữ nguyên dùng chung đối tượng nên đổi luôn ở bản ghi xuống, cờ đi theo nguyên vẹn; hàng payload ghép
+  // theo thứ tự với bản CSDL nó thay thế (src/khoanChi.ts chuanHoaRidTrung). Hàng đã trả (cũ) thiếu rid → từ chối.
+  const dbTheoThuTu = sapTheoThuTu(sheetsDb);
+  chuanHoaRidTrung("sheet", bangCuaSheets(dbTheoThuTu), bangCuaSheets(toWrite));
+  const thieuMa = hangVetThieuRid("sheet", bangCuaSheets(dbTheoThuTu));
+  if (thieuMa.length) throw loiVetThieuRid(thieuMa);
+  // rid trùng (KT-6): hàng payload mượn rid của phần CSDL giữ nguyên → rid mới, KỂ CẢ khi nó đứng ở trang TRƯỚC hàng gốc
+  // (thứ tự duyệt theo id trang — "bảng giữ nguyên đứng trước" chỉ đúng trong MỘT trang). Trùng còn lại: hàng đầu giữ.
+  catRidMuonNgoaiPhamVi(bangMoi, bangGiu, bangSua);
+  tachRidTrung("sheet", bangCuaSheets(toWrite));
+  // Cờ duyệt theo CSDL trừ khi có quyền duyệt; cờ đã-chi / ảnh chứng từ LUÔN theo CSDL (đóng băng) — đúng bộ chốt mà
+  // đường lưu thường đang chạy, chỉ khác là chạy trên bản đã lọc theo phạm vi.
+  const daChi = tapDaChi("sheet", bangCuaSheets(sheetsDb), khoan);
   reconcileExtraApprovals(toWrite, sheetsDb, can(req.session, P.QUOTE_INTERNAL_APPROVE), req.session.userId!);
-  reconcileExtraPayments(toWrite, sheetsDb, can(req.session, P.QUOTE_INTERNAL_PAY), req.session.userId!);
+  reconcileExtraPayments(toWrite, sheetsDb, { daChi, mienChotTien: can(req.session, P.INVOICE_INPUT_PAY) });
+  // KT-4: hàng ĐÃ CHI không được biến mất qua đường Lưu.
+  const mat = hangDaChiBiMat("sheet", bangCuaSheets(sheetsDb), bangCuaSheets(toWrite), daChi);
+  if (mat.length) throw loiHangDaChi(mat);
 
   for (let i = 0; i < sheetsDb.length; i++) {
     await tx.quoteSheet.update({ where: { id: sheetsDb[i].id }, data: { extraTables: toWrite[i].extraTables as any } });
@@ -735,7 +818,8 @@ export async function updateQuote(req: Request) {
   if (b.hnTables !== undefined && !phamVi.includes("hanoi")) delete (b as any).hnTables;
   // Account PHỤ có quote:hn:manage (mọi manager đều có) KHÔNG được sửa thẳng giá HN đã duyệt
   // (RBAC-07): reviewHn đã cấm phụ duyệt/trả phần HN, mà sửa thẳng số đã chốt còn nặng hơn.
-  chotHnTables(b, existing, can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing));
+  // (chotHnTables chạy TRONG transaction, trên bản Quote đã khoá — xem `hnTablesDeGhi` bên dưới.)
+  const quanLyHn = can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing);
   let vungNoiBo: any[] | null = null;
   if (!duPhamVi && !phamVi.includes("main")) {
     // Không được giao "Báo giá chính": mọi field danh tính/khách/đầu trang bị GỠ khỏi payload —
@@ -764,7 +848,7 @@ export async function updateQuote(req: Request) {
   // lặng — UPDATE không hề kèm điều kiện mốc. `UPDATE … WHERE updatedAt = <mốc>` vừa KIỂM vừa KHOÁ
   // hàng Quote: bên đến sau phải xếp hàng, tới lượt thì mốc đã đổi → 0 dòng → 409.
   // ĐẶT SAU khi đã lấy khoá QuoteSheet (không phải đầu transaction) là CỐ Ý: giữ đúng thứ tự lấy
-  // khoá QuoteSheet → Quote như các đường ghi khác (markExtraTableRowPayment, saveHn) để không đẻ
+  // khoá QuoteSheet → Quote như các đường ghi khác (ghiVungNoiBoDuocGiao, saveHn) để không đẻ
   // ra deadlock. Rollback dọn hết phần đã làm trước đó nên không để lại dấu vết.
   //
   // Dùng `$executeRaw` chứ KHÔNG dùng `tx.quote.updateMany`: extension realtime ở src/db.ts coi
@@ -801,17 +885,33 @@ export async function updateQuote(req: Request) {
   // `b.discount` (mức báo giá) CỐ Ý bị bỏ qua: giảm giá nay ở mức SHEET và `Quote.discount` được
   // computeQuoteTotals suy ra = Σ các sheet. Nhận số client gửi ở đây là mở đường ghi đè nó.
   if (b.showTotals !== undefined) data.showTotals = b.showTotals;
-  // Bảng Hà Nội: chuẩn hoá rồi ghi thẳng cột của Quote. Cờ duyệt + cờ đã-thanh-toán + ảnh chứng từ
-  // do SERVER sở hữu nên phải lấy lại từ CSDL trước khi ghi — `sanitizeHnTables` chỉ chuẩn hoá hình
-  // dạng, nó persist nguyên trạng mọi cờ client gửi lên. Dùng ĐÚNG hai hàm mà saveHn dùng, để hai
-  // đường ghi (chủ báo giá ở đây, account Hà Nội ở PUT /:id/hn) không trôi khỏi nhau.
-  if (b.hnTables !== undefined) {
+  // Bảng Hà Nội: chuẩn hoá rồi ghi thẳng cột của Quote. Cờ duyệt + cờ đã-chi + ảnh chứng từ do SERVER sở hữu nên
+  // phải lấy lại từ CSDL trước khi ghi — `sanitizeHnTables` chỉ chuẩn hoá hình dạng, nó persist nguyên trạng mọi cờ
+  // client gửi lên. Dùng ĐÚNG hai hàm mà saveHn dùng, để hai đường ghi (chủ báo giá ở đây, account Hà Nội ở
+  // PUT /:id/hn) không trôi khỏi nhau.
+  //
+  // CHẠY TRONG TRANSACTION, trên bản Quote ĐÃ KHOÁ (KT-5): bản trước reconcile trên `existing` đọc NGOÀI transaction,
+  // nên một lần ghi HN chen giữa (account HN lưu, kế toán tích) bị lần Lưu này đè bằng cờ cũ. Và chốt "hàng đã chi
+  // không được biến mất" (KT-4) phải đọc khoản kế toán SAU khi khoá Quote — kế toán ghi dưới Quote FOR SHARE.
+  const hnTablesDeGhi = (qTuoi: { hnStatus: string | null; hnTables: unknown }, khoan: Awaited<ReturnType<typeof docKhoanChiTrongTx>>) => {
+    if (b.hnTables === undefined) return;
+    chotHnTables(b, qTuoi, quanLyHn);                // HN đã chốt: giống CSDL → bỏ qua; khác → 409
+    if (b.hnTables === undefined) return;
+    const hnDb = Array.isArray(qTuoi.hnTables) ? qTuoi.hnTables : [];
+    // rid trùng CÓ SẴN trong CSDL → ghép theo thứ tự trước reconcile; hàng đã trả (cũ) thiếu rid → từ chối (khoanChi.ts).
+    chuanHoaRidTrung("hn", hnDb, b.hnTables);
+    const thieuMa = hangVetThieuRid("hn", hnDb);
+    if (thieuMa.length) throw loiVetThieuRid(thieuMa);
+    tachRidTrung("hn", b.hnTables);
+    const daChi = tapDaChi("hn", hnDb, khoan);
     const bocHn = [{ extraTables: b.hnTables }];
-    const bocHnDb = [{ extraTables: Array.isArray(existing.hnTables) ? existing.hnTables : [] }];
-    reconcileExtraPayments(bocHn, bocHnDb, can(req.session, P.QUOTE_INTERNAL_PAY), userId);
+    const bocHnDb = [{ extraTables: hnDb }];
+    reconcileExtraPayments(bocHn, bocHnDb, { daChi, mienChotTien: can(req.session, P.INVOICE_INPUT_PAY) });
     reconcileHnApprovals(bocHn, bocHnDb, can(req.session, P.QUOTE_INTERNAL_APPROVE));
+    const mat = hangDaChiBiMat("hn", hnDb, bocHn[0].extraTables, daChi);
+    if (mat.length) throw loiHangDaChi(mat);
     data.hnTables = sanitizeHnTables(bocHn[0].extraTables);
-  }
+  };
   if (b.companyId !== undefined) data.companyId = b.companyId;
   let dongBoSo: { so: string; prefix: string } | null = null;
   if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
@@ -891,6 +991,11 @@ export async function updateQuote(req: Request) {
       // lý (không xác định), nên thiếu câu này thì nó và saveHn có thể lấy khoá ngược chiều nhau
       // trên cùng báo giá → deadlock 40P01 → Prisma P2034.
       await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
+      // KT-5: khoá Quote NGAY SAU QuoteSheet (thứ tự mọi đường ghi vẫn là QuoteSheet → Quote) rồi mới đọc khoản kế
+      // toán. Kế toán ghi khoản dưới Quote FOR SHARE — từ đây tới lúc commit không ai tích chen vào được, nên chốt
+      // "hàng đã chi không được biến mất" bên dưới thấy bản TƯƠI. Đọc kèm bảng Hà Nội TƯƠI cho `hnTablesDeGhi`.
+      const [qKhoa] = await tx.$queryRaw<{ hnStatus: string | null; hnTables: unknown }[]>`SELECT "hnStatus", "hnTables" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
+      const khoan = await docKhoanChiTrongTx(tx, id);
       // VAT TƯƠI (MONEY-06): `vatPct` lấy từ `existing` đọc NGOÀI transaction. Một lần đổi RIÊNG VAT
       // chen giữa sẽ bị lần Lưu này ghi đè tổng bằng VAT cũ (Quote.vatPercent = 10 mà total tính 8%).
       // Mọi đường ghi đều khoá QuoteSheet trước, nên đọc SAU khoá là thấy VAT đã commit của lượt kia.
@@ -913,9 +1018,29 @@ export async function updateQuote(req: Request) {
         ...(config.INCREMENTAL_QUOTE_SAVE ? { include: { items: { orderBy: { order: "asc" } } } } : {}),
       });
 
+      // rid TRÙNG CÓ SẴN trong CSDL (dữ liệu cũ): ghép từng bản với bản tương ứng của payload theo thứ tự HIỂN THỊ, TRƯỚC
+      // mọi reconcile — bản đầu (chủ khoản kế toán) giữ rid, các bản sau nhận rid mới ở CẢ hai phía nên mỗi hàng kế thừa
+      // đúng cờ của chính nó (src/khoanChi.ts chuanHoaRidTrung). Bảng ngoài phạm vi được reconcilePhamViTables lấy lại từ
+      // chính các đối tượng CSDL này nên mang rid đã tách. Hàng đã trả (cũ) thiếu rid → từ chối (lần Lưu sẽ xoá im cờ).
+      chuanHoaRidTrung("sheet", bangCuaSheets(sapTheoThuTu(sheetsTuoi)), bangCuaSheets(b.sheets));
+      const thieuMa = hangVetThieuRid("sheet", bangCuaSheets(sheetsTuoi));
+      if (thieuMa.length) throw loiVetThieuRid(thieuMa);
+      // Account phụ thiếu vài bảng nội bộ: bảng ngoài phạm vi sẽ được LẤY LẠI từ CSDL (reconcilePhamViTables, bên dưới) →
+      // hàng trong phạm vi của họ không được mượn rid của những bảng đó (xem catRidMuonNgoaiPhamVi). Chủ / quote:update:all
+      // (đủ phạm vi) không qua bước này.
+      if (!duPhamVi) {
+        const ngoai = (t: any) => t && (t.category === "hcm" || t.category === "khach") && !catChoPhep.has(t.category);
+        const trong = (t: any) => t && catChoPhep.has(t.category);
+        const bangDb = bangCuaSheets(sheetsTuoi);
+        catRidMuonNgoaiPhamVi(bangCuaSheets(b.sheets).filter(trong), bangDb.filter(ngoai), bangDb.filter(trong));
+      }
+      // rid trùng trong phía "sheet" (KT-6) → hàng sau nhận rid mới, TRƯỚC hai lần reconcile (khớp luật "kế thừa một lần").
+      tachRidTrung("sheet", bangCuaSheets(b.sheets));
       // CHỈ người có quyền DUYỆT NỘI BỘ được đổi trạng thái duyệt hàng (HCM/Khách); còn lại giữ nguyên theo DB.
       reconcileExtraApprovals(b.sheets, sheetsTuoi, can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
-      reconcileExtraPayments(b.sheets, sheetsTuoi, can(req.session, P.QUOTE_INTERNAL_PAY), userId);
+      // Cờ đã-chi + ảnh cũ: đóng băng theo DB cho MỌI người; chốt số tiền theo trạng thái HIỆU LỰC (khoản thắng JSON).
+      const daChiSheet = tapDaChi("sheet", bangCuaSheets(sheetsTuoi), khoan);
+      reconcileExtraPayments(b.sheets, sheetsTuoi, { daChi: daChiSheet, mienChotTien: can(req.session, P.INVOICE_INPUT_PAY) });
       // Lưu = XOÁ sheet rồi TẠO LẠI → phải BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet,
       // chữ ký, số hoá đơn/thanh toán…), nếu không mỗi lần bấm Lưu là mất sạch.
       const carry = carrySheetState(b.sheets, sheetsTuoi);
@@ -949,6 +1074,13 @@ export async function updateQuote(req: Request) {
           throw httpError(409, "Bạn được thêm vào làm cùng báo giá này nên chỉ sửa được nội dung, không thêm/xoá trang. Hãy nhờ người tạo báo giá làm việc đó.");
         }
       }
+      // KT-4: hàng ĐÃ CHI (hiệu lực) không được biến mất qua đường Lưu — xoá dòng, xoá bảng, xoá trang, hay một client cũ
+      // gửi `extraTables: []`. So TẬP rid của cả phía nên chuyển bảng / "Chuyển loại" / đổi thứ tự trang không bị chặn.
+      // 400 (không 409): màn soạn giữ nguyên phần đang soạn và toast câu báo nêu tên hàng.
+      const matSheet = hangDaChiBiMat("sheet", bangCuaSheets(sheetsTuoi), bangCuaSheets(b.sheets), daChiSheet);
+      if (matSheet.length) throw loiHangDaChi(matSheet);
+      // Bảng Hà Nội (nếu payload có): chốt + reconcile trên bản Quote vừa khoá — TRƯỚC khi xoá trang.
+      hnTablesDeGhi(qKhoa ?? { hnStatus: null, hnTables: null }, khoan);
 
       const seqCu = Number((existing as any).sheetCodeSeq) || 0;
       // KÉO ĐỔI THỨ TỰ SHEET: mã sản xuất đi theo vị trí mới — nhưng CHỈ khi chưa mã nào của báo giá
@@ -1033,6 +1165,11 @@ export async function updateQuote(req: Request) {
             data.vatPercent
           );
         }
+      }
+      if (b.hnTables !== undefined) {
+        // KT-5: Quote FOR UPDATE (sau mọi khoá QuoteSheet phía trên) RỒI mới đọc bảng HN tươi + khoản kế toán.
+        const [qKhoa] = await tx.$queryRaw<{ hnStatus: string | null; hnTables: unknown }[]>`SELECT "hnStatus", "hnTables" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
+        hnTablesDeGhi(qKhoa ?? { hnStatus: null, hnTables: null }, await docKhoanChiTrongTx(tx, id));
       }
       await chotKhoaLacQuan(tx);
       if (dongBoSo) await syncQuoteCounter(dongBoSo.so, dongBoSo.prefix, tx as any);
@@ -1164,6 +1301,10 @@ export async function listQuotes(req: Request) {
     // Gắn vào ĐÚNG hình dạng mà presentQuoteRow vẫn đọc (`q.sheets[].extraTables`): cả hai nhánh
     // của nó đều flatMap qua MỌI sheet rồi mới đếm/cộng, nên gộp về một phần tử không đổi kết quả.
     for (const r of rows as any[]) r.sheets = [{ extraTables: theoBaoGia.get(r.id) ?? [] }];
+    // Trạng thái đã-chi HIỆU LỰC (khoản kế toán thắng cờ JSON cũ — src/khoanChi.ts) để "Đã TT x/y" của tài khoản chi
+    // phí đếm đúng thứ kế toán đã tích ở trang Hóa đơn đầu vào. CHỈ nhánh internalOnly của presentQuoteRow đếm đã chi
+    // (route truyền internalOnly = can(INTERNAL_VIEW)); account HN đi nhánh hnOnly — không tốn câu đọc khoản trên đường nóng.
+    if (can(req.session, P.QUOTE_INTERNAL_VIEW)) await phuKeToanDanhSach(rows as any[]);
   }
   return { rows, total, page, size };
 }
@@ -1180,96 +1321,10 @@ async function soTrangTheoBaoGia(ids: number[]): Promise<Map<number, number>> {
 }
 
 /**
- * Bảng nội bộ THEO TỪNG SHEET của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
- *
- * BA đường dùng nó: `listQuotes` (gộp theo báo giá — xem `bangNoiBoTheoBaoGia`), `listProjects`
- * (cần theo TỪNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang), và
- * bản xuất GDPR (src/services/gdprService.ts) — đường đó cũng cần dữ liệu chữ/số của bảng nội bộ
- * mà KHÔNG kéo ảnh chứng từ qua dây.
- *
- * Vì sao phải cắt ở tầng SQL chứ không lọc sau khi nạp: lọc ở JS thì base64 đã đi qua dây và đã
- * nằm trong heap rồi — đúng chi phí cần bỏ. Ảnh vẫn sống trong CSDL và vẫn tải được on-demand qua
- * GET /:id/extra/:sheetId/:rid/proof, y như trước.
- *
- * Phép tính TIỀN/ĐẾM vẫn do `extraTableSum`/`presentQuoteRow` ở JS làm, KHÔNG dịch sang SQL: quy
- * tắc ở đó (làm tròn từng dòng, cờ `quantityExact`, `days`, chỉ cộng hàng đã duyệt với hcm/khách)
- * là quy tắc TIỀN — dựng lại nó bằng SQL là mở đường cho hai nguồn số lệch nhau.
- *
- * `extraTables` là cột Json TỰ DO (đường ghi ở hnWorkflow và lúc nhân bản không qua
- * sanitizeExtraTables), nên phải phòng cả ca không phải mảng: CASE ở ngoài chặn `jsonb_array_elements`
- * ném lỗi trên object/chuỗi, và bảng có `items` không phải mảng thì để nguyên.
- */
-export async function bangNoiBoTheoSheet(ids: number[]) {
-  const rows = await prisma.$queryRaw<{ quoteId: number; sheetId: number; order: number; tables: any }[]>`
-    SELECT s."quoteId" AS "quoteId", s.id AS "sheetId", s."order" AS "order",
-           coalesce(jsonb_agg(x.t ORDER BY x.ord), '[]'::jsonb) AS "tables"
-      FROM "QuoteSheet" s
-      CROSS JOIN LATERAL (
-        SELECT CASE WHEN jsonb_typeof(e.t->'items') = 'array'
-                    THEN jsonb_set(e.t, '{items}', (SELECT coalesce(jsonb_agg(
-                                                           -- Phep tru jsonb-text NEM LOI 22023 "cannot delete from
-                                                           -- scalar" khi phan tu KHONG phai object/array. CASE ben
-                                                           -- ngoai chi phong extraTables khong phai mang va items
-                                                           -- khong phai mang - KHONG phong PHAN TU vo huong ben trong
-                                                           -- items (null, chuoi, so). Cot nay la jsonb tu do, da qua
-                                                           -- nhieu doi ma ghi, nen phan tu di dang la chuyen co that.
-                                                           -- Duong JS cu chiu duoc hoan toan, nen chuyen sang SQL ma
-                                                           -- thieu lop nay la lam HONG CA TRANG DANH SACH bao gia vi
-                                                           -- mot hang du lieu cu. (Chu thich khong dau: khoi SQL nay
-                                                           -- nam trong template literal, backtick se lam dut chuoi.)
-                                                           CASE WHEN jsonb_typeof(it) = 'object' THEN it - 'paidProof' ELSE it END
-                                                         ), '[]'::jsonb)
-                                                    FROM jsonb_array_elements(e.t->'items') it))
-                    ELSE e.t END AS t, e.ord AS ord
-          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s."extraTables") = 'array'
-                                         THEN s."extraTables" ELSE '[]'::jsonb END) WITH ORDINALITY AS e(t, ord)
-         -- BO QUA ban cu cua bang Ha Noi con nam lai trong trang: migration 20260915140000 la
-         -- EXPAND-ONLY (chep sang Quote.hnTables, CHUA xoa cho cu de lui anh con an toan). Khong
-         -- loc thi phan HN bi dem HAI LAN tren du lieu cu. (Chu thich khong dau: nam trong
-         -- template literal, dau backtick se lam dut chuoi.)
-         WHERE NOT (jsonb_typeof(e.t) = 'object' AND e.t->>'category' = 'hanoi')
-      ) x
-     WHERE s."quoteId" = ANY(${ids})
-     GROUP BY s."quoteId", s.id, s."order"`;
-  // WITH ORDINALITY giu dung THU TU bang trong mang goc: jsonb_agg khong co ORDER BY thi thu tu
-  // do planner quyet, va thu tu bang la thu tu nguoi dung nhin thay tren man hinh.
-  return rows;
-}
-
-/**
  * Bảng nội bộ GOM THEO BÁO GIÁ (thứ tự sheet: `order` rồi `id`) — hình dạng mà `presentQuoteRow`
  * đọc. Chỉ là lớp gộp trong JS trên `bangNoiBoTheoSheet`, để chỉ có MỘT câu SQL cắt `paidProof`
  * trong cả tệp: hai bản chép của quy tắc cắt ấy sẽ trôi khỏi nhau.
  */
-/**
- * Bảng HÀ NỘI của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
- *
- * Song sinh với `bangNoiBoTheoSheet`, khác mỗi chỗ đọc: cột `Quote.hnTables` (cấp báo giá, từ
- * migration 20260915140000) thay vì `QuoteSheet.extraTables`. Lý lẽ "vì sao cắt ở tầng SQL" và
- * "vì sao phải phòng cột jsonb không phải mảng" giống hệt — đọc chú thích ở hàm kia.
- */
-export async function bangHnTheoBaoGia(ids: number[]) {
-  const rows = await prisma.$queryRaw<{ quoteId: number; tables: any }[]>`
-    SELECT q.id AS "quoteId",
-           coalesce(jsonb_agg(x.t ORDER BY x.ord), '[]'::jsonb) AS "tables"
-      FROM "Quote" q
-      CROSS JOIN LATERAL (
-        SELECT CASE WHEN jsonb_typeof(e.t->'items') = 'array'
-                    THEN jsonb_set(e.t, '{items}', (SELECT coalesce(jsonb_agg(
-                                                           CASE WHEN jsonb_typeof(it) = 'object' THEN it - 'paidProof' ELSE it END
-                                                         ), '[]'::jsonb)
-                                                    FROM jsonb_array_elements(e.t->'items') it))
-                    ELSE e.t END AS t, e.ord AS ord
-          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(q."hnTables") = 'array'
-                                         THEN q."hnTables" ELSE '[]'::jsonb END) WITH ORDINALITY AS e(t, ord)
-      ) x
-     WHERE q.id = ANY(${ids})
-     GROUP BY q.id`;
-  const out = new Map<number, any[]>();
-  for (const r of rows) out.set(r.quoteId, Array.isArray(r.tables) ? r.tables : []);
-  return out;
-}
-
 async function bangNoiBoTheoBaoGia(ids: number[]) {
   const rows = await bangNoiBoTheoSheet(ids);
   rows.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.sheetId - b.sheetId);
@@ -1346,48 +1401,65 @@ export async function listHnAccounts(req: Request) {
  */
 export async function listInputInvoices(req: Request) {
   if (!can(req.session, P.INVOICE_PAGE)) throw httpError(403, "Bạn không có quyền xem trang Hóa đơn đầu vào");
-  // Báo giá xoá mềm bị loại (`deletedAt`); HN chỉ tính khi đã duyệt. Không lọc theo `status`: người duyệt hàng
-  // chi phí có thể làm việc đó từ lúc báo giá còn nháp, và trạng thái báo giá đi kèm từng dòng để kế toán tự lọc.
+  // Báo giá xoá mềm bị loại (`deletedAt`) khỏi câu chính; HN chỉ tính khi đã duyệt. Không lọc theo `status`: người
+  // duyệt hàng chi phí có thể làm việc đó từ lúc báo giá còn nháp, và trạng thái báo giá đi kèm từng dòng để kế toán
+  // tự lọc. Báo giá CÓ dữ liệu kế toán (khoản, hoặc cờ "đã trả" JSON cũ) cũng được nhặt dù không còn hàng đã duyệt —
+  // các dòng đó vào nhóm "Cần chú ý" thay vì biến mất khỏi trang của kế toán.
   const nhan = await prisma.$queryRaw<{ id: number }[]>`
     SELECT q.id
       FROM "Quote" q
      WHERE q."deletedAt" IS NULL
        AND (q."hnStatus" = 'approved'
+            OR (jsonb_typeof(q."hnTables") = 'array' AND q."hnTables" @> '[{"items":[{"paid":true}]}]'::jsonb)
+            OR EXISTS (SELECT 1 FROM "InputInvoiceEntry" e WHERE e."quoteId" = q.id)
             OR EXISTS (SELECT 1 FROM "QuoteSheet" s
                         WHERE s."quoteId" = q.id
                           AND jsonb_typeof(s."extraTables") = 'array'
-                          AND s."extraTables" @> '[{"items":[{"approved":true}]}]'::jsonb))
+                          AND (s."extraTables" @> '[{"items":[{"approved":true}]}]'::jsonb
+                               OR s."extraTables" @> '[{"items":[{"paid":true}]}]'::jsonb)))
      ORDER BY q."quoteDate" DESC, q.id DESC
      LIMIT ${TRAN_DU_AN + 1}`;
   const truncated = nhan.length > TRAN_DU_AN;
   const ids = nhan.slice(0, TRAN_DU_AN).map((r) => r.id);
-  if (!ids.length) return { data: [] as HangDauVao[], meta: { quotes: 0, truncated: false } };
+  // Báo giá ĐÃ XOÁ MỀM còn khoản kế toán: dòng chỉ-xem (tiền đã chi không được biến khỏi trang kế toán).
+  const daXoa = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT q.id FROM "Quote" q
+     WHERE q."deletedAt" IS NOT NULL AND EXISTS (SELECT 1 FROM "InputInvoiceEntry" e WHERE e."quoteId" = q.id)
+     ORDER BY q.id DESC
+     LIMIT ${TRAN_DU_AN}`;
+  const idsDaXoa = daXoa.map((r) => r.id);
+  if (!ids.length && !idsDaXoa.length) return { data: [] as HangDauVao[], meta: { quotes: 0, truncated: false } };
 
-  const [quotes, hnTheoBaoGia, bangSheet, dsMau] = await Promise.all([
-    prisma.quote.findMany({
-      where: { id: { in: ids } },
-      select: {
-        id: true, companyId: true, status: true, projectCode: true, projectVersion: true, quoteNumber: true, title: true, shortTitle: true,
-        hnStatus: true, hnReviewedAt: true, hnReviewerId: true,
-        customer: { select: { code: true, name: true } },
-        company: { select: { shortName: true, name: true } },
-        createdBy: { select: { displayName: true } },
-        sheets: { orderBy: [{ order: "asc" }, { id: "asc" }], select: { id: true, order: true, name: true, codeNo: true } },
-      },
-    }),
+  const chonBaoGia = {
+    id: true, companyId: true, status: true, projectCode: true, projectVersion: true, quoteNumber: true, title: true, shortTitle: true,
+    hnStatus: true, hnReviewedAt: true, hnReviewerId: true,
+    customer: { select: { code: true, name: true } },
+    company: { select: { shortName: true, name: true } },
+    createdBy: { select: { displayName: true } },
+    sheets: { orderBy: [{ order: "asc" }, { id: "asc" }], select: { id: true, order: true, name: true, codeNo: true } },
+  } satisfies Prisma.QuoteSelect;
+  const [quotes, quotesDaXoa, hnTheoBaoGia, bangSheet, dsMau, khoanTheoBaoGia] = await Promise.all([
+    ids.length ? prisma.quote.findMany({ where: { id: { in: ids } }, select: chonBaoGia }) : [],
+    idsDaXoa.length ? prisma.quote.findMany({ where: { id: { in: idsDaXoa } }, select: chonBaoGia, includeDeleted: true } as any) as Promise<any[]> : [],
     bangHnTheoBaoGia(ids),
     bangNoiBoTheoSheet(ids),
     dsMauBangNoiBo(),
+    docKhoanChiTheoBaoGia([...ids, ...idsDaXoa]),
   ]);
+  // Siêu dữ liệu ảnh (KHÔNG có ảnh) của mọi khoản đang hiện.
+  const anhTheoKhoan = await docAnhTheoKhoan([...khoanTheoBaoGia.values()].flatMap((m) => [...m.values()].map((e) => e.id)));
 
-  // Tên người duyệt: gom id ở MỘT chỗ rồi tra MỘT câu (hàng duyệt lưu id, không lưu tên).
+  // Tên người: gom id ở MỘT chỗ rồi tra MỘT câu (hàng duyệt / cờ "đã trả" cũ lưu id, không lưu tên).
   const idNguoi = new Set<number>();
-  for (const q of quotes) if (q.hnStatus === "approved" && q.hnReviewerId != null) idNguoi.add(q.hnReviewerId);
-  for (const s of bangSheet) for (const t of Array.isArray(s.tables) ? s.tables : []) for (const it of Array.isArray(t?.items) ? t.items : []) {
+  const gomNguoi = (it: any) => {
     if (it && it.approved === true && typeof it.approvedBy === "number") idNguoi.add(it.approvedBy);
-  }
+    if (it && it.paid === true && typeof it.paidById === "number") idNguoi.add(it.paidById);
+  };
+  for (const q of quotes) if (q.hnStatus === "approved" && q.hnReviewerId != null) idNguoi.add(q.hnReviewerId);
+  for (const s of bangSheet) for (const t of Array.isArray(s.tables) ? s.tables : []) for (const it of Array.isArray(t?.items) ? t.items : []) gomNguoi(it);
+  for (const tables of hnTheoBaoGia.values()) for (const t of tables) for (const it of Array.isArray(t?.items) ? t.items : []) gomNguoi(it);
   const tenNguoi = new Map<number, string>(
-    idNguoi.size ? (await prisma.user.findMany({ where: { id: { in: [...idNguoi] } }, select: { id: true, displayName: true } })).map((u) => [u.id, u.displayName] as [number, string]) : [],
+    idNguoi.size ? (await prisma.user.findMany({ where: { id: { in: [...idNguoi] } }, select: { id: true, displayName: true }, includeDeleted: true } as any) as { id: number; displayName: string }[]).map((u) => [u.id, u.displayName] as [number, string]) : [],
   );
 
   const theoBaoGia = new Map<number, { sheetId: number; order: number; tables: unknown[] }[]>();
@@ -1396,8 +1468,13 @@ export async function listInputInvoices(req: Request) {
   }
   const data = quotes.flatMap((q) => hangHoaDonDauVao({
     quote: q, sheets: q.sheets, sheetTables: theoBaoGia.get(q.id) ?? [], bangHn: hnTheoBaoGia.get(q.id) ?? [], dsMau, tenNguoi,
+    khoan: khoanTheoBaoGia.get(q.id), anh: anhTheoKhoan,
   }));
-  // Mới duyệt lên đầu; hàng không có ngày duyệt (dữ liệu cũ) xuống cuối. Sắp ổn định: cùng ngày giữ thứ tự bảng.
+  for (const q of quotesDaXoa) {
+    data.push(...hangKhoanBaoGiaDaXoa({ quote: q, khoan: khoanTheoBaoGia.get(q.id) ?? new Map(), anh: anhTheoKhoan, tenNguoi }));
+  }
+  // Mới duyệt lên đầu; hàng không có ngày duyệt (dữ liệu cũ, nhóm "Cần chú ý") xuống cuối. Sắp ổn định: cùng ngày giữ
+  // thứ tự bảng.
   data.sort((a, b) => (b.approvedAt ? Date.parse(b.approvedAt) : -Infinity) - (a.approvedAt ? Date.parse(a.approvedAt) : -Infinity) || b.quoteId - a.quoteId);
   return { data, meta: { quotes: ids.length, truncated } };
 }
@@ -1674,206 +1751,6 @@ export async function signSheet(req: Request) {
   });
   await audit(req, signed ? "quote.sign" : "quote.unsign", { resource: "quote", resourceId: sheet.quoteId });
   return { id: updated.id, signedAt: updated.signedAt, signedByName: updated.signedByName };
-}
-
-// `quote:internal:*` là NĂNG LỰC ("được xem/tích thanh toán bảng nội bộ"), KHÔNG phải phạm vi dữ
-// liệu: thiếu lớp này thì tài khoản chi phí chỉ cần đổi `:id` trên URL (id báo giá tuần tự) là đọc
-// được ảnh uỷ nhiệm chi — và ghi được cờ paid — của MỌI báo giá, trong khi danh sách báo giá của
-// chính họ vẫn bị `quoteScopeWhereOrThrow` giới hạn. CỐ Ý KHÔNG dùng `loadAuthorizedQuote`: hàm đó
-// từ chối luôn caller có view bị lược (internal:view / hn:fill) — mà đó chính là người dùng HỢP LỆ
-// của hai endpoint này, dùng nó sẽ khoá chết tính năng. Xem tests/rbacscope-extra-idor.test.js.
-//
-// VÌ SAO action "read" CHO CẢ ĐƯỜNG GHI `/pay` (lệch quy ước `canOnQuote(update)` của các đường ghi
-// khác — hnWorkflow.ts, /customer-decision): ở đây `quote:internal:pay` MỚI là cổng GHI, còn hàm
-// này chỉ trả lời "được đụng tới BÁO GIÁ NÀO". Siết lên "update" sẽ chặn đúng tài khoản chi phí —
-// họ chỉ có `quote:read:own`, và tư cách thành viên KHÔNG suy ra `quote:update:*` vì `canOnQuote`
-// kiểm quyền trước rồi mới xét thành viên. Đó là đổi CHÍNH SÁCH, không phải sửa lỗi; ca test
-// "read:all + internal:pay, KHÔNG update → 200" khoá lựa chọn này lại để lần sau ai siết thì biết.
-//
-// BÁO GIÁ ĐÃ XOÁ MỀM → 404: `findFirst` đi qua extension soft-delete (src/db.ts) nên tự có
-// `deletedAt: null`. CỐ Ý giữ vậy — `QuoteSheet` không soft-delete, nếu không chốt qua Quote thì
-// sheet của báo giá trong thùng rác vẫn với tới được, trong khi `GET /api/quotes/:id` (lối vào duy
-// nhất của hai endpoint này) đã 404 từ lâu.
-async function assertQuoteInScope(req: Request, quoteId: number) {
-  // `select` CHỈ những cột `canOnQuote` thật sự đọc. Trước đây hàm này dùng `include` trần, tức kéo
-  // MỌI cột vô hướng của Quote — gồm `customerLogo` (data-URL base64, trần 3,5 MB ở validators.ts) —
-  // chỉ để đọc `createdById`/`status`. Nó chạy ở đầu MỌI thao tác bảng nội bộ (tích thanh toán, lấy
-  // ảnh chứng từ), tức đúng những nút bấm liên tục nhất của kế toán. Phát hiện qua ultracode audit
-  // vòng 2. `canOnQuote` chỉ đụng createdById/status/members (src/permissions.ts).
-  const quote = await prisma.quote.findFirst({
-    where: { id: quoteId },
-    select: { id: true, createdById: true, status: true, members: { select: { userId: true, scopes: true } } },
-  });
-  if (!quote) throw httpError(404, "Không tìm thấy báo giá");
-  if (!canOnQuote(req.session, "read", quote)) throw httpError(403, "Bạn không có quyền với báo giá này");
-}
-
-// THANH TOÁN 1 HÀNG bảng nội bộ (quyền quote:internal:pay) — tích/bỏ paid + ảnh chứng từ, KHÔNG cần lưu cả
-// báo giá (tài khoản chi phí chỉ đụng được phần này). Khớp hàng theo `rid` (id ổn định).
-export async function markExtraTableRowPayment(req: Request) {
-  const quoteId = Number(req.params.id);
-  const sheetId = Number(req.params.sheetId);
-  const rid = String((req.params as any).rid);
-  const paid = req.body.paid !== false;
-  const proof = typeof req.body.paidProof === "string" ? req.body.paidProof : undefined;
-  await assertQuoteInScope(req, quoteId);
-  // PHẠM VI: account phụ chỉ tích được hàng thuộc bảng mình được giao. Không có chốt này thì
-  // đường /pay là một cửa hậu đi vòng qua toàn bộ lớp lọc của updateQuote — cùng một cột Json.
-  const qPv = await prisma.quote.findFirst({ where: { id: quoteId }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
-  const pvHang = quoteScopesFor(req.session, qPv) ?? [...QUOTE_SCOPES];
-  const catDuocTich = new Set<string>(pvHang.filter((c) => c !== "main"));
-  // TUẦN TỰ HÓA read-modify-write khối JSON extraTables: khóa HÀNG sheet (SELECT … FOR UPDATE) trong
-  // 1 transaction để 2 request đánh dấu 2 HÀNG KHÁC NHAU của CÙNG sheet không cùng đọc 1 snapshot rồi
-  // ghi đè mất bản ghi thanh toán (+ ảnh chứng từ) của nhau. Ngoài ra "chạm" báo giá cha để bump
-  // updatedAt → khóa lạc quan của updateQuote phát hiện được thay đổi này (chống lost-update chéo).
-  let mocMoi: Date | undefined;
-  await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE id = ${sheetId} AND "quoteId" = ${quoteId} FOR UPDATE`;
-    const sheet = await tx.quoteSheet.findFirst({ where: { id: sheetId, quoteId }, select: { id: true, extraTables: true } });
-    if (!sheet) throw httpError(404, "Không tìm thấy sheet");
-    const tables = (Array.isArray(sheet.extraTables) ? sheet.extraTables : []) as any[];
-    let found = false;
-    for (const t of tables) for (const it of (t?.items || [])) {
-      if (it && it.rid === rid) {
-        if (!catDuocTich.has(String(t?.category))) {
-          throw httpError(403, `Bạn không được giao phần "${tenPhamVi(String(t?.category))}" của báo giá này`);
-        }
-        found = true;
-        if (paid) {
-          if (!it.paid) { it.paidAt = new Date().toISOString(); it.paidById = req.session.userId; }
-          it.paid = true;
-          if (proof !== undefined) it.paidProof = proof || null;   // gửi "" = xóa ảnh; bỏ qua = giữ ảnh cũ
-        } else { it.paid = false; it.paidAt = null; it.paidById = null; it.paidProof = null; }
-      }
-    }
-    if (!found) throw httpError(404, "Không tìm thấy dòng nội bộ");
-
-    // ── TRẦN TỔNG CHO CỘT extraTables ─────────────────────────────────────
-    // `paidProof` được zod chặn ở 900.000 ký tự — nhưng đó là trần cho MỘT LƯỢT, không phải cho
-    // CỘT. Không có chốt nào trên tổng, trong khi mỗi sheet nhận được 20 bảng × 1000 dòng, và
-    // chính handler này là ĐỌC–SỬA–GHI toàn khối: nạp cả cột, sửa tại chỗ, ghi cả cột trở lại,
-    // bên trong một transaction đang giữ `SELECT … FOR UPDATE` trên hàng sheet. Sau 100 ảnh trên
-    // một sheet, MỖI lượt /pay kế tiếp đọc ~90 MB, giữ ~90 MB, ghi ~90 MB trên luồng chính.
-    //
-    // ĐO ĐƯỢC ngày 2026-09-16 (vì sao đây là P1 chứ không phải P0): cột lớn nhất trên production
-    // là 424 BYTE, tổng 5,3 kB; trên dev là 92 kB. Chưa ai đính ảnh thật. Đây là lỗ TIỀM ẨN —
-    // chặn trước khi nó thành thói quen thì rẻ, chặn sau khi cột đã 90 MB thì không còn đường lùi.
-    //
-    // ÁP THEO CHIỀU TĂNG, cùng bài học với MAX_SAVE_TOTAL_ROWS (xem src/validators.ts): một trần
-    // tuyệt đối sẽ khoá luôn thao tác GỠ ảnh trên một cột đã quá lớn — tức nhốt người dùng lại với
-    // đúng dữ liệu họ đang cố dọn. Nên chỉ chặn khi cột PHÌNH THÊM quá trần; thu nhỏ thì luôn cho.
-    const coCu = JSON.stringify(Array.isArray(sheet.extraTables) ? sheet.extraTables : []).length;
-    const coMoi = JSON.stringify(tables).length;
-    if (coMoi > config.MAX_EXTRA_TABLES_BYTES && coMoi > coCu) {
-      throw httpError(
-        413,
-        `Bảng nội bộ của trang này đã ${(coMoi / 1048576).toFixed(1)} MB, vượt trần ${(config.MAX_EXTRA_TABLES_BYTES / 1048576).toFixed(0)} MB. ` +
-          "Hãy gỡ bớt ảnh chứng từ cũ rồi thử lại.",
-      );
-    }
-
-    await tx.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: tables } });
-    // Bump Quote.updatedAt cho khoá lạc quan (chống lost-update CHÉO giữa hai người).
-    //
-    // PHẢI TRẢ MỐC MỚI VỀ CHO CLIENT. Người tích "đã thanh toán" thường ĐANG MỞ chính báo giá đó
-    // trong trình soạn, mà editor giữ `q.updatedAt` đã tải để gửi kèm `baseUpdatedAt` lúc Lưu. Bump
-    // xong mà không trả mốc mới thì mốc trong tay họ thành cũ ngay lập tức, và lần bấm Lưu kế tiếp
-    // ăn 409 "Báo giá vừa được người khác cập nhật" — do CHÍNH HỌ, trong CHÍNH cửa sổ đó. Người
-    // dùng không có cách nào hiểu, và phần vừa gõ có nguy cơ mất khi họ tải lại theo lời khuyên của
-    // thông báo. Phát hiện qua ultracode audit vòng 2.
-    const sau = await tx.quote.update({ where: { id: quoteId }, data: {}, select: { updatedAt: true } });
-    mocMoi = sau.updatedAt;
-  });
-  await audit(req, paid ? "quote.internal.pay" : "quote.internal.unpay", { resource: "quote", resourceId: quoteId, after: { sheetId, rid, hasProof: proof !== undefined ? !!proof : undefined } });
-  return { ok: true, rid, paid, updatedAt: mocMoi };
-}
-
-// ── HÀNG BẢNG HÀ NỘI: hai đường song sinh, khác mỗi CHỖ LƯU ───────────────────────────────────
-// Bảng HN nay ở `Quote.hnTables` (cấp báo giá) nên KHÔNG còn `sheetId` để định vị. Không có cặp
-// hàm này thì hàng HN mất hẳn đường tích thanh toán, và ảnh uỷ nhiệm chi đã lưu vẫn nằm trong CSDL
-// nhưng không ai đọc được nữa — mất mát im lặng, không lỗi nào hiện ra.
-//
-// KHOÁ: chỉ khoá hàng Quote, và KHÔNG đụng QuoteSheet sau đó. Mọi đường ghi khác lấy khoá theo thứ
-// tự QuoteSheet → Quote (updateQuote, markExtraTableRowPayment), lấy ngược chiều là deadlock.
-// Khác đường cũ một điểm tinh tế: ở đây ghi thẳng cột của Quote nên `@updatedAt` tự bump trong
-// CÙNG câu UPDATE — không cần "chạm" thêm lần nữa, nhưng VẪN phải trả mốc mới về client (cùng lý
-// do đã ghi ở markExtraTableRowPayment: người tích thường đang mở chính báo giá đó).
-export async function markHnRowPayment(req: Request) {
-  const quoteId = Number(req.params.id);
-  const rid = String((req.params as any).rid);
-  const paid = req.body.paid !== false;
-  const proof = typeof req.body.paidProof === "string" ? req.body.paidProof : undefined;
-  await assertQuoteInScope(req, quoteId);
-  // Phạm vi: account phụ chỉ tích được vùng mình được giao (đối xứng với markExtraTableRowPayment).
-  const qPv = await prisma.quote.findFirst({ where: { id: quoteId }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
-  if (!(quoteScopesFor(req.session, qPv) ?? [...QUOTE_SCOPES]).includes("hanoi")) {
-    throw httpError(403, `Bạn không được giao phần "${tenPhamVi("hanoi")}" của báo giá này`);
-  }
-  let mocMoi: Date | undefined;
-  await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "Quote" WHERE id = ${quoteId} FOR UPDATE`;
-    const q = await tx.quote.findFirst({ where: { id: quoteId }, select: { hnTables: true } });
-    if (!q) throw httpError(404, "Không tìm thấy báo giá");
-    const tables = (Array.isArray(q.hnTables) ? q.hnTables : []) as any[];
-    let found = false;
-    for (const t of tables) for (const it of (t?.items || [])) {
-      if (it && it.rid === rid) {
-        found = true;
-        if (paid) {
-          if (!it.paid) { it.paidAt = new Date().toISOString(); it.paidById = req.session.userId; }
-          it.paid = true;
-          if (proof !== undefined) it.paidProof = proof || null;   // gửi "" = xoá ảnh; bỏ qua = giữ ảnh cũ
-        } else { it.paid = false; it.paidAt = null; it.paidById = null; it.paidProof = null; }
-      }
-    }
-    if (!found) throw httpError(404, "Không tìm thấy dòng Hà Nội");
-    const sau = await tx.quote.update({ where: { id: quoteId }, data: { hnTables: tables }, select: { updatedAt: true } });
-    mocMoi = sau.updatedAt;
-  });
-  await audit(req, paid ? "quote.internal.pay" : "quote.internal.unpay", { resource: "quote", resourceId: quoteId, after: { hn: true, rid, hasProof: proof !== undefined ? !!proof : undefined } });
-  return { ok: true, rid, paid, updatedAt: mocMoi };
-}
-
-/** Ảnh chứng từ 1 hàng bảng Hà Nội (on-demand) — song sinh với getExtraTableRowProof. */
-export async function getHnRowProof(req: Request) {
-  if (!can(req.session, P.QUOTE_INTERNAL_VIEW) && !can(req.session, P.QUOTE_INTERNAL_PAY)) throw httpError(403, "Không có quyền");
-  const quoteId = Number(req.params.id);
-  await assertQuoteInScope(req, quoteId);
-  const q = await prisma.quote.findFirst({ where: { id: quoteId }, select: { hnTables: true } });
-  if (!q) throw httpError(404, "Không tìm thấy");
-  const rid = String((req.params as any).rid);
-  for (const t of (Array.isArray(q.hnTables) ? q.hnTables : []) as any[]) for (const it of (t?.items || [])) {
-    if (it && it.rid === rid) {
-      // Ghi nhật ký đường ĐỌC: ảnh uỷ nhiệm chi là PII của bên thứ ba. Chỉ ghi ĐỊNH DANH, không
-      // chép chuỗi ảnh vào AuditEvent (nhân bản đúng cái PII đang muốn kiểm soát).
-      await audit(req, "quote.internal.proof-view", { resource: "quote", resourceId: quoteId, after: { hn: true, rid, hasProof: !!it.paidProof } });
-      return { paidProof: it.paidProof || null };
-    }
-  }
-  throw httpError(404, "Không tìm thấy dòng");
-}
-
-// Lấy ẢNH chứng từ 1 hàng nội bộ (on-demand) — quyền internal:view HOẶC internal:pay.
-export async function getExtraTableRowProof(req: Request) {
-  if (!can(req.session, P.QUOTE_INTERNAL_VIEW) && !can(req.session, P.QUOTE_INTERNAL_PAY)) throw httpError(403, "Không có quyền");
-  await assertQuoteInScope(req, Number(req.params.id));
-  const sheet = await prisma.quoteSheet.findFirst({ where: { id: Number(req.params.sheetId), quoteId: Number(req.params.id) }, select: { extraTables: true } });
-  if (!sheet) throw httpError(404, "Không tìm thấy");
-  const rid = String((req.params as any).rid);
-  for (const t of (Array.isArray(sheet.extraTables) ? sheet.extraTables : []) as any[]) for (const it of (t?.items || [])) {
-    if (it && it.rid === rid) {
-      // GHI NHẬT KÝ đường ĐỌC: ảnh uỷ nhiệm chi là PII của bên thứ ba (tên + số tài khoản + số
-      // tiền). `/pay` ngay trên đã ghi audit; nếu đường đọc không ghi thì không truy được ai đã
-      // xem chứng từ của báo giá nào. CỐ Ý chỉ ghi ĐỊNH DANH (sheetId/rid + có ảnh hay không) —
-      // chép cả `paidProof` vào AuditEvent là nhân bản chính cái PII đang muốn kiểm soát.
-      await audit(req, "quote.internal.proof-view", {
-        resource: "quote", resourceId: Number(req.params.id),
-        after: { sheetId: Number(req.params.sheetId), rid, hasProof: !!it.paidProof },
-      });
-      return { paidProof: it.paidProof || null };
-    }
-  }
-  throw httpError(404, "Không tìm thấy dòng");
 }
 
 /**
@@ -2290,7 +2167,27 @@ export async function deleteQuote(req: Request) {
   if (!ownerDraftDelete && !can(req.session, P.QUOTE_DELETE_ALL)) {
     throw httpError(403, "Chỉ Quản trị hoặc người tạo (báo giá ở trạng thái Nháp/Bị từ chối) mới được xóa");
   }
-  await prisma.quote.delete({ where: { id } }); // soft delete via middleware
+  // KT-4: báo giá chứa khoản kế toán ĐÃ CHI (trạng thái HIỆU LỰC — khoản thắng cờ JSON cũ, nên khoản đã bỏ tích không
+  // chặn oan) không xoá mềm được: thùng rác là đường tới "Dọn rác", và tiền đã chi thì phải còn đối chiếu được. Kiểm và
+  // xoá trong CÙNG transaction dưới Quote FOR NO KEY UPDATE — kế toán tích dưới Quote FOR SHARE nên không chen giữa được.
+  // Xoá mềm bằng `tx.quote.update` chứ KHÔNG `tx.quote.delete` (extension soft-delete ở src/db.ts chạy ngoài tx).
+  await prisma.$transaction(async (tx) => {
+    const [tuoi] = await tx.$queryRaw<{ status: string; deletedAt: Date | null }[]>`SELECT status, "deletedAt" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
+    // Kiểm LẠI trạng thái sau khi đã khoá: hai kiểm ở trên chạy NGOÀI giao dịch, một lần "Khách chốt" chen giữa sẽ để
+    // báo giá ĐÃ CHỐT (kết thúc, không ai được xoá) lọt vào thùng rác (soát 2026-10-06, DT-3).
+    if (!tuoi || tuoi.deletedAt) throw httpError(404, "Không tìm thấy báo giá");
+    if (tuoi.status === "converted") throw httpError(400, "Không thể xóa báo giá đã chốt");
+    if (!can(req.session, P.QUOTE_DELETE_ALL) && !(canOnQuote(req.session, "delete", existing) && (tuoi.status === "draft" || tuoi.status === "rejected"))) {
+      throw httpError(403, "Chỉ Quản trị hoặc người tạo (báo giá ở trạng thái Nháp/Bị từ chối) mới được xóa");
+    }
+    const daChi = await khoanDaChiCuaBaoGia(tx, id);
+    if (daChi.length) {
+      const nhan = daChi.slice(0, 5).map((t) => `"${String(t).slice(0, 80)}"`).join(", ") + (daChi.length > 5 ? "…" : "");
+      throw loiCoMa(400, "bao-gia-co-khoan-da-chi",
+        `Không xoá được báo giá: có ${daChi.length} khoản kế toán đã đánh dấu ĐÃ CHI (${nhan}). Nhờ kế toán bỏ đánh dấu ở trang Hóa đơn đầu vào trước.`);
+    }
+    await tx.quote.update({ where: { id }, data: { deletedAt: new Date() } });
+  });
   await audit(req, "quote.delete", { resource: "quote", resourceId: id, before: { status: existing.status } });
   return { ok: true };
 }

@@ -24,13 +24,17 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["quote.hn.save", "Lưu phần Hà Nội"], ["quote.hn.assign", "Giao phần Hà Nội"], ["quote.hn.submit", "Gửi duyệt phần Hà Nội"], ["quote.hn.review", "Duyệt / trả phần Hà Nội"],
     ["quote.import.preview", "Xem trước nhập từ Excel"], ["quote.import.rejected", "Từ chối tệp Excel nhập vào"],
     ["quote.sheet.customerDecision", "Khách duyệt / từ chối sheet"],
-    ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi (bảng nội bộ)"],
+    // Các mã quote.internal.* (proof-view · ke-toan ở đây, pay / unpay ở nhóm dưới) từ 2026-10-06 đều do trang Hóa
+    // đơn đầu vào ghi (kế toán, src/services/inputInvoiceService.ts). Mã GIỮ NGUYÊN để dòng nhật ký cũ (bảng nội bộ
+    // ở màn soạn / tài khoản chi phí) vẫn lọc được — chỉ đổi nhãn.
+    ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi (Hóa đơn đầu vào)"],
+    ["quote.internal.ke-toan", "Hóa đơn đầu vào: ngày HĐ / ghi chú KT / ảnh chứng từ"],
     ["quote.list-note", "Ghi chú / màu ở danh sách báo giá"],
     // MƯỜI MÃ DƯỚI ĐÂY (ở đây và ở nhóm Nhân sự) TỪNG VẮNG MẶT, và bài test phủ mã vẫn XANH:
     // bộ dò của nó chỉ khớp `audit(req, "chuỗi")`, bỏ hết dạng ternary và dạng truyền qua biến.
     // Nhãn đặt theo ĐÚNG việc mà nơi gọi làm — đã đọc từng nơi gọi, không suy từ tên mã.
     ["quote.sign", "Ký duyệt sheet"], ["quote.unsign", "Gỡ ký duyệt sheet"],
-    ["quote.internal.pay", "Đánh dấu ĐÃ chi (bảng nội bộ)"], ["quote.internal.unpay", "Gỡ đánh dấu đã chi (bảng nội bộ)"],
+    ["quote.internal.pay", "Đánh dấu ĐÃ chi (Hóa đơn đầu vào)"], ["quote.internal.unpay", "Gỡ đánh dấu đã chi (Hóa đơn đầu vào)"],
   ]],
   ["Khách hàng", [
     ["customer.create", "Thêm khách hàng"], ["customer.update", "Sửa khách hàng"], ["customer.delete", "Xóa khách hàng"],
@@ -100,6 +104,11 @@ const FIELD_LABEL: Record<string, string> = {
   // Ghi chú / phân quyền / báo giá
   teamNote: "Team ghi chú", accountingNote: "Kế toán ghi chú", note: "Ghi chú",
   permissions: "Quyền", title: "Tiêu đề", status: "Trạng thái", role: "Vai trò",
+  // Khoản chi của hàng nội bộ — trang Hóa đơn đầu vào (quote.internal.pay / unpay / ke-toan / proof-view ghi
+  // before/after theo các khoá này; `paidById` tự ẩn như mọi …ById, `accountingNote` dùng chung nhãn ở trên).
+  invoiceDate: "Ngày hóa đơn", paid: "Đã chi", paidByName: "Người đánh dấu chi",
+  proofId: "Ảnh chứng từ (mã)", proofSha256: "Dấu vân tay ảnh", side: "Phía bảng", rid: "Mã hàng nội bộ",
+  nguon: "Nguồn dữ liệu", version: "Phiên bản khoản", ten: "Hạng mục",
   // Đổi khách hàng (danh mục) của báo giá: máy chủ ghi MÃ + TÊN ở `khachHang` (đọc được) và số id ở `customerId` (kỹ thuật — ẩn, xem diffRows).
   khachHang: "Khách hàng (danh mục)",
   // Tài khoản / hồ sơ nhân sự / danh bạ (hay gặp ở user.*, personnel.*, employee.*)

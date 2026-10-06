@@ -53,9 +53,11 @@ describe("RBAC-10 — ma trận quyền không có ô chết", () => {
     expect(chet, `ô trên ma trận không được kiểm ở đâu: ${chet.join(", ")}`).toEqual([]);
   });
 
-  it("ba ô chết cũ không còn trên ma trận, nhưng hằng số vẫn giữ (không vỡ dữ liệu quyền đã lưu)", () => {
+  it("ô chết cũ không còn trên ma trận, nhưng hằng số vẫn giữ (không vỡ dữ liệu quyền đã lưu)", () => {
     const hienThi = new Set(PERMISSION_GROUPS.flatMap((g) => g.perms));
-    for (const p of ["role:assign", "template:manage", "company:manage"]) {
+    // quote:internal:pay (2026-10-06): tích "đã chi" chuyển sang kế toán ở trang Hóa đơn đầu vào (invoice:input:pay);
+    // không chỗ nào còn kiểm khoá cũ — để nó trên ma trận là một ô tích hay bỏ đều như nhau.
+    for (const p of ["role:assign", "template:manage", "company:manage", "quote:internal:pay"]) {
       expect(hienThi.has(p), p).toBe(false);
       expect(Object.values(PERMISSIONS)).toContain(p);
     }

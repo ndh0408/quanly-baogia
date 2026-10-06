@@ -62,6 +62,25 @@ everything from `0_init` directly.
   đầu bằng một khối `DO $$` dừng ngay và in ra các MST trùng nếu prod còn khách SỐNG trùng mã số
   thuế — dọn trùng trước rồi chạy lại. Bản `CONCURRENTLY` cho prod đang tải ghi sẵn trong chính
   file migration (kèm bước kiểm index INVALID trước khi `migrate resolve`).
+- `20261006090000_input_invoice_entries` — khoản chi kế toán của trang Hóa đơn đầu vào: hai bảng MỚI
+  `InputInvoiceEntry` (khoản: đã chi, ngày HĐ, ghi chú KT…, `@@unique([quoteId, side, rid])`) và
+  `InputInvoiceProof` (ảnh chứng từ, `@@index([entryId])`). **Expand-only, chỉ DDL**: 2 `CREATE TABLE`
+  + 1 unique index + 1 index + 2 FK, không đụng cột / dữ liệu nào đang có, không `DROP` / `ALTER TYPE`
+  — nên `check-destructive-sql` và bước [3c/6] của `deploy.sh` xanh, và bản app CŨ chạy tiếp được trên
+  schema mới (nó không biết hai bảng). `SET lock_timeout = '10s'` như `20260930120000_quote_list_note`.
+  Cả hai FK là **`ON DELETE RESTRICT`**, không cascade: báo giá còn khoản thì không xoá cứng được
+  ("Dọn rác" bỏ qua nó, app cũ chạy "Dọn rác" thì hỏng ồn ào 409 thay vì xoá), khoản còn ảnh thì không
+  xoá được; mã ứng dụng không có lệnh `DELETE` nào lên hai bảng (ảnh chỉ thêm). `currentProofId` cố ý
+  KHÔNG có FK (tránh vòng FK hai chiều). Cần sinh lại SQL thì dùng `prisma migrate diff --from-schema
+  <schema trước> --to-schema prisma/schema.prisma --script` (chỉ đọc, không cần CSDL) — KHÔNG `migrate dev`
+  (nó sinh `DROP INDEX` cho drift được phép, xem bảng dưới). Dữ liệu cũ KHÔNG chép trong migration: công cụ `node dist/tools/backfillKhoanChi.js`
+  (khô → `--sua-rid` khi có dòng thiếu / trùng rid → `--ghi` → `--kiem` phải thoát 0) chạy ngay sau deploy — runbook ở
+  `docs/operations/DISASTER_RECOVERY.md`.
+  ⚠️ **Lùi schema chỉ khi CẢ HAI bảng RỖNG** (`SELECT count(*) FROM "InputInvoiceEntry"` và
+  `… "InputInvoiceProof"` đều 0): khi đó mới `DROP TABLE "InputInvoiceProof"; DROP TABLE
+  "InputInvoiceEntry";` (ghi sẵn ở đầu `migration.sql`) — và phải gỡ luôn dòng của migration này
+  trong `_prisma_migrations`, nếu không lượt `migrate deploy` sau tưởng nó đã áp và bản mới chạy thiếu
+  bảng. Có dữ liệu thì **KHÔNG lùi schema**: lùi ảnh (`deploy.sh rollback`) là đủ.
 
 ### Drift ĐƯỢC PHÉP — danh sách ĐÍCH DANH, do NOT drop
 

@@ -1,7 +1,7 @@
 // Ảnh chứng từ thanh toán: hai route CHỈ kiểm TIỀN TỐ của data-URL — chốt hồi quy.
 //
 // ── LỖI ─────────────────────────────────────────────────────────────────────
-// `POST /api/quotes/:id/extra/:sheetId/:rid/pay` và `POST /api/personnel/:id/payment` nhận
+// `POST /api/quotes/:id/extra/:sheetId/:rid/pay` (nay đã gỡ — xem dưới) và `POST /api/personnel/:id/payment` nhận
 // `paidProof`/`paymentProof` qua regex KHÔNG neo cuối:
 //     /^data:image\/(png|jpe?g|webp);base64,/
 // Chuỗi `data:image/png;base64,iVBORw0KGgo" onerror="alert(1)` khớp tiền tố ấy, nên phần đuôi
@@ -15,6 +15,11 @@
 // thuộc tính. Bài test này KHÔNG khẳng định đã chặn được một vụ khai thác. Nó khoá lại BẤT BIẾN mà
 // phần còn lại của mã đang dựa vào: "chuỗi *Proof trong CSDL luôn là data-URL ảnh base64 hợp lệ".
 // Bất biến đó phải được ép ở CỬA VÀO, vì nơi tiêu thụ có thể đổi (xuất PDF, ghép OOXML, email).
+//
+// ── 2026-10-06: ẢNH HÀNG NỘI BỘ ĐI QUA ROUTE KẾ TOÁN ───────────────────────
+// Route /pay cũ ĐÃ GỠ; ảnh chứng từ hàng bảng nội bộ nay vào `PUT /api/quotes/input-invoices/:quoteId/:side/:rid`
+// (bảng InputInvoiceProof). Cùng hằng số PAYMENT_PROOF_DATA_URL_RE gác cửa vào, cộng thêm giải base64 + soát magic
+// bytes ở dịch vụ — hai ca dưới đây chuyển sang route đó.
 //
 // ── NHÁNH DI SẢN ────────────────────────────────────────────────────────────
 // `readProofDataUrl` (src/paymentProof.ts) rơi về cột base64 cũ cho hồ sơ chưa chuyển sang kho
@@ -59,7 +64,7 @@ describe.runIf(dbAvailable)("chứng từ thanh toán: data-URL phải hợp l�
       sheets: [{
         name: "Trang 1", order: 0, templateId,
         items: [{ kind: "item", name: "Màn LED", quantity: 1, unitPrice: 1000, order: 0 }],
-        extraTables: [{ category: "hcm", name: "Chi phí HCM", items: [{ kind: "item", name: "Thuê xe", quantity: 1, unitPrice: 500, rid: RID }] }],
+        extraTables: [{ category: "hcm", name: "Chi phí HCM", items: [{ kind: "item", name: "Thuê xe", quantity: 1, unitPrice: 500, rid: RID, approved: true }] }],
       }],
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
@@ -70,6 +75,9 @@ describe.runIf(dbAvailable)("chứng từ thanh toán: data-URL phải hợp l�
   });
 
   afterAll(async () => {
+    // Khoản kế toán RESTRICT báo giá: dọn ảnh → khoản trước khi xoá cứng báo giá.
+    await prisma.inputInvoiceProof.deleteMany({ where: { entry: { quoteId } } }).catch(() => {});
+    await prisma.inputInvoiceEntry.deleteMany({ where: { quoteId } }).catch(() => {});
     await prisma.personnelRecord.deleteMany({ where: { fullName: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
     await prisma.quote.deleteMany({ where: { title: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
     await prisma.quoteTemplate.deleteMany({ where: { code: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
@@ -81,19 +89,21 @@ describe.runIf(dbAvailable)("chứng từ thanh toán: data-URL phải hợp l�
     await prisma.$disconnect();
   });
 
-  it("báo giá /pay: data-URL có đuôi rác → 400 và KHÔNG ghi gì vào CSDL", async () => {
-    const res = await admin.post(`/api/quotes/${quoteId}/extra/${sheetId}/${RID}/pay`).send({ paid: true, paidProof: ANH_DOC });
+  it("hàng nội bộ (route kế toán): data-URL có đuôi rác → 400 và KHÔNG ghi gì vào CSDL", async () => {
+    const res = await admin.put(`/api/quotes/input-invoices/${quoteId}/sheet/${RID}`).send({ baseVersion: 0, paid: true, paidProof: ANH_DOC });
     expect(res.status, JSON.stringify(res.body)).toBe(400);
 
     // Chốt luôn ở lớp CSDL: 400 mà vẫn ghi được thì bất biến vẫn vỡ.
+    expect(await prisma.inputInvoiceEntry.count({ where: { quoteId } })).toBe(0);
     const sheet = await prisma.quoteSheet.findUnique({ where: { id: sheetId } });
     const hang = (sheet.extraTables?.[0]?.items || []).find((it) => it.rid === RID);
     expect(hang?.paidProof ?? null).toBeNull();
   });
 
-  it("báo giá /pay: ảnh PNG hợp lệ vẫn qua được (không siết nhầm luồng thật)", async () => {
-    const res = await admin.post(`/api/quotes/${quoteId}/extra/${sheetId}/${RID}/pay`).send({ paid: true, paidProof: ANH_THAT });
+  it("hàng nội bộ (route kế toán): ảnh PNG hợp lệ vẫn qua được (không siết nhầm luồng thật)", async () => {
+    const res = await admin.put(`/api/quotes/input-invoices/${quoteId}/sheet/${RID}`).send({ baseVersion: 0, paid: true, paidProof: ANH_THAT });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.row).toMatchObject({ paid: true, hasPaidProof: true });
   });
 
   it("nhân sự /payment: data-URL có đuôi rác → 400", async () => {

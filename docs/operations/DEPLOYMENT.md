@@ -364,6 +364,14 @@ Vì thế migration phải theo **expand/contract** (prisma/migrations/README.md
 sau, bỏ cột cũ ở một bản phát hành SAU lượt đã ngừng dùng nó. Bước [3c/6] chặn migration huỷ trên prod
 cho tới khi người deploy xác nhận điều đó bằng `CHO_PHEP_MIGRATION_HUY=1`.
 
+**Riêng `20261006090000_input_invoice_entries`** (khoản chi kế toán, trang Hóa đơn đầu vào): chỉ thêm hai
+bảng → lùi ảnh là đủ; **KHÔNG** DROP hai bảng khi đã có dữ liệu và **KHÔNG** khôi phục dump trước-deploy để
+"lùi" (mất mọi khoản ghi từ lúc deploy). Bản này kèm một bước SAU deploy mà `deploy.sh` không tự chạy:
+`docker compose -f <compose> exec app node dist/tools/backfillKhoanChi.js` (khô → `--sua-rid` nếu có dòng thiếu / trùng
+rid → `--ghi` → `--kiem` phải thoát 0), và chạy lại `--ghi` + `--kiem` mỗi lần tiến lại sau khi đã lùi ảnh. Runbook đủ (tiền kiểm chỉ
+đọc, bảng xử lý từng loại dòng lệch, những gì app cũ không thấy trong lúc lùi):
+[DISASTER_RECOVERY.md](DISASTER_RECOVERY.md), mục "Khoản chi kế toán".
+
 ## Biến môi trường BẮT BUỘC ở production
 
 Thiếu là tiến trình **thoát ngay** (`src/config.ts`):
@@ -396,6 +404,9 @@ giữ cho khớp với schema.
       `npm run verify:nhanh` **không** ghi dấu xanh — nó bỏ smoke image + smoke giao diện +
       cổng bảo mật.
 - [ ] Có migration đụng dữ liệu → đã diễn tập
+- [ ] Bản phát hành kèm công cụ chuyển dữ liệu chạy SAU deploy (vd `dist/tools/backfillKhoanChi.js` của
+      đợt khoản chi kế toán) → đã chạy đủ khô → `--ghi` → `--kiem` (thoát 0) trên staging, và có người
+      trực chạy ngay sau bước [5/6] trên prod — `deploy.sh` không tự chạy nó
 - [ ] Backup gần nhất < 24h (`/opt/quanly/backup-watchdog.sh`)
 - [ ] Đã deploy staging và duyệt bằng tay
 - [ ] Có sửa `cap_*` / `security_opt` / `deploy.resources` của `postgres` hoặc `redis`

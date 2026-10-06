@@ -54,6 +54,13 @@ describe("FE-18 — RealtimeBridge làm tươi theo thực thể", () => {
     // Số đếm "Có ghi chú / Chưa có / từng màu" của bộ lọc (quoteFacets) đổi theo từng dòng ghi chú — không làm tươi thì hiện số cũ.
     expect(khoa(spy as unknown as ReturnType<typeof vi.fn>)).toEqual(["quotes", "quoteFacets"]);
   });
+  // Khoản chi (Hóa đơn đầu vào, 2026-10-06) có thực thể RIÊNG. Thiếu dòng trong KHOA_THEO_THUC_THE thì thực thể lạ làm
+  // tươi MỌI query (hành vi "không rõ thực thể") — mỗi lần kế toán tích một ô là cả công ty tải lại Dashboard, Dự án…
+  it("entity=inputInvoice → CHỈ trang Hóa đơn đầu vào, màn nội bộ, danh sách báo giá ('Đã TT x/y') và Nhật ký", async () => {
+    const spy = await mo();
+    act(() => { window.dispatchEvent(new CustomEvent("realtime:changed", { detail: { entity: "inputInvoice", action: "update" } })); });
+    expect(khoa(spy as unknown as ReturnType<typeof vi.fn>).sort()).toEqual(["audit", "inputInvoices", "quote-internal", "quotes"]);
+  });
   it("số đếm bộ lọc (quoteFacets) đi cùng danh sách báo giá ở MỌI thực thể làm đổi danh sách đó (quote, customer, user)", async () => {
     for (const entity of ["quote", "customer", "user"]) {
       const spy = await mo();
