@@ -76,7 +76,11 @@ if (dinhDau.length) {
 // thêm 23%, tức lưới chuỗi KHÔNG thấy gì.
 // Đây đồng thời là ngân sách dung lượng: app phình thật thì cổng này đỏ, và đó là ĐÚNG việc của
 // nó — nâng trần một cách CÓ CHỦ Ý kèm một dòng trong CHANGELOG, đừng nâng cho qua chuyện.
-const TRAN = 850_000;
+// 2026-10-06: 850.000 → 900.000. Đo được 859.313 byte sau khi thêm (theo yêu cầu chủ repo) khoá
+// "Thành Tiền nhóm" + thẻ đối chiếu nhập Excel, Hóa đơn đầu vào + HĐ VAT, cột Thanh toán chỉ xem +
+// hộp xem chứng từ, dán ảnh vào ô Hình ảnh, name/autoComplete cho mọi ô nhập. Trần mới vẫn dưới
+// xa bản dev (984.802 lúc đo, nay còn lớn hơn) nên vẫn bắt được bản dev.
+const TRAN = 900_000;
 if (tong > TRAN) xau(`tổng ${tong.toLocaleString("vi-VN")} byte > trần ${TRAN.toLocaleString("vi-VN")} byte`);
 else ok(`tổng dưới trần ${TRAN.toLocaleString("vi-VN")} byte`);
 
