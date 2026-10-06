@@ -127,7 +127,7 @@ export function VenuesPage({ me }: { me: Me }) {
         <div className={`vn-split${sel ? " has-sel" : ""}`}>
           {/* ── TRÁI: danh sách rạp ── */}
           <aside className="vn-left">
-            <input type="search" className="vn-search" value={q} onChange={(e) => setQ(e.target.value)}
+            <input name="q" type="search" className="vn-search" value={q} onChange={(e) => setQ(e.target.value)}
               placeholder="Tìm rạp hoặc hạng mục…" aria-label="Tìm rạp hoặc hạng mục" />
 
             {tags.length > 0 && (
@@ -196,7 +196,7 @@ function FirstVenue({ canManage, onAdd }: { canManage: boolean; onAdd: AddVenueH
         <li>Xong. Lúc làm báo giá, gõ “quầy vé” là app hiện đúng hạng mục để chèn nhanh.</li>
       </ol>
       <div className="vn-firstform">
-        <input ref={inputRef} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…" disabled={busy}
+        <input autoComplete="off" name="name" ref={inputRef} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…" disabled={busy}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }} />
         <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy || !name.trim()}>{busy ? "Đang thêm…" : "Thêm rạp"}</button>
       </div>
@@ -221,7 +221,7 @@ function AddVenueRow({ onAdd }: { onAdd: AddVenueHandler }) {
   };
   return (
     <div className="vn-addv">
-      <input ref={inputRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="+ Thêm rạp mới…" disabled={busy}
+      <input autoComplete="off" name="name" ref={inputRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="+ Thêm rạp mới…" disabled={busy}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }} />
       {name.trim() && <button type="button" className="btn btn-sm btn-primary" onClick={() => void submit()} disabled={busy}>{busy ? "…" : "Thêm"}</button>}
     </div>
@@ -274,7 +274,7 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
       <div className="vn-rhead">
         <button type="button" className="btn btn-sm vn-back" onClick={onBack}>‹ Danh sách</button>
         {renaming ? (
-          <input className="vn-rename" autoFocus value={name} onChange={(e) => setName(e.target.value)}
+          <input autoComplete="off" name="name" className="vn-rename" autoFocus value={name} onChange={(e) => setName(e.target.value)}
             onBlur={() => void rename()} onKeyDown={(e) => {
               if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
               if (e.key === "Escape") { e.preventDefault(); renameCancelledRef.current = true; setRenaming(false); setName(venue.name); }
@@ -372,7 +372,7 @@ function TagRow({ tags, all, canManage, onChange }: {
         </span>
       ))}
       {canManage && (adding ? (
-        <input ref={inputRef} className="vn-taginput" autoFocus value={draft} list="vn-tag-sug" placeholder="tên nhóm…" disabled={saving}
+        <input name="nhom" ref={inputRef} className="vn-taginput" autoFocus value={draft} list="vn-tag-sug" placeholder="tên nhóm…" disabled={saving}
           onChange={(e) => setDraft(e.target.value)} onBlur={() => void add(draft)}
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
@@ -460,7 +460,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
 
   return (
     <div className="vn-additem">
-      <textarea ref={nameRef} rows={2} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
+      <textarea name="tenHangMuc" ref={nameRef} rows={2} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
         aria-keyshortcuts="Enter Shift+Enter Alt+Enter" onKeyDown={(e) => {
           if (dangGoIME(e)) return;   // nhịp của bộ gõ — xem web/src/lib/gridShared.ts
@@ -474,7 +474,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
             requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + 1; });
           } else void add();
         }} />
-      <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" disabled={busy} />
+      <input name="unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" disabled={busy} />
       <datalist id="vn-units"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist>
       <button type="button" className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "Thêm"}</button>
       <div className="vn-ai-hint muted"><b>Shift + Enter</b> hoặc <b>Alt/Option + Enter</b> = xuống dòng · <b>Enter</b> = lưu hàng.</div>
@@ -523,11 +523,11 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
           {err && <div className="err">⚠ {err}</div>}
           <div className="grid">
             <label className="full"><span>Tên hạng mục</span>
-              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
+              <input autoComplete="off" name="name" autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
             <label className="full"><span>Ghi chú <em className="unit">(điền sẵn vào cột Ghi chú của báo giá)</em></span>
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="vd: PP in KTS" /></label>
+              <input name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="vd: PP in KTS" /></label>
             <label className="full" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} style={{ width: "auto" }} />
+              <input name="active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} style={{ width: "auto" }} />
               <span>Đang dùng <em className="unit">(bỏ tick = ẩn khỏi gợi ý)</em></span></label>
           </div>
         </div>
@@ -580,7 +580,7 @@ function MergeModal({ venue, venues, onClose, onDone }: {
         <div className="modal-head"><h3>Gộp “{venue.name}” vào rạp khác</h3><button type="button" className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           <p className="muted" style={{ marginTop: 0 }}>Chọn rạp giữ lại — {n} hạng mục sẽ dồn sang đó, rạp này bị xoá.</p>
-          <input className="vs-pick-search" autoFocus placeholder="Tìm rạp…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input name="q" className="vs-pick-search" autoFocus placeholder="Tìm rạp…" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="vs-pick-body">
             {list.length === 0 && <div className="vs-empty muted">Không tìm thấy</div>}
             {list.map((v) => (

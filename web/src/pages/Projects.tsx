@@ -103,9 +103,9 @@ export function ProjectsPage({ me }: { me: Me }) {
       <p className="muted">Dự án = báo giá <b>đã chốt</b>. {!isAdmin && <b>Bạn chỉ xem được dự án do mình tạo. </b>}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Dữ liệu hóa đơn (Số HĐ, PO, ngày, chứng từ…) là <b>tham chiếu từ trang Hóa đơn đầu ra</b> — kế toán nhập bên đó. Bấm vào dòng để mở báo giá.</p>
 
       <div className="toolbar" style={{ margin: "4px 0 6px" }}>
-        <input className="grow" type="search" placeholder="Tìm: phim, mã sản xuất, khách hàng, account…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm kiếm dự án" />
-        <select value={account} onChange={(e) => setAccount(e.target.value)} aria-label="Lọc theo Account"><option value="">Account: Tất cả</option>{accounts.map((a) => <option key={a as string} value={a as string}>{a as string}</option>)}</select>
-        <select value={customer} onChange={(e) => setCustomer(e.target.value)} aria-label="Lọc theo Mã khách hàng"><option value="">Mã KH: Tất cả</option>{customers.map((c) => <option key={c as string} value={c as string}>{c as string}</option>)}</select>
+        <input name="q" className="grow" type="search" placeholder="Tìm: phim, mã sản xuất, khách hàng, account…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm kiếm dự án" />
+        <select name="account" value={account} onChange={(e) => setAccount(e.target.value)} aria-label="Lọc theo Account"><option value="">Account: Tất cả</option>{accounts.map((a) => <option key={a as string} value={a as string}>{a as string}</option>)}</select>
+        <select name="customer" value={customer} onChange={(e) => setCustomer(e.target.value)} aria-label="Lọc theo Mã khách hàng"><option value="">Mã KH: Tất cả</option>{customers.map((c) => <option key={c as string} value={c as string}>{c as string}</option>)}</select>
         <button className="btn btn-sm btn-ghost" type="button" onClick={clear} disabled={!q && !account && !customer}>Xóa lọc</button>
       </div>
 

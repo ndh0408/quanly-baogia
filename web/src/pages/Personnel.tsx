@@ -270,7 +270,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
       </div>
       <div className="toolbar">
         {/* Ô tìm dùng CHUNG state query với ô tìm sidebar (GlobalSearch) — gõ ở đâu cũng lọc như nhau. */}
-        <input className="grow" type="search" aria-label="Tìm hồ sơ" placeholder="Tìm theo tên, MST, dự án…" value={query} onChange={(e) => onQuery?.(e.target.value)} />
+        <input name="q" className="grow" type="search" aria-label="Tìm hồ sơ" placeholder="Tìm theo tên, MST, dự án…" value={query} onChange={(e) => onQuery?.(e.target.value)} />
         {!canCreate && <span className="badge">Chỉ xem</span>}
         <span className="spacer" />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm hồ sơ</button>}
@@ -445,8 +445,8 @@ function InlineInput({ initial, multiline, onDone, onCancel }: { initial: string
     else if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) { e.preventDefault(); onDone(v); }
   };
   return multiline
-    ? <textarea ref={ref as Ref<HTMLTextAreaElement>} className="inline-edit-input" rows={2} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => onDone(v)} onKeyDown={onKeyDown} />
-    : <input ref={ref as Ref<HTMLInputElement>} className="inline-edit-input" type="text" value={v} onChange={(e) => setV(e.target.value)} onBlur={() => onDone(v)} onKeyDown={onKeyDown} />;
+    ? <textarea name="giaTri" ref={ref as Ref<HTMLTextAreaElement>} className="inline-edit-input" rows={2} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => onDone(v)} onKeyDown={onKeyDown} />
+    : <input name="giaTri" ref={ref as Ref<HTMLInputElement>} className="inline-edit-input" type="text" value={v} onChange={(e) => setV(e.target.value)} onBlur={() => onDone(v)} onKeyDown={onKeyDown} />;
 }
 
 // Nén ảnh phía client: resize ≤ 1280px + JPEG 0.7 → data URL nhỏ (~50–200KB) để lưu base64 (S3 chưa bật).
@@ -512,7 +512,7 @@ export function PaymentDialog({ rec, onClose, onDone, onLoi }: { rec: Personnel;
         <div className="modal-head"><h3>Thanh toán — {rec.fullName}</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           <p className="muted" style={{ marginTop: 0 }}>{paid ? `Trạng thái: ĐÃ thanh toán${(rec.paidBy as { displayName?: string } | undefined)?.displayName ? ` · ${(rec.paidBy as { displayName?: string }).displayName}` : ""}.` : "Trạng thái: CHƯA thanh toán."}</p>
-          {!paid && <label className="full"><span>Ảnh chứng từ (tùy chọn — sẽ nén tự động)</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={onFile} /></label>}
+          {!paid && <label className="full"><span>Ảnh chứng từ (tùy chọn — sẽ nén tự động)</span><input name="anhChungTu" type="file" accept="image/png,image/jpeg,image/webp" onChange={onFile} /></label>}
           {shown && <div className="pay-proof"><img src={safeImgSrc(shown)} alt="ảnh chứng từ thanh toán" /></div>}
           {!shown && proofLoading && <div className="skeleton-wrap" aria-busy="true"><div className="skeleton-row" /><div className="skeleton-row" /></div>}
           {!shown && !proofLoading && proofErr && (
@@ -635,12 +635,12 @@ function RecordForm({ rec, readOnly: readOnlyTheoQuyen, onClose, onSaved }: {
                     <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
                       <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}{f.type === "money" && <em className="unit"> (đ)</em>}</span>
                       {f.type === "textarea" ? (
-                        <textarea value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)} />
+                        <textarea autoComplete="off" name={f.key} value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)} />
                       ) : f.key === "birthYear" ? (
                         // NGÀY SINH: lịch chọn ngày (đủ dd/mm/yyyy cho hợp đồng). Trường DB là text —
                         // dữ liệu cũ chỉ có năm ("1995") giữ nguyên nếu không chọn lại (input trống + nhắc).
                         <>
-                          <input type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
+                          <input autoComplete="off" name={f.key} type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
                             onChange={(e) => set(f.key, inputToDdmm(e.target.value))} />
                           {form[f.key] && !fullDateToInput(form[f.key]) && (
                             <em className="unit">Đang lưu: “{form[f.key]}” (chỉ năm) — chọn ngày để có đủ ngày/tháng/năm in hợp đồng.</em>
@@ -695,7 +695,7 @@ function EmployeePicker({ onPick }: { onPick: (emp: Employee) => void }) {
     <fieldset className="emp-picker-fs">
       <legend>Chọn từ danh bạ (tự điền)</legend>
       <div className="emp-picker">
-        <input type="search" aria-label="Tìm người trong danh bạ" placeholder="🔎 Gõ tên / MST / SĐT để chọn người có sẵn…" value={q}
+        <input name="timDanhBa" type="search" aria-label="Tìm người trong danh bạ" placeholder="🔎 Gõ tên / MST / SĐT để chọn người có sẵn…" value={q}
                onChange={(e) => setQ(e.target.value)} onFocus={() => results.length > 0 && setOpen(true)}
                onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
                onBlur={() => { window.setTimeout(() => setOpen(false), 150); }} />
@@ -767,7 +767,7 @@ function ProjectPicker({ selected, onPick, onClear, readOnly }: {
     <fieldset className="emp-picker-fs proj-fs proj-fs-required">
       <legend>Chọn dự án đã chốt <b className="req">* bắt buộc</b></legend>
       <div className="emp-picker">
-        <input type="search" aria-label="Tìm dự án đã chốt" placeholder="🔎 Gõ tên / mã dự án để chọn (chỉ dự án đã chốt của bạn)…" value={q}
+        <input name="timDuAn" type="search" aria-label="Tìm dự án đã chốt" placeholder="🔎 Gõ tên / mã dự án để chọn (chỉ dự án đã chốt của bạn)…" value={q}
                onChange={(e) => setQ(e.target.value)} onFocus={() => setOpen(true)}
                onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
                onBlur={() => { window.setTimeout(() => setOpen(false), 150); }} />

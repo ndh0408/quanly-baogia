@@ -87,13 +87,13 @@ export function BoLocBaoGia({ loc, dat, xoa, facets: duLieuDem, meId }: {
       </div>
 
       <div id={idThem} className="toolbar inv-filter-row inv-filter-extra bl-them-hang">
-        <select value={coNgay ? (mauNgay || "tuychon") : ""} onChange={(e) => chonMauNgay(e.target.value)} aria-label="Mẫu ngày báo giá" title="Chọn nhanh khoảng ngày báo giá">
+        <select name="mauNgay" value={coNgay ? (mauNgay || "tuychon") : ""} onChange={(e) => chonMauNgay(e.target.value)} aria-label="Mẫu ngày báo giá" title="Chọn nhanh khoảng ngày báo giá">
           <option value="">Ngày báo giá: Tất cả</option>
           {MAU_NGAY.map((m) => <option key={m.khoa} value={m.khoa}>{m.nhan}</option>)}
           {coNgay && !mauNgay && <option value="tuychon">Tự chọn…</option>}
         </select>
-        <label className="inv-date-filter"><span>Từ</span><input type="date" aria-label="Ngày báo giá từ" value={loc.tu} max={loc.den || undefined} onChange={(e) => dat({ tu: e.target.value })} /></label>
-        <label className="inv-date-filter"><span>Đến</span><input type="date" aria-label="Ngày báo giá đến" value={loc.den} min={loc.tu || undefined} onChange={(e) => dat({ den: e.target.value })} /></label>
+        <label className="inv-date-filter"><span>Từ</span><input name="tu" type="date" aria-label="Ngày báo giá từ" value={loc.tu} max={loc.den || undefined} onChange={(e) => dat({ tu: e.target.value })} /></label>
+        <label className="inv-date-filter"><span>Đến</span><input name="den" type="date" aria-label="Ngày báo giá đến" value={loc.den} min={loc.tu || undefined} onChange={(e) => dat({ den: e.target.value })} /></label>
 
         <span className="bl-tien" role="group" aria-label="Tổng tiền">
           <span className="bl-nhan" aria-hidden="true">Tổng tiền:</span>
@@ -143,7 +143,7 @@ function OTien({ nhan, goiY, value, onChange }: { nhan: string; goiY: string; va
   };
   return (
     <>
-      <input type="text" inputMode="decimal" className={`bl-o-tien${loi ? " is-loi" : ""}`} aria-label={nhan} placeholder={goiY} value={chu} aria-invalid={loi || undefined}
+      <input name="tien" type="text" inputMode="decimal" className={`bl-o-tien${loi ? " is-loi" : ""}`} aria-label={nhan} placeholder={goiY} value={chu} aria-invalid={loi || undefined}
         title={loi ? "Chưa hiểu số tiền — thử 100tr, 1,5 tỷ, 500k hoặc 1.250.000" : "Gõ 100tr, 1,5 tỷ, 500k hoặc 1.250.000"}
         onChange={(e) => setChu(e.target.value)} onBlur={chot}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); chot(); } }} />

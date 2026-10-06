@@ -72,12 +72,12 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
         <section className="card-section">
           <h3>Hồ sơ</h3>
           <form className="form-grid" onSubmit={saveProfile}>
-            <label className="full">Họ tên <b className="req">*</b><input value={displayName} required onChange={(e) => setDisplayName(e.target.value)} /></label>
-            <label className="full">Tên người gửi trên báo giá<input value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => setSenderName(e.target.value)} /></label>
-            <label>Số điện thoại<input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
-            <label>Chức danh<input value={title} placeholder="VD: Account, Sale…" onChange={(e) => setTitle(e.target.value)} /></label>
-            <label>Email<input value={me.email || "—"} disabled /></label>
-            <label>Vai trò<input value={ROLE_LABEL[me.role] || me.role} disabled /></label>
+            <label className="full">Họ tên <b className="req">*</b><input autoComplete="name" name="displayName" value={displayName} required onChange={(e) => setDisplayName(e.target.value)} /></label>
+            <label className="full">Tên người gửi trên báo giá<input autoComplete="off" name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => setSenderName(e.target.value)} /></label>
+            <label>Số điện thoại<input autoComplete="tel" name="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
+            <label>Chức danh<input autoComplete="organization-title" name="title" value={title} placeholder="VD: Account, Sale…" onChange={(e) => setTitle(e.target.value)} /></label>
+            <label>Email<input autoComplete="email" name="email" value={me.email || "—"} disabled /></label>
+            <label>Vai trò<input name="role" value={ROLE_LABEL[me.role] || me.role} disabled /></label>
             <div className="full"><button className="btn btn-primary" type="submit" disabled={savingP}>{savingP ? "Đang lưu…" : "Lưu hồ sơ"}</button></div>
           </form>
         </section>
@@ -103,13 +103,13 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
           <form onSubmit={changePw} autoComplete="off">
             <p className="muted" style={{ marginTop: 0 }}>Mật khẩu mới tối thiểu 8 ký tự, gồm cả chữ và số.</p>
             <label className="pf-field"><span>Mật khẩu cũ</span>
-              <input type="password" autoComplete="current-password" required value={oldPw}
+              <input name="oldPassword" type="password" autoComplete="current-password" required value={oldPw}
                 aria-invalid={pwErrors.oldPassword ? true : undefined}
                 onChange={(e) => { setOldPw(e.target.value); clearPwErr("oldPassword"); }} />
               {pwErrors.oldPassword && <div className="field-err">{pwErrors.oldPassword}</div>}
             </label>
             <label className="pf-field"><span>Mật khẩu mới</span>
-              <input type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={newPw}
+              <input name="newPassword" type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={newPw}
                 aria-invalid={pwErrors.newPassword ? true : undefined}
                 onChange={(e) => { setNewPw(e.target.value); clearPwErr("newPassword"); }} />
               {pwErrors.newPassword && <div className="field-err">{pwErrors.newPassword}</div>}
@@ -123,7 +123,7 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
               </div>
             )}
             <label className="pf-field"><span>Nhập lại mật khẩu mới</span>
-              <input type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={newPw2}
+              <input name="newPassword2" type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={newPw2}
                 aria-invalid={pwErrors.newPw2 ? true : undefined}
                 onChange={(e) => { setNewPw2(e.target.value); clearPwErr("newPw2"); }} />
               {pwErrors.newPw2 && <div className="field-err">{pwErrors.newPw2}</div>}
@@ -196,8 +196,8 @@ function MfaSetupModal({ onClose, onEnabled }: { onClose: () => void; onEnabled:
               <div style={{ textAlign: "center" }}><img src={setup.qr} alt="Mã QR MFA" style={{ width: 184, height: 184, border: "1px solid var(--line)", borderRadius: 8 }} /></div>
               <p className="muted" style={{ wordBreak: "break-all" }}>Hoặc nhập tay khóa: <b>{setup.secret}</b></p>
               <div className="grid">
-                <label className="full"><span><b>2.</b> Mã 6 số đang hiện trên app</span><input ref={tokenRef} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" value={token} onChange={(e) => setToken(e.target.value)} /></label>
-                <label className="full"><span><b>3.</b> Mật khẩu tài khoản (xác nhận)</span><input type="password" autoComplete="current-password" placeholder="Mật khẩu" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+                <label className="full"><span><b>2.</b> Mã 6 số đang hiện trên app</span><input name="token" ref={tokenRef} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" value={token} onChange={(e) => setToken(e.target.value)} /></label>
+                <label className="full"><span><b>3.</b> Mật khẩu tài khoản (xác nhận)</span><input name="password" type="password" autoComplete="current-password" placeholder="Mật khẩu" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
               </div>
             </form>
           )}
@@ -238,8 +238,8 @@ function MfaDisableModal({ onClose, onDisabled }: { onClose: () => void; onDisab
         <div className="modal-body">
           <form id="mfa-disable-form" onSubmit={(e) => { e.preventDefault(); disable(); }}>
             <div className="grid">
-              <label className="full"><span>Mật khẩu hiện tại</span><input ref={pwRef} type="password" autoComplete="current-password" placeholder="Mật khẩu" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-              <label className="full"><span>Mã 6 số (hoặc mã dự phòng)</span><input autoComplete="one-time-code" placeholder="123456" value={token} onChange={(e) => setToken(e.target.value)} /></label>
+              <label className="full"><span>Mật khẩu hiện tại</span><input name="password" ref={pwRef} type="password" autoComplete="current-password" placeholder="Mật khẩu" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+              <label className="full"><span>Mã 6 số (hoặc mã dự phòng)</span><input name="token" autoComplete="one-time-code" placeholder="123456" value={token} onChange={(e) => setToken(e.target.value)} /></label>
             </div>
           </form>
         </div>

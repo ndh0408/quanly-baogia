@@ -261,12 +261,12 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                   <div className="extra-table extra-table-inline">
                     <div className="extra-table-head">
                       <span className={`extra-here cat-${cat}`}>📍 Đang ở: {label}</span>
-                      <input className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${active + 1}`}"`} disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} />
-                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                      <input name="tenSheet" className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${active + 1}`}"`} disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} />
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select name="templateId" value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
                       {/* "Chuyển loại" chỉ liệt kê loại người này ĐƯỢC PHÉP sửa — không thì họ kéo
                           bảng sang loại ngoài phạm vi rồi sửa ở đó (server sẽ 409, nhưng để họ gõ
                           xong mới báo là kiểu tệ nhất). */}
-                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.filter(([v]) => v === t.category || suaDuoc(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select name="category" value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.filter(([v]) => v === t.category || suaDuoc(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
                     </div>
                     {/* `fxBar`: THANH CÔNG THỨC. Trước đây chỉ lưới chính và sheet Hà Nội mới có,
                         nên sheet HCM / Phí Khách Hàng thiếu hẳn ô địa chỉ + ô công thức, không xem

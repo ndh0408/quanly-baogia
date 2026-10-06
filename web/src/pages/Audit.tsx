@@ -191,7 +191,7 @@ export function AuditPage() {
       <h1>Nhật ký hoạt động</h1>
       <p className="muted page-sub">Lịch sử ai đã làm gì trong hệ thống.</p>
       <div className="toolbar">
-        <select aria-label="Lọc theo hoạt động" value={action} onChange={(e) => setAction(e.target.value)}>
+        <select name="action" aria-label="Lọc theo hoạt động" value={action} onChange={(e) => setAction(e.target.value)}>
           <option value="">Tất cả hoạt động</option>
           {ACTION_GROUPS.map(([g, opts]) => (
             <optgroup key={g} label={g}>
@@ -199,12 +199,12 @@ export function AuditPage() {
             </optgroup>
           ))}
         </select>
-        <select aria-label="Lọc theo đối tượng" value={resource} onChange={(e) => setResource(e.target.value)}>
+        <select name="resource" aria-label="Lọc theo đối tượng" value={resource} onChange={(e) => setResource(e.target.value)}>
           <option value="">Tất cả đối tượng</option>
           {RESOURCE_OPTS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <label className="inline-field">Từ <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="inline-field">Đến <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <label className="inline-field">Từ <input name="from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="inline-field">Đến <input name="to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
         <button className="btn btn-sm btn-ghost" type="button" onClick={clear} disabled={!hasFilter}>Xóa lọc</button>
       </div>
 

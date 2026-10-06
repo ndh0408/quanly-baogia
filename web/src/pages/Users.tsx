@@ -81,8 +81,8 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
       <h1>Quản lý nhân viên</h1>
       <p className="muted page-sub">Mời qua email — nhân viên tự đặt mật khẩu rồi đăng nhập bằng email. Nhân viên nghỉ việc thì <b>Khóa</b> tài khoản (không xóa).</p>
       <div className="toolbar">
-        <input type="search" className="grow" placeholder="Tìm theo tên, tên đăng nhập, email, SĐT…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm nhân viên" />
-        <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} aria-label="Lọc theo trạng thái">
+        <input name="q" type="search" className="grow" placeholder="Tìm theo tên, tên đăng nhập, email, SĐT…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm nhân viên" />
+        <select name="status" value={fStatus} onChange={(e) => setFStatus(e.target.value)} aria-label="Lọc theo trạng thái">
           <option value="">Tất cả trạng thái</option>
           <option value="active">Hoạt động</option>
           <option value="pending">Chờ kích hoạt</option>
@@ -176,7 +176,7 @@ function PermMatrix({ cat, isAdmin, value, onChange }: { cat: PermCatalog; isAdm
               const locked = adminOnly.has(p.key);
               return (
                 <label key={p.key} className={`perm-item${locked ? " locked" : ""}`} title={locked ? "Chỉ tài khoản Quản trị mới có" : (p.desc || p.key)}>
-                  <input type="checkbox" disabled={locked} checked={!locked && value.has(p.key)} onChange={() => toggle(p.key)} />
+                  <input name="quyen" type="checkbox" disabled={locked} checked={!locked && value.has(p.key)} onChange={() => toggle(p.key)} />
                   <span className="perm-item-txt">
                     <span className="perm-item-label">{p.label}{locked && " 🔒"}</span>
                     {p.desc && <span className="perm-item-desc">{p.desc}</span>}
@@ -251,7 +251,7 @@ function PermSection({ cat, isAdmin, setAdmin, perms, setPerms, onPreview, label
   return (
     <div className="perm-section">
       <label className="perm-admin-toggle">
-        <input type="checkbox" checked={isAdmin} onChange={(e) => setAdmin(e.target.checked)} />
+        <input name="admin" type="checkbox" checked={isAdmin} onChange={(e) => setAdmin(e.target.checked)} />
         <span><strong>Toàn quyền quản trị</strong> <span className="muted" style={{ fontSize: 11 }}>(thấy & làm mọi thứ; quản lý tài khoản/cấu hình)</span></span>
       </label>
       {!isAdmin && veTheoVaiTro && (veTheoVaiTro.dangBat ? (
@@ -259,7 +259,7 @@ function PermSection({ cat, isAdmin, setAdmin, perms, setPerms, onPreview, label
           <p className="muted" style={{ margin: "0 0 6px" }}>↺ Lưu xong, tài khoản này <b>bỏ quyền Tùy chỉnh</b> và theo ma trận vai trò <b>{veTheoVaiTro.nhanVaiTro}</b> (trang Phân quyền) — đổi quyền của vai trò đó sẽ áp cho họ. Tích / bỏ ô bất kỳ bên dưới là quay lại quyền Tùy chỉnh.</p>
           {veTheoVaiTro.hoiGiuKy && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
-              <input type="checkbox" checked={veTheoVaiTro.giuKy} onChange={(e) => veTheoVaiTro.doiGiuKy(e.target.checked)} />
+              <input name="giuKy" type="checkbox" checked={veTheoVaiTro.giuKy} onChange={(e) => veTheoVaiTro.doiGiuKy(e.target.checked)} />
               <span>Giữ quyền Ký chứng từ riêng <span className="muted">(vai trò {veTheoVaiTro.nhanVaiTro} không có quyền này; bỏ tích = mất quyền Ký)</span></span>
             </label>
           )}
@@ -330,17 +330,17 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
           <p className="muted" style={{ marginTop: 0 }}>Nhập email — hệ thống gửi lời mời, họ tự đặt mật khẩu. Tích các quyền tài khoản này được phép.</p>
           <div className="grid">
             <label className="full"><span>Họ tên <b className="req">*</b></span>
-              <input ref={firstRef} value={displayName} placeholder="VD: Nguyễn Văn A" aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />
+              <input autoComplete="off" name="displayName" ref={firstRef} value={displayName} placeholder="VD: Nguyễn Văn A" aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />
               {fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
             {/* Cùng cụm danh tính với Họ tên. Câu chữ lấy NGUYÊN của trang Hồ sơ cá nhân và màn
                 kích hoạt (#/onboard) — ba nơi cùng một trường thì phải cùng một cách gọi tên. */}
             <label className="full"><span>Tên người gửi trên báo giá</span>
-              <input value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
+              <input autoComplete="off" name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
             <label className="full"><span>Email cá nhân <b className="req">*</b></span>
-              <input type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
+              <input autoComplete="off" name="email" type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
               {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: báo giá của họ năm nay là FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span>
-              <input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
+              <input name="projectCode" value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
           <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={xemThu} label={displayName.trim() || "tài khoản mới"} />
         </div>
@@ -482,8 +482,8 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
         <div className="modal-head"><h3>Sửa: {user.username}</h3><button className="x" onClick={() => void guardedClose()} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           <div className="grid">
-            <label className="full"><span>Tên đăng nhập</span><input value={user.username} disabled /></label>
-            <label className="full"><span>Họ tên</span><input ref={firstRef} value={displayName} aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />{fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
+            <label className="full"><span>Tên đăng nhập</span><input autoComplete="off" name="username" value={user.username} disabled /></label>
+            <label className="full"><span>Họ tên</span><input autoComplete="off" name="displayName" ref={firstRef} value={displayName} aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />{fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
             {/* Trước 2026-09-18 email đặt được ĐÚNG MỘT LẦN lúc mời rồi khoá cứng: `USER_SELECT` trả
                 cột này về nên giao diện ĐỌC được, nhưng không schema quản trị nào NHẬN nó — ảnh gương
                 của ca `title` (ghi-được-không-đọc-được). Một địa chỉ gõ sai lúc mời là không ai sửa
@@ -494,22 +494,22 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
                 một lá thư không bao giờ tới. Máy chủ chặn 400; `required` ở đây chỉ để người dùng biết
                 trước khi bấm Lưu. Muốn bỏ một người thì KHOÁ tài khoản, đừng xoá email. */}
             <label className="full"><span>Email <em className="unit">(địa chỉ nhận thư mời · đặt lại mật khẩu)</em></span>
-              <input type="email" required value={email} placeholder="vd: nhanvien@gianguyen.vn" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
+              <input autoComplete="off" name="email" type="email" required value={email} placeholder="vd: nhanvien@gianguyen.vn" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
               {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
             {/* Ô NẠP SẴN giá trị đang có ⇒ xoá trắng là XOÁ THẬT. Admin nhìn thấy "Chị Lan", xoá đi,
                 bấm Lưu — kỳ vọng duy nhất là nó biến mất. Bản trước quy "" về "không đổi", nên
                 giao diện báo "Đã lưu" mà cột vẫn nguyên: lưu mà không ăn. (Luật ngược lại chỉ áp
                 cho ô KHÔNG nạp sẵn — vd màn Quên mật khẩu, nơi ô luôn rỗng bất kể CSDL có gì.) */}
-            <label className="full"><span>Tên người gửi trên báo giá</span><input value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
-            <label className="full"><span>SĐT</span><input type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
+            <label className="full"><span>Tên người gửi trên báo giá</span><input autoComplete="off" name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
+            <label className="full"><span>SĐT</span><input autoComplete="off" name="phone" type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
             {/* Cùng luật, cùng câu chữ với trang Hồ sơ cá nhân (web/src/pages/Profile.tsx) và màn
                 #/onboard — một trường thì một cách gọi tên. Ô này IN LÊN BÁO GIÁ gửi khách (dòng
                 chức danh dưới tên người gửi), nhưng trước 2026-09-17 `USER_SELECT` không trả
                 `title` về nên modal không dựng nổi ô: admin ghi được qua API mà không đọc lại được,
                 và người được mời qua email bỏ trống ô Chức danh ở #/onboard thì không ai sửa hộ
                 được nữa. */}
-            <label className="full"><span>Chức danh</span><input value={title} placeholder="VD: Account, Sale…" onChange={(e) => mark(setTitle)(e.target.value)} /></label>
-            <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
+            <label className="full"><span>Chức danh</span><input autoComplete="off" name="title" value={title} placeholder="VD: Account, Sale…" onChange={(e) => mark(setTitle)(e.target.value)} /></label>
+            <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input name="projectCode" value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
           <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={setPermsTay} onPreview={xemThu} label={user.displayName || user.username}
             veTheoVaiTro={user.permCustom && vaiTroSau ? { nhanVaiTro: vaiTroSau.label, dangBat: veTheoVaiTro, bat: batVeTheoVaiTro, hoiGiuKy, giuKy, doiGiuKy } : undefined} />
@@ -556,7 +556,7 @@ function InviteResultModal({ result, onClose }: { result: InviteResult; onClose:
             </p>
           )}
           <div className="copy-row" style={{ marginTop: 8 }}>
-            <input ref={ref} value={result.inviteUrl} readOnly aria-label="Liên kết mời" />
+            <input name="inviteUrl" ref={ref} value={result.inviteUrl} readOnly aria-label="Liên kết mời" />
             <button className="btn" type="button" onClick={copy}>Sao chép</button>
           </div>
           <p className="muted" style={{ marginTop: 10 }}>Nhân viên mở liên kết → đặt mật khẩu + điền SĐT → đăng nhập bằng <b>email</b>. Lời mời hết hạn sau 7 ngày.</p>

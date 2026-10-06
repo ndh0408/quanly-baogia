@@ -329,7 +329,7 @@ export function ImportExcelModal({
                 <div><strong>Kéo file .xlsx vào đây</strong> hoặc bấm để chọn</div>
                 <div className="muted" style={{ fontSize: 12.5 }}>Tối đa 10 MB · chỉ định dạng .xlsx (file .xls cũ hãy mở Excel rồi “Lưu thành” .xlsx)</div>
               </div>
-              <input ref={inputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              <input name="tepExcel" ref={inputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 style={{ display: "none" }} onChange={(e) => pick(e.target.files?.[0])} />
               {busy && <div className="skeleton-wrap" style={{ marginTop: 14 }}>{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>}
             </>
@@ -365,7 +365,7 @@ export function ImportExcelModal({
                         {s.stats.formulas > 0 && <> · giữ {s.stats.formulas} công thức</>}
                       </td>
                       <td>
-                        <select value={plans[i]?.targetIndex ?? 0} disabled={plans[i]?.mode === "skip"}
+                        <select name="targetIndex" value={plans[i]?.targetIndex ?? 0} disabled={plans[i]?.mode === "skip"}
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             const targetIndex = Number(e.target.value);
@@ -379,7 +379,7 @@ export function ImportExcelModal({
                         </select>
                       </td>
                       <td>
-                        <select value={plans[i]?.mode ?? "replace"} onClick={(e) => e.stopPropagation()}
+                        <select name="mode" value={plans[i]?.mode ?? "replace"} onClick={(e) => e.stopPropagation()}
                           onChange={(e) => setPlan(i, { mode: e.target.value as TargetMode })}>
                           {plans[i]?.targetIndex === NEW_SHEET
                             ? <option value="replace">Tạo sheet mới</option>
@@ -407,7 +407,7 @@ export function ImportExcelModal({
                   return <div className="import-unmatched-row" key={i}>
                     <span><strong>{sh.name || `Sheet ${i + 1}`}</strong>{tpl?.name && <small>{tpl.name}</small>}
                       {daChi.length > 0 && <small className="field-err">Có {daChi.length} khoản đã chi — không xoá được</small>}</span>
-                    <select value={remove ? "remove" : "keep"} onChange={(e) => setRemoveTargets((cur) => e.target.value === "remove" ? [...new Set([...cur, i])] : cur.filter((x) => x !== i))}>
+                    <select name="removeTargets" value={remove ? "remove" : "keep"} onChange={(e) => setRemoveTargets((cur) => e.target.value === "remove" ? [...new Set([...cur, i])] : cur.filter((x) => x !== i))}>
                       <option value="keep">Giữ lại trong báo giá</option>
                       <option value="remove" disabled={daChi.length > 0}>Xóa khi nạp</option>
                     </select>
@@ -554,7 +554,7 @@ export function ImportExcelModal({
                     </span>
                   </div>
                   {view.counts.same > 0 && <label className="import-show-same">
-                    <input type="checkbox" checked={showSame} onChange={(e) => setShowSame(e.target.checked)} />
+                    <input name="showSame" type="checkbox" checked={showSame} onChange={(e) => setShowSame(e.target.checked)} />
                     Hiện thêm {view.counts.same} dòng không thay đổi
                   </label>}
                   {previewRows.length > 0 ? <div className="import-diff-wrap">
@@ -571,7 +571,7 @@ export function ImportExcelModal({
 
                   {!khongCoTongTien && view.fs.totals && (view.fs.totals.vatPercent != null || view.fs.totals.discount != null) && (
                     <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13.5, cursor: "pointer" }}>
-                      <input type="checkbox" checked={applyTotals} onChange={(e) => setApplyTotals(e.target.checked)} />
+                      <input name="applyTotals" type="checkbox" checked={applyTotals} onChange={(e) => setApplyTotals(e.target.checked)} />
                       <span>
                         Lấy luôn <strong>VAT {view.fs.totals.vatPercent ?? "—"}%</strong>
                         {!!view.fs.totals.discount && <> và <strong>Discount {M.fmtMoney(view.fs.totals.discount)}</strong> cho riêng sheet này</>} theo file

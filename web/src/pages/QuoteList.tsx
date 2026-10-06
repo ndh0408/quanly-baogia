@@ -188,16 +188,16 @@ export function QuoteListPage({ me }: { me: Me }) {
         // VIEW LƯỢC (account HN / tài khoản chi phí): ô tìm + trạng thái + ngày — những thứ họ thấy trên dòng. Không người tạo /
         // tổng tiền / ghi chú / số đếm: lọc theo thứ người ta không được thấy là cách dò nó (máy chủ cũng bỏ các bộ lọc đó).
         <div className="toolbar">
-          <input type="search" className="grow" placeholder="Tìm theo số, tiêu đề, khách…" value={loc.q} onChange={(e) => datLoc({ q: e.target.value })} aria-label="Tìm báo giá" />
-          <select value={loc.status.join(",")} onChange={(e) => datLoc({ status: e.target.value ? e.target.value.split(",") : [] })} aria-label="Lọc theo trạng thái">
+          <input name="q" type="search" className="grow" placeholder="Tìm theo số, tiêu đề, khách…" value={loc.q} onChange={(e) => datLoc({ q: e.target.value })} aria-label="Tìm báo giá" />
+          <select name="status" value={loc.status.join(",")} onChange={(e) => datLoc({ status: e.target.value ? e.target.value.split(",") : [] })} aria-label="Lọc theo trạng thái">
             <option value="">— Tất cả trạng thái —</option>
             <option value="draft">Nháp</option><option value="converted">Đã chốt</option><option value="lost">Không chốt</option>
             {/* Deep-link từ Pipeline Dashboard (#/list?status=pending…): trạng thái ngoài bộ chuẩn vẫn phải
                 hiện trong select — không thì ô trống, user không biết đang lọc gì. */}
             {loc.status.length > 0 && !["draft", "converted", "lost"].includes(loc.status.join(",")) && <option value={loc.status.join(",")}>{loc.status.map(statusLabel).join(", ")}</option>}
           </select>
-          <label className="inv-date-filter"><span>Từ</span><input type="date" aria-label="Ngày báo giá từ" value={loc.tu} max={loc.den || undefined} onChange={(e) => datLoc({ tu: e.target.value })} /></label>
-          <label className="inv-date-filter"><span>Đến</span><input type="date" aria-label="Ngày báo giá đến" value={loc.den} min={loc.tu || undefined} onChange={(e) => datLoc({ den: e.target.value })} /></label>
+          <label className="inv-date-filter"><span>Từ</span><input name="tu" type="date" aria-label="Ngày báo giá từ" value={loc.tu} max={loc.den || undefined} onChange={(e) => datLoc({ tu: e.target.value })} /></label>
+          <label className="inv-date-filter"><span>Đến</span><input name="den" type="date" aria-label="Ngày báo giá đến" value={loc.den} min={loc.tu || undefined} onChange={(e) => datLoc({ den: e.target.value })} /></label>
           <button className="btn btn-sm btn-ghost" type="button" onClick={xoaLoc} disabled={!dangLoc}>Xóa lọc</button>
           {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
         </div>
@@ -206,7 +206,7 @@ export function QuoteListPage({ me }: { me: Me }) {
           <div className="toolbar">
             {/* Tìm THÔNG MINH: nhiều từ, không dấu, không cần đúng thứ tự; mỗi từ khớp mã / tiêu đề / khách (cả trong danh mục) /
                 người tạo / công ty / ghi chú — luật ở src/quoteListFilter.ts. */}
-            <input type="search" className="grow" placeholder="Tìm theo mã, tiêu đề, khách, người tạo, ghi chú…" title="Gõ nhiều từ, không cần dấu, không cần đúng thứ tự — ví dụ: sao mai hcm" value={loc.q} onChange={(e) => datLoc({ q: e.target.value })} aria-label="Tìm báo giá" />
+            <input name="q" type="search" className="grow" placeholder="Tìm theo mã, tiêu đề, khách, người tạo, ghi chú…" title="Gõ nhiều từ, không cần dấu, không cần đúng thứ tự — ví dụ: sao mai hcm" value={loc.q} onChange={(e) => datLoc({ q: e.target.value })} aria-label="Tìm báo giá" />
             {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
           </div>
           <BoLocBaoGia loc={loc} dat={datLoc} xoa={xoaLoc} facets={facets} meId={me.id} />
