@@ -3569,7 +3569,7 @@ textarea[aria-invalid="true"] {
   margin: 0;
   padding: 0;
   border: 2px solid #1e293b;
-  border-color: #1e293b;   /* ghi riêng để luật giao diện tối chỉ cần đè đúng màu */
+  border-color: #1e293b; /* ghi riêng để luật giao diện tối chỉ cần đè đúng màu */
   border-radius: 4px;
   background-color: #1e293b;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
