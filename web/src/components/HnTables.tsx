@@ -6,6 +6,7 @@ import { type EditorTemplate } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
 import { extraTableSum, removeTableFromList, loiXoaBangDaChi, type ExtraTable } from "./ExtraTables";
 import { KhoiSheet } from "./KhoiSheet";
+import { sapMauHienThi } from "../lib/thuTuMau";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
 //
@@ -166,7 +167,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
             {editable && (
               <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu:
                 <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>
-                  {tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  {sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </select>
               </label>
             )}

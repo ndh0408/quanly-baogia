@@ -15,6 +15,7 @@ import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuyenBanNhapCu } from "../lib/localDraft";
 import { useTrangAnToan } from "../lib/phienBan";
+import { sapMauHienThi } from "../lib/thuTuMau";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
 const RONG: never[] = [];
@@ -1368,7 +1369,7 @@ Lý do (không bắt buộc):`,
             // (lưới gắn lại theo mẫu nên Ctrl+Z không cứu). Mẫu không ngày thì tiền vốn không nhân ngày
             // (lineAmount/sheetTotals theo `usesDays`) và save() đã tự gửi `days: null`.
             activeSheet.templateId = Number(e.target.value); mark(); redraw();
-          }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          }}>{sapMauHienThi(templates.filter((t) => t.companyId === q.companyId)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
           {suaMain && (
             <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (bản khách đã sửa hoặc file ngoài)"
