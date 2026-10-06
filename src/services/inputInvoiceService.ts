@@ -46,17 +46,23 @@ import {
 /** Trần số ảnh MỘT khoản giữ được (kể cả ảnh đã rút) — ảnh chỉ thêm, nên phải có trần. */
 export const TRAN_ANH_MOI_KHOAN = 20;
 
-const CHON_KHOAN = {
+// KHÔNG dùng toán tử `satisfies`: parser của semgrep 1.97 bỏ vùng quanh nó, và scripts/ci/security-scan.sh [S3] ghim số tệp
+// mã nguồn quét dở. Hàm đồng nhất có tham số kiểu kiểm y hệt (khoá chọn phải hợp lệ, giữ kiểu literal `true` để Prisma suy
+// đúng hình kết quả) mà parser đọc được.
+function chonKhoanChi<T extends Prisma.InputInvoiceEntrySelect>(s: T): T { return s; }
+function chonAnhChungTu<T extends Prisma.InputInvoiceProofSelect>(s: T): T { return s; }
+
+const CHON_KHOAN = chonKhoanChi({
   id: true, quoteId: true, side: true, rid: true,
   paid: true, paidAt: true, paidById: true, paidByName: true, paidSnapshot: true,
   currentProofId: true, invoiceDate: true, accountingNote: true,
   rowSnapshot: true, legacySeed: true, source: true, version: true,
   updatedAt: true, updatedByName: true,
-} satisfies Prisma.InputInvoiceEntrySelect;
+});
 
-const CHON_ANH = {
+const CHON_ANH = chonAnhChungTu({
   id: true, entryId: true, uploadedAt: true, uploadedByName: true, retiredAt: true, retiredReason: true, source: true,
-} satisfies Prisma.InputInvoiceProofSelect;
+});
 
 type DocKhoan = Pick<TxClient, "inputInvoiceEntry">;
 

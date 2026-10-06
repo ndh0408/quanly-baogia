@@ -1385,6 +1385,10 @@ export async function listHnAccounts(req: Request) {
   return { data };
 }
 
+// Thay cho `{ … } satisfies Prisma.QuoteSelect`: toán tử `satisfies` làm parser của semgrep 1.97 bỏ vùng quanh nó
+// (scripts/ci/security-scan.sh [S3] ghim số tệp quét dở). Hàm đồng nhất có tham số kiểu kiểm y hệt và giữ kiểu literal.
+function chonBaoGiaDauVao<T extends Prisma.QuoteSelect>(s: T): T { return s; }
+
 /**
  * HÓA ĐƠN ĐẦU VÀO — `GET /input-invoices`: mọi hàng bảng nội bộ ĐÃ DUYỆT (Chi phí HCM / Phí khách hàng theo
  * hàng, Báo giá Hà Nội theo `hnStatus = approved`), mỗi hàng là một khoản chi cần hoá đơn đầu vào. LUẬT chọn
@@ -1430,14 +1434,14 @@ export async function listInputInvoices(req: Request) {
   const idsDaXoa = daXoa.map((r) => r.id);
   if (!ids.length && !idsDaXoa.length) return { data: [] as HangDauVao[], meta: { quotes: 0, truncated: false } };
 
-  const chonBaoGia = {
+  const chonBaoGia = chonBaoGiaDauVao({
     id: true, companyId: true, status: true, projectCode: true, projectVersion: true, quoteNumber: true, title: true, shortTitle: true,
     hnStatus: true, hnReviewedAt: true, hnReviewerId: true,
     customer: { select: { code: true, name: true } },
     company: { select: { shortName: true, name: true } },
     createdBy: { select: { displayName: true } },
     sheets: { orderBy: [{ order: "asc" }, { id: "asc" }], select: { id: true, order: true, name: true, codeNo: true } },
-  } satisfies Prisma.QuoteSelect;
+  });
   const [quotes, quotesDaXoa, hnTheoBaoGia, bangSheet, dsMau, khoanTheoBaoGia] = await Promise.all([
     ids.length ? prisma.quote.findMany({ where: { id: { in: ids } }, select: chonBaoGia }) : [],
     idsDaXoa.length ? prisma.quote.findMany({ where: { id: { in: idsDaXoa } }, select: chonBaoGia, includeDeleted: true } as any) as Promise<any[]> : [],
