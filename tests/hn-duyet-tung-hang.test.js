@@ -4,8 +4,8 @@
  *
  * Chốt trên CSDL thật:
  *   · Account HN gửi duyệt TỪNG HÀNG (chọn rid) hoặc hàng loạt; một lần gửi = MỘT thông báo cho chủ báo giá.
- *   · Duyệt / trả / bỏ duyệt cần quyền duyệt dòng bảng nội bộ (quote:internal:approve, như Chi phí HCM); manager thường
- *     (chỉ quote:hn:manage) và Account HN được giao (kể cả khi được cấp riêng quyền duyệt) đều 403.
+ *   · Duyệt / trả / bỏ duyệt GIỮ QUYỀN CŨ của duyệt cả phần: quote:hn:manage (admin, manager/Account — chủ báo giá);
+ *     chỉ có quote:internal:approve thì 403; Account HN được giao không tự duyệt (kể cả khi được cấp quote:hn:manage).
  *   · Hàng đã duyệt KHOÁ ở MÁY CHỦ với mọi đường Lưu (PUT /:id/hn, PUT /:id — kể cả admin): sửa / xoá → 409
  *     'hang-hn-da-khoa'; hàng đã gửi khoá với Account HN; bỏ duyệt thì mở lại.
  *   · Hóa đơn đầu vào: hàng HN đã duyệt hiện NGAY (không chờ cả phần), kế toán tích đã chi được; bỏ duyệt hàng đã chi →
@@ -28,7 +28,7 @@ const PWD = "Test1234!a";
 const PREFIX = `D${`${Date.now()}`.slice(-6)}`;
 
 describe.runIf(dbAvailable)("Bảng Hà Nội — gửi / duyệt / trả / bỏ duyệt TỪNG HÀNG", () => {
-  let app, soanU, adminU, admin2U, hnU, ketoanU, companyId, templateId, quoteId;
+  let app, soanU, adminU, admin2U, hnU, ketoanU, chiDuyetNoiBoU, companyId, templateId, quoteId;
   const dangNhap = async (u) => {
     const a = agentWithCsrf(app);
     expect((await a.post("/api/auth/login").send({ username: u.username, password: PWD })).status).toBe(200);
@@ -62,11 +62,12 @@ describe.runIf(dbAvailable)("Bảng Hà Nội — gửi / duyệt / trả / bỏ
 
   beforeAll(async () => {
     app = (await import("../src/app.js")).createApp();
-    soanU = await taoUser("soan", "manager");                     // chủ báo giá: có quote:hn:manage, KHÔNG có quyền duyệt dòng
+    soanU = await taoUser("soan", "manager");                     // chủ báo giá: quote:hn:manage (vai trò mặc định) — người duyệt HN
     adminU = await taoUser("admin", "admin");                     // người duyệt (quote:internal:approve)
     admin2U = await taoUser("admin2", "admin");
     hnU = await taoUser("hn", "account_hn", undefined);
     ketoanU = await taoUser("ketoan", "accountant");
+    chiDuyetNoiBoU = await taoUser("duyetnb", "manager", [P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL, P.QUOTE_INTERNAL_APPROVE]);   // không có hn:manage
     companyId = (await prisma.company.create({ data: { code: `${TAG}CO`, name: "Cty thử", address: "1 Thử", quotePrefix: PREFIX } })).id;
     templateId = (await prisma.quoteTemplate.create({ data: { companyId, name: "Mẫu thử", code: `${TAG}k`, filePath: "templates/GN_KhongNgay.xlsx" } })).id;
     const soan = await dangNhap(soanU);
@@ -80,7 +81,7 @@ describe.runIf(dbAvailable)("Bảng Hà Nội — gửi / duyệt / trả / bỏ
   }, 60_000);
 
   afterAll(async () => {
-    const ids = [soanU, adminU, admin2U, hnU, ketoanU].filter(Boolean).map((u) => u.id);
+    const ids = [soanU, adminU, admin2U, hnU, ketoanU, chiDuyetNoiBoU].filter(Boolean).map((u) => u.id);
     const qIds = (await prisma.quote.findMany({ where: { title: { startsWith: TAG } }, includeDeleted: true, select: { id: true } })).map((q) => q.id);
     await prisma.inputInvoiceEntry.deleteMany({ where: { quoteId: { in: qIds } } }).catch(() => {});
     await prisma.auditEvent.deleteMany({ where: { actorId: { in: ids } } }).catch(() => {});
@@ -126,10 +127,10 @@ describe.runIf(dbAvailable)("Bảng Hà Nội — gửi / duyệt / trả / bỏ
     expect((await hangDb("C")).unitPrice).toBe(350);
   });
 
-  it("QUYỀN: chủ báo giá chỉ có quote:hn:manage → 403; Account HN được giao KHÔNG tự duyệt kể cả khi được cấp quyền duyệt", async () => {
-    const soan = await dangNhap(soanU);
-    expect((await soan.post(`/api/quotes/${quoteId}/hn/review`).send({ decision: "approve", rids: [await rid("A")] })).status).toBe(403);
-    await prisma.user.update({ where: { id: hnU.id }, data: { permissions: [P.QUOTE_HN_FILL, P.QUOTE_INTERNAL_APPROVE, P.QUOTE_READ_OWN] } });
+  it("QUYỀN: chỉ có quote:internal:approve (không quote:hn:manage) → 403; Account HN được giao KHÔNG tự duyệt kể cả khi được cấp quote:hn:manage", async () => {
+    const nb = await dangNhap(chiDuyetNoiBoU);
+    expect((await nb.post(`/api/quotes/${quoteId}/hn/review`).send({ decision: "approve", rids: [await rid("A")] })).status).toBe(403);
+    await prisma.user.update({ where: { id: hnU.id }, data: { permissions: [P.QUOTE_HN_FILL, P.QUOTE_HN_MANAGE, P.QUOTE_READ_OWN] } });
     try {
       const hn = await dangNhap(hnU);
       const r = await hn.post(`/api/quotes/${quoteId}/hn/review`).send({ decision: "approve", rids: [await rid("A")] });
@@ -140,20 +141,20 @@ describe.runIf(dbAvailable)("Bảng Hà Nội — gửi / duyệt / trả / bỏ
     expect((await hangDb("A")).trangThaiDuyet).toBe("cho-duyet");
   });
 
-  it("người có quyền duyệt DUYỆT một hàng → hàng đó vào Hóa đơn đầu vào NGAY (phần HN chưa duyệt hết); MỘT thông báo cho Account HN", async () => {
-    const admin = await dangNhap(adminU);
+  it("CHỦ báo giá (manager — quyền cũ quote:hn:manage) DUYỆT một hàng → hàng đó vào Hóa đơn đầu vào NGAY (phần HN chưa duyệt hết); MỘT thông báo cho Account HN", async () => {
+    const admin = await dangNhap(soanU);
     const truoc = await soThongBao(hnU.id);
     const r = await admin.post(`/api/quotes/${quoteId}/hn/review`).send({ decision: "approve", rids: [await rid("A")] });
     expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
     expect(await soThongBao(hnU.id)).toBe(truoc + 1);
     const a = await hangDb("A");
-    expect(a).toMatchObject({ trangThaiDuyet: "da-duyet", approved: true, approvedBy: adminU.id });
+    expect(a).toMatchObject({ trangThaiDuyet: "da-duyet", approved: true, approvedBy: soanU.id });
     expect((await prisma.quote.findUnique({ where: { id: quoteId } })).hnStatus, "còn B đang chờ").toBe("submitted");
 
     const kt = await dangNhap(ketoanU);
     const dong = await dongDauVao(kt);
     expect(dong.map((d) => d.name)).toEqual(["A"]);
-    expect(dong[0]).toMatchObject({ trangThaiHang: "binh-thuong", amount: 1000, approvedByName: `${TAG} admin`, coTheGhi: true });
+    expect(dong[0]).toMatchObject({ trangThaiHang: "binh-thuong", amount: 1000, approvedByName: `${TAG} soan`, coTheGhi: true });
     // Kế toán tích ĐÃ CHI được ngay trên hàng đã duyệt theo hàng.
     const chi = await kt.put(`/api/quotes/input-invoices/${quoteId}/hn/${encodeURIComponent(a.rid)}`).send({ baseVersion: 0, paid: true });
     expect(chi.status, JSON.stringify(chi.body).slice(0, 300)).toBe(200);

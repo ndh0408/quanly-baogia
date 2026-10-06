@@ -82,7 +82,7 @@ import * as ui from "../lib/ui";
 import { khoaBanNhap, ghiBanNhap, docBanNhap } from "../lib/localDraft";
 import { setPendingNewQuote } from "../lib/pendingQuote";
 
-const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all", "quote:internal:pay", "quote:internal:approve"] };   // internal:approve: duyệt / trả hàng HN (2026-10-06)
+const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all", "quote:internal:pay"] };
 type WinDirty = Window & { __editorDirty?: boolean };
 
 let root: Root | null = null;

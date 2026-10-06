@@ -148,7 +148,8 @@ describe.runIf(dbAvailable)("Lưu báo giá và kế toán ghi khoản chi song 
 
   // ── H1 ──────────────────────────────────────────────────────────────────────────────────────────────
   it("H1 màn soạn mở TRƯỚC lần tích, Lưu SAU lần tích → 200 không 409, khoản nguyên vẹn; bỏ đúng hàng đã chi → 400 chứ không 409", async () => {
-    const q0 = await taoBaoGia("h1", { trang: [[bang([hang("r1", "Thuê xe"), hang("r2", "Nước uống")])]] });
+    // r2 CHƯA duyệt: từ 2026-10-06 hàng HCM đã duyệt bị khoá với mọi người — bài này đo khoá lạc quan / khoản, không đo duyệt.
+    const q0 = await taoBaoGia("h1", { trang: [[bang([hang("r1", "Thuê xe"), hang("r2", "Nước uống", { approved: false, approvedAt: null, approvedBy: null })])]] });
     const q = await tai(q0.id);   // màn soạn nạp ở đây — mốc T0
     expect((await tich(ketoan, q.id, "sheet", "r1", { baseVersion: 0, paid: true, paidProof: ANH })).status).toBe(200);
     const e0 = await khoan(q.id, "sheet", "r1");

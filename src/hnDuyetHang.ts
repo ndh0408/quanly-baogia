@@ -177,7 +177,7 @@ const nhanHang = (ds: string[]) => ds.slice(0, 5).map((t) => `"${String(t || "(k
  * tachRidTrung (mỗi rid chỉ còn một hàng), TRƯỚC sanitizeHnTables.
  *
  * Khoá: "da-duyet" với mọi người; thêm "cho-duyet" khi `khoaChoDuyet` (Account HN — đã gửi thì chờ duyệt / trả;
- * người soạn KHÔNG có quyền duyệt — đúng chốt cũ của phần "đã gửi duyệt"). Người có quyền duyệt sửa được hàng đang
+ * người soạn không duyệt được phần HN (không có quote:hn:manage, hoặc account phụ) — đúng chốt cũ "đã gửi duyệt"). Người có quyền duyệt sửa được hàng đang
  * chờ (họ là người duyệt nó), nhưng KHÔNG sửa được hàng đã duyệt: bỏ duyệt trước, rồi sửa, rồi duyệt lại.
  *
  * 409 (không phải 400 như chốt duyệt hàng HCM): cùng mã với chốt cả phần cũ (chotHnTables) mà các màn soạn đã biết
@@ -280,4 +280,56 @@ export function apThaoTacHangHn(tables: unknown, loai: ThaoTacHangHn, opt: { rid
     if (r) rids.push(r);
   }
   return { ten, rids };
+}
+
+/**
+ * KHOÁ HÀNG CHI PHÍ HCM / PHÍ KHÁCH HÀNG ĐÃ DUYỆT (chủ repo 2026-10-06: "khoá HCM như HN"). Duyệt ở đây vẫn là cờ
+ * `approved` theo hàng (reconcileExtraApprovals). Hàng ĐÃ DUYỆT trong CSDL mà VẪN duyệt sau lần Lưu (người có quyền
+ * duyệt không bỏ tích trong cùng lần Lưu) thì nội dung phải giữ nguyên — với MỌI người, kể cả admin; hàng đã duyệt
+ * biến khỏi payload (xoá hàng / bảng / trang) cũng bị chặn. Muốn sửa / xoá: bỏ duyệt trước.
+ *
+ * Gọi trên bản CUỐI sẽ ghi (sau reconcile và sau reconcilePhamViTables), so với bản CSDL — bảng ngoài phạm vi đã được
+ * lấy lại nguyên từ CSDL nên không báo oan. Vân tay hàng như `vanTayHangHn` nhưng KHÔNG gồm tên / mẫu bảng ("Chuyển
+ * loại", chuyển bảng giữ rid là hợp lệ); Số Ngày theo mẫu (`coNgay*`). `moCotNoiBo` mở NS · Chứng từ · Lưu kho.
+ * Trả `null` khi không vi phạm, không thì lỗi 409 'hang-hcm-da-khoa' để nơi gọi ném (SAU chốt đã chi — 400 báo trước).
+ */
+export function loiKhoaHangNoiBoDaDuyet(
+  finalTables: unknown, dbTables: unknown,
+  opts: { moCotNoiBo?: boolean; coNgayDb?: (t: Record<string, any>) => boolean; coNgayPl?: (t: Record<string, any>) => boolean } = {},
+): (Error & { status: number; code: string }) | null {
+  const coNgayDb = opts.coNgayDb ?? (() => true);
+  const coNgayPl = opts.coNgayPl ?? coNgayDb;
+  const LOAI = new Set(["hcm", "khach"]);
+  const cuaLoai = (tables: unknown) => (Array.isArray(tables) ? tables : []).filter((x: any) => x && LOAI.has(x.category));
+  // Hàng CŨ ghi trước khi sanitize chuẩn hoá số (không có quantity / unitPrice trong JSON): không có số tiền để so —
+  // MỞ phần tiền (cùng luật fail-open của chốt duyệt / đã chi cũ, tests/extra-paid-preserved), vẫn khoá phần còn lại.
+  const boTien = (it: Record<string, any>) => ({ ...it, quantity: null, unitPrice: null, days: null, quantityExact: null });
+  const truoc = new Map<string, { van: string; ten: string; khongTien: boolean }>();
+  for (const { t, it, ten } of hangTienHn(cuaLoai(dbTables))) {
+    const r = chu(it.rid);
+    if (!r || it.approved !== true || truoc.has(r)) continue;
+    const khongTien = it.quantity == null && it.unitPrice == null;
+    truoc.set(r, { van: vanTayHangHn(khongTien ? boTien(it) : it, null, coNgayDb(t), !!opts.moCotNoiBo), ten, khongTien });
+  }
+  if (!truoc.size) return null;
+  const daThay = new Set<string>();
+  const biSua: string[] = [];
+  for (const { t, it, ten } of hangTienHn(cuaLoai(finalTables))) {
+    const r = chu(it.rid);
+    if (!r || daThay.has(r)) continue;
+    daThay.add(r);
+    const p = truoc.get(r);
+    if (p && it.approved === true && vanTayHangHn(p.khongTien ? boTien(it) : it, null, coNgayPl(t), !!opts.moCotNoiBo) !== p.van) biSua.push(ten || p.ten);
+  }
+  const biXoa = [...truoc.entries()].filter(([r]) => !daThay.has(r)).map(([, p]) => p.ten);
+  if (!biSua.length && !biXoa.length) return null;
+  const phan = [
+    biSua.length ? `${biSua.length} hàng bị sửa: ${nhanHang(biSua)}` : "",
+    biXoa.length ? `${biXoa.length} hàng bị xoá: ${nhanHang(biXoa)}` : "",
+  ].filter(Boolean).join("; ");
+  return Object.assign(
+    httpError(409, `Không lưu được: hàng Chi phí HCM / Phí khách hàng ĐÃ DUYỆT bị khoá — ${phan}. ` +
+      "Muốn sửa / xoá thì người có quyền duyệt bỏ tích Duyệt của hàng đó trước. Hãy chép lại phần vừa gõ, tải lại trang rồi làm tiếp."),
+    { code: "hang-hcm-da-khoa" },
+  );
 }

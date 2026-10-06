@@ -64,8 +64,7 @@ import { ApiError } from "../lib/api";
 import * as ui from "../lib/ui";
 import { khoaBanNhap, docBanNhap } from "../lib/localDraft";
 
-// quote:internal:approve: duyệt hàng HN (2026-10-06) cần quyền duyệt dòng bảng nội bộ như Chi phí HCM.
-const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:internal:approve", "quote:read:all"] };
+const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all"] };
 type WinDirty = Window & { __editorDirty?: boolean };
 
 let root: Root | null = null;

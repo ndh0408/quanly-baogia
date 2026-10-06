@@ -130,8 +130,10 @@ export async function removeExtraTableAt(
 // Cột THANH TOÁN (2026-10-06): việc tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào của kế toán (InvoicesIn);
 // ở đây chỉ HIỆN đã chi chưa / ngày / ai tích (chủ repo: "cái thanh toán hiện đã thanh toán ở đây ngày như nào chứ")
 // — cột chỉ xem, không nút, không ghi gì vào hàng. Nguồn `daChi` (lib/daChiHang), thiếu thì cờ lớp phủ lúc nạp.
-export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, onMarkDirty, thanhChung, daChi }: {
+export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, moCotNoiBo = false, onMarkDirty, thanhChung, daChi }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
+  /** Hàng ĐÃ DUYỆT vẫn mở NS · Chứng từ · Lưu kho (chủ báo giá / người có quyền duyệt — khớp máy chủ). */
+  moCotNoiBo?: boolean;
   /**
    * PHẠM VI theo TỪNG LOẠI bảng — dành cho "account phụ" chỉ được giao một phần (vd chỉ bảng Hà
    * Nội). CỐ Ý chỉ trả lời "có được giao loại này không", KHÔNG nhân với `editable` — `suaDuoc`
@@ -283,6 +285,10 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                       onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}
                       usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false} cotNoiBo
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
+                      /* KHOÁ HÀNG ĐÃ DUYỆT (2026-10-06, như bảng HN): ô tắt, không xoá được — kể cả với người có quyền duyệt.
+                         Bỏ tích Duyệt là mở lại ngay; máy chủ chặn bản CSDL đã duyệt (409 'hang-hcm-da-khoa'). */
+                      khoaHang={(it) => it.approved === true && (t.category === "hcm" || t.category === "khach")}
+                      moCotNoiBoKhiKhoa={moCotNoiBo}
                       payCol={t.category === "hcm" || t.category === "khach"} daChi={daChi}
                       groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
                       sheetTotalLine={false} />

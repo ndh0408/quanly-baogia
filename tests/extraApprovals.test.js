@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { reconcileExtraApprovals } from "../src/services/quoteService.js";
+import { loiKhoaHangNoiBoDaDuyet } from "../src/hnDuyetHang.js";
 
 // Duyệt theo HÀNG (bảng nội bộ HCM/Phí KH): CHỈ admin được đặt approved. Server phải chặn
 // non-admin tự duyệt qua payload, và giữ nguyên trạng thái duyệt cũ theo rid.
@@ -60,18 +61,19 @@ describe("reconcileExtraApprovals — sửa số tiền hàng đã duyệt (rid 
   const payload = (items) => [{ extraTables: [{ category: "hcm", items }] }];
   const hang = (p) => p[0].extraTables[0].items;
 
-  it("non-admin ĐỔI SỐ TIỀN của hàng đã duyệt (cùng rid) → cả lần lưu bị từ chối", () => {
-    const p = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 1, unitPrice: 50_000_000, approved: true }]);
-    let loi;
-    try { reconcileExtraApprovals(p, db([hangDb()]), false, 1); } catch (e) { loi = e; }
+  // 2026-10-06 (chủ repo: "khoá HCM như HN"): chốt nay là `loiKhoaHangNoiBoDaDuyet` trên bản CUỐI sẽ ghi — 409
+  // 'hang-hcm-da-khoa', áp cho MỌI người (trước: 400, chỉ người không có quyền duyệt, chỉ số tiền).
+  const khoa = (p, d) => { reconcileExtraApprovals(p, d, false, 1); return loiKhoaHangNoiBoDaDuyet(p[0].extraTables, d[0].extraTables); };
+  it("non-admin ĐỔI SỐ TIỀN của hàng đã duyệt (cùng rid) → cả lần lưu bị từ chối (409)", () => {
+    const loi = khoa(payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 1, unitPrice: 50_000_000, approved: true }]), db([hangDb()]));
     expect(loi, "sửa tiền hàng đã duyệt phải bị chặn cả lần ghi").toBeTruthy();
-    expect(loi.status, "phải là lỗi của người gửi, không phải 500").toBe(400);
+    expect(loi.status).toBe(409);
+    expect(loi.code).toBe("hang-hcm-da-khoa");
     expect(loi.message, "thông điệp phải nêu đích danh hàng vướng").toContain("Thi công nhỏ");
   });
 
   it("đổi SỐ LƯỢNG cũng tính là đổi số tiền", () => {
-    const p = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 40, unitPrice: 1_000_000, approved: true }]);
-    expect(() => reconcileExtraApprovals(p, db([hangDb()]), false, 1)).toThrowError(/đã duyệt/);
+    expect(khoa(payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 40, unitPrice: 1_000_000, approved: true }]), db([hangDb()]))?.message).toMatch(/ĐÃ DUYỆT/);
   });
 
   it("KHÔNG đổi tiền → hàng đã duyệt GIỮ NGUYÊN dấu duyệt và người duyệt", () => {
@@ -90,12 +92,14 @@ describe("reconcileExtraApprovals — sửa số tiền hàng đã duyệt (rid 
     expect(hang(p)[0].unitPrice).toBe(9_000_000);
   });
 
-  it("người CÓ quote:internal:approve vẫn đổi được giá hàng đã duyệt (luồng duyệt bình thường)", () => {
-    const p = payload([{ rid: "r-that", name: "Người duyệt chỉnh", quantity: 1, unitPrice: 3_000_000, approved: true }]);
+  it("người CÓ quote:internal:approve: vẫn duyệt mà đổi giá → 409; BỎ TÍCH trong cùng lần Lưu thì sửa được", () => {
+    const p = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 1, unitPrice: 3_000_000, approved: true }]);
     reconcileExtraApprovals(p, db([hangDb()]), true, 5);
-    const it = hang(p)[0];
-    expect(it.approved).toBe(true);
-    expect(it.approvedBy).toBe(3);   // giữ người duyệt gốc (vẫn đang duyệt, không phải MỚI duyệt)
+    expect(hang(p)[0]).toMatchObject({ approved: true, approvedBy: 3 });   // giữ người duyệt gốc
+    expect(loiKhoaHangNoiBoDaDuyet(p[0].extraTables, db([hangDb()])[0].extraTables)?.status).toBe(409);
+    const bo = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 1, unitPrice: 3_000_000, approved: false }]);
+    reconcileExtraApprovals(bo, db([hangDb()]), true, 5);
+    expect(loiKhoaHangNoiBoDaDuyet(bo[0].extraTables, db([hangDb()])[0].extraTables)).toBeNull();
   });
 
   it("bản CSDL KHÔNG ghi số tiền (hàng cũ trước sanitize) → giữ nguyên kế thừa (fail-open)", () => {
@@ -104,6 +108,10 @@ describe("reconcileExtraApprovals — sửa số tiền hàng đã duyệt (rid 
     const it = hang(p)[0];
     expect(it.approved, "hàng cũ hợp lệ không được mất dấu duyệt vì thiếu dữ liệu để so").toBe(true);
     expect(it.approvedBy).toBe(7);
+    // Chốt khoá cũng fail-open phần TIỀN của hàng cũ không ghi số (chỉ so phần còn lại — ở đây tên đã đổi → 409).
+    const dbCu = db([{ rid: "r-cu", name: "Thuê xe", approved: true }])[0].extraTables;
+    expect(loiKhoaHangNoiBoDaDuyet([{ category: "hcm", items: [{ rid: "r-cu", name: "Thuê xe", quantity: 1, unitPrice: 100, approved: true }] }], dbCu)).toBeNull();
+    expect(loiKhoaHangNoiBoDaDuyet(p[0].extraTables, dbCu)?.status).toBe(409);
   });
 
   it("hai hàng CÙNG rid → chỉ hàng ĐẦU kế thừa, bản sao thì không (và không bị chặn vì bản sao có giá khác)", () => {

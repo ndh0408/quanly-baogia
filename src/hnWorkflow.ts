@@ -12,7 +12,7 @@ import type { Request } from "express";
 import { prisma } from "./db.js";
 import { notify } from "./notifications.js";
 import { audit } from "./audit.js";
-import { canOnQuote, can, laAccountPhu, quoteScopesFor, PERMISSIONS as P } from "./permissions.js";
+import { canOnQuote, can, laAccountPhu, PERMISSIONS as P } from "./permissions.js";
 import { QUOTE_INCLUDE, sanitizeHnTables, hnRevCua, dsMauBangNoiBo, bangNoiBoCoNgay } from "./quoteUtils.js";
 import { reconcileExtraPayments } from "./services/quoteService.js";
 import { emitChange } from "./sse.js";
@@ -310,8 +310,7 @@ export async function submitHn(req: Request) {
 /**
  * DUYỆT / TRẢ / BỎ DUYỆT hàng Hà Nội — `POST /:id/hn/review`, body `{ decision: approve|reject|unapprove, note?, rids? }`.
  *
- * QUYỀN = quyền duyệt dòng bảng nội bộ như Chi phí HCM (`quote:internal:approve`) + sửa được báo giá + được giao vùng
- * "Giá Hà Nội". Thêm hai chốt riêng của phần HN: account phụ không duyệt (giữ luật cũ của reviewHn — duyệt là mở /
+ * QUYỀN = như duyệt cả phần trước đây: `quote:hn:manage` + sửa được báo giá. Thêm hai chốt: account phụ không duyệt (giữ luật cũ của reviewHn — duyệt là mở /
  * đóng khoá giá đã chốt, việc của chủ), và ACCOUNT HN ĐƯỢC GIAO KHÔNG TỰ DUYỆT hàng mình điền (kể cả khi được cấp
  * riêng quyền duyệt).
  *
@@ -331,8 +330,9 @@ export async function reviewHn(req: Request) {
   const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   const me = req.session.userId!;
-  if (!can(req.session, P.QUOTE_INTERNAL_APPROVE) || !canOnQuote(req.session, "update", existing)) throw httpError(403, "Bạn không có quyền duyệt hàng Hà Nội");
-  if (!(quoteScopesFor(req.session, existing) ?? []).includes("hanoi")) throw httpError(403, 'Bạn không được giao phần "Giá Hà Nội" của báo giá này');
+  // GIỮ QUYỀN CŨ (chủ repo 2026-10-06): ai duyệt được phần HN trước đây (quote:hn:manage — admin, manager/Account) thì
+  // duyệt / bỏ duyệt / trả được từng hàng; không đổi sang quote:internal:approve.
+  if (!can(req.session, P.QUOTE_HN_MANAGE) || !canOnQuote(req.session, "update", existing)) throw httpError(403, "Bạn không có quyền duyệt phần Hà Nội");
   // Như assignHn: duyệt/trả phần HN mở lại quyền ghi lên giá đã chốt, không phải việc của phụ.
   if (laAccountPhu(req.session, existing)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này, việc duyệt phần Hà Nội thuộc về người tạo báo giá");
   const tuDuyet = "Account Hà Nội không tự duyệt hàng mình điền — nhờ người tạo báo giá duyệt";

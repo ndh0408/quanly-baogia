@@ -334,6 +334,15 @@ describe.runIf(dbAvailable)("Lưu báo giá không làm mất khoản chi của 
       expect(await khoan(q.id, "sheet", "r1")).toEqual(e0);
     });
 
+  /** Từ 2026-10-06 hàng Chi phí HCM / Phí KH ĐÃ DUYỆT không ai xoá / sửa được (409 'hang-hcm-da-khoa') — mô phỏng người
+   *  duyệt BỎ TÍCH hàng đó trước (như màn soạn bắt buộc), để bài đo đúng chốt khoản / VAT của nó. */
+  const boDuyetHangSheet = async (qid, rid) => {
+    for (const s of await prisma.quoteSheet.findMany({ where: { quoteId: qid } })) {
+      if (!Array.isArray(s.extraTables)) continue;
+      const moi = s.extraTables.map((t) => ({ ...t, items: (t.items || []).map((it) => (it.rid === rid ? { ...it, approved: false, approvedAt: null, approvedBy: null } : it)) }));
+      await prisma.quoteSheet.update({ where: { id: s.id }, data: { extraTables: moi } });
+    }
+  };
     it("kế toán BỎ tích hàng JSON cũ đã trả → xoá hàng 200 VÀ xoá mềm báo giá 200 (khoản thắng cờ JSON đóng băng)", async () => {
       const qa = await taoBaoGia("b-bo-tich-xoa-hang", { trang: [[bang("hcm", [hang("tra", "Thuê xe đưa đón", daTraCu()), hang("h2", "Nước")])]] });
       const qb = await taoBaoGia("b-bo-tich-xoa-bg", { trang: [[bang("hcm", [hang("tra", "Thuê xe đưa đón", daTraCu())])]] });
@@ -343,6 +352,7 @@ describe.runIf(dbAvailable)("Lưu báo giá không làm mất khoản chi của 
         expect(r.body.row.paid).toBe(false);
       }
       // (1) Xoá hàng: cờ JSON `paid:true` vẫn nằm đó (đóng băng) nhưng hàng HIỆU LỰC đã không còn chi.
+      await boDuyetHangSheet(qa.id, "tra");
       const q = await tai(qa.id);
       expect(timHang(bangSheet(q), "tra")[0].paid, "cờ JSON cũ đóng băng, không ai sửa").toBe(true);
       const than = thanLuu(q);
@@ -360,6 +370,7 @@ describe.runIf(dbAvailable)("Lưu báo giá không làm mất khoản chi của 
     it("hàng CHỈ có ghi chú kế toán bị xoá → 200, khoản còn, danh sách hiện dòng 'khong-con-hang' giữ ghi chú", async () => {
       const q0 = await taoBaoGia("b-ghi-chu", { trang: [[bang("hcm", [hang("gc", "Dựng sân khấu"), hang("h2", "Nước")])]] });
       expect((await tichKhoan(q0.id, "sheet", "gc", { baseVersion: 0, accountingNote: "Chờ HĐ đỏ", invoiceDate: "2026-10-05" })).status).toBe(200);
+      await boDuyetHangSheet(q0.id, "gc");
       const q = await tai(q0.id);
       const than = thanLuu(q);
       than.sheets[0].extraTables[0].items = than.sheets[0].extraTables[0].items.filter((it) => it.rid !== "gc");

@@ -36,7 +36,7 @@ import {
   bangNoiBoCoNgay,
   dsMauBangNoiBo,
   phangThanhVien } from "../quoteUtils.js";
-import { reconcileTrangThaiHn, tomTatHn, type PhanHn } from "../hnDuyetHang.js";
+import { reconcileTrangThaiHn, tomTatHn, loiKhoaHangNoiBoDaDuyet, type PhanHn } from "../hnDuyetHang.js";
 import { httpError } from "../httpError.js";
 import { sheetKhongDoi } from "../quoteSheetDiff.js";
 import { chuanHoaGhiChu, type MauGhiChu } from "../quoteListNote.js";
@@ -120,26 +120,9 @@ export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], is
           if (daDung.has(it.rid)) p = null;
           else {
             daDung.add(it.rid);
-            // NGƯỜI KHÔNG CÓ QUYỀN DUYỆT SỬA SỐ TIỀN CỦA HÀNG ĐÃ DUYỆT → TỪ CHỐI CẢ LẦN LƯU.
-            //
-            // Lỗ đo được: người có `quote:update:own` nhưng KHÔNG có `quote:internal:approve` mở
-            // báo giá đã có hàng "hcm"/"khach" ĐÃ DUYỆT (approved:true), sửa unitPrice/quantity
-            // của đúng rid đó rồi Lưu. Bản trước không so số tiền nên nhánh non-admin CHỈ kế thừa
-            // `approved`/`approvedAt`/`approvedBy` theo rid — số tiền đi theo payload của họ, dấu
-            // duyệt của người khác vẫn đứng nguyên trên số tiền họ vừa bịa ra. Cùng lỗ y hệt đã vá
-            // ở `reconcileExtraPayments` (xem chú thích ở đó) — CHỈ khác chữ "thanh toán" → "duyệt".
-            //
-            // Cùng lý do chọn NÉM LỖI thay vì âm thầm khôi phục/xoá dấu duyệt: hỏng TO ngay lúc lưu,
-            // không mất dữ liệu, không nuốt thay đổi. `p.tien === null` (hàng ghi trước khi
-            // sanitizeExtraTables chuẩn hoá số) thì KHÔNG có gì để so — thiếu dữ liệu thì MỞ.
-            if (!isAdmin && p.approved && p.tien !== null && p.tien !== soTienHang(it)) {
-              throw httpError(
-                400,
-                `Không sửa được số tiền của hàng đã duyệt: "${String(it.name || "").slice(0, 80) || "(không tên)"}". ` +
-                  `Hàng này đã được duyệt nên số lượng / đơn giá / số ngày phải giữ nguyên. ` +
-                  `Cần đổi thì nhờ người có quyền duyệt bỏ duyệt trước, rồi sửa và duyệt lại.`
-              );
-            }
+            // Sửa hàng ĐÃ DUYỆT (tiền hay nội dung) giờ bị chặn với MỌI người — kể cả người có quyền duyệt — bằng
+            // `loiKhoaHangNoiBoDaDuyet` (src/hnDuyetHang.ts, 409 'hang-hcm-da-khoa') trên bản CUỐI sẽ ghi, sau khi chốt
+            // đã chi báo trước. Chốt 400 cũ ở đây (chỉ người không có quyền duyệt, chỉ số tiền) đã được nó thay.
           }
         }
         if (!isAdmin) {   // non-admin: bỏ qua mọi thay đổi duyệt từ client → theo DB (mới = chưa duyệt)
@@ -714,6 +697,14 @@ async function ghiVungNoiBoDuocGiao(tx: TxClient, id: number, ptSheets: any[], c
   // KT-4: hàng ĐÃ CHI không được biến mất qua đường Lưu.
   const mat = hangDaChiBiMat("sheet", bangCuaSheets(sheetsDb), bangCuaSheets(toWrite), daChi);
   if (mat.length) throw loiHangDaChi(mat);
+  // Hàng HCM / Phí KH ĐÃ DUYỆT khoá với mọi người (409). Account phụ: NS · Chứng từ · Lưu kho chỉ mở khi có quyền duyệt.
+  const dsMau = await dsMauBangNoiBo();
+  const ctyId = (await tx.quote.findFirst({ where: { id }, select: { companyId: true } }))?.companyId ?? null;
+  const loiKhoa = loiKhoaHangNoiBoDaDuyet(bangCuaSheets(toWrite), bangCuaSheets(sheetsDb), {
+    moCotNoiBo: can(req.session, P.QUOTE_INTERNAL_APPROVE),
+    coNgayDb: (t) => bangNoiBoCoNgay(t, ctyId, dsMau),
+  });
+  if (loiKhoa) throw loiKhoa;
 
   for (let i = 0; i < sheetsDb.length; i++) {
     await tx.quoteSheet.update({ where: { id: sheetsDb[i].id }, data: { extraTables: toWrite[i].extraTables as any } });
@@ -753,7 +744,7 @@ export async function updateQuote(req: Request) {
   if (b.hnTables !== undefined && !phamVi.includes("hanoi")) delete (b as any).hnTables;
   // Hàng HN đã duyệt khoá với MỌI người (kể cả account phụ có quote:hn:manage — RBAC-07): reconcileTrangThaiHn chạy
   // TRONG transaction, trên bản Quote đã khoá — xem `hnTablesDeGhi` bên dưới. Mẫu cột (cột Số Ngày) để so tiền đúng luật.
-  const dsMauHn = b.hnTables !== undefined ? await dsMauBangNoiBo() : [];
+  const dsMauHn = b.hnTables !== undefined || b.sheets !== undefined ? await dsMauBangNoiBo() : [];
   let vungNoiBo: any[] | null = null;
   if (!duPhamVi && !phamVi.includes("main")) {
     // Không được giao "Báo giá chính": mọi field danh tính/khách/đầu trang bị GỠ khỏi payload —
@@ -845,7 +836,8 @@ export async function updateQuote(req: Request) {
     if (mat.length) throw loiHangDaChi(mat);
     // Trạng thái duyệt từng hàng: theo CSDL; hàng đã duyệt (và đang chờ, với người không có quyền duyệt) bị khoá → 409.
     reconcileTrangThaiHn(bocHn[0].extraTables, hnDb, qTuoi, {
-      khoaChoDuyet: !can(req.session, P.QUOTE_INTERNAL_APPROVE),
+      // Người duyệt phần HN = quote:hn:manage, không phải account phụ (giữ đúng quyền trước bản duyệt từng hàng).
+      khoaChoDuyet: !(can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing)),
       moCotNoiBo: can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing),
       coNgayDb: (t) => bangNoiBoCoNgay(t, existing.companyId, dsMauHn),
       coNgayPl: (t) => bangNoiBoCoNgay(t, data.companyId ?? existing.companyId, dsMauHn),
@@ -1022,6 +1014,14 @@ export async function updateQuote(req: Request) {
       // 400 (không 409): màn soạn giữ nguyên phần đang soạn và toast câu báo nêu tên hàng.
       const matSheet = hangDaChiBiMat("sheet", bangCuaSheets(sheetsTuoi), bangCuaSheets(b.sheets), daChiSheet);
       if (matSheet.length) throw loiHangDaChi(matSheet);
+      // Hàng Chi phí HCM / Phí KH ĐÃ DUYỆT khoá với MỌI người (409 'hang-hcm-da-khoa') — trên bản cuối (bảng ngoài phạm vi
+      // đã lấy lại từ CSDL). NS · Chứng từ · Lưu kho (theo dõi sau duyệt) vẫn mở cho chủ / người có quyền duyệt.
+      const loiKhoaSheet = loiKhoaHangNoiBoDaDuyet(bangCuaSheets(b.sheets), bangCuaSheets(sheetsTuoi), {
+        moCotNoiBo: !laAccountPhu(req.session, existing) || can(req.session, P.QUOTE_INTERNAL_APPROVE),
+        coNgayDb: (t) => bangNoiBoCoNgay(t, existing.companyId, dsMauHn),
+        coNgayPl: (t) => bangNoiBoCoNgay(t, data.companyId ?? existing.companyId, dsMauHn),
+      });
+      if (loiKhoaSheet) throw loiKhoaSheet;
       // Bảng Hà Nội (nếu payload có): chốt + reconcile trên bản Quote vừa khoá — TRƯỚC khi xoá trang.
       hnTablesDeGhi(qKhoa ?? { hnStatus: null, hnTables: null, hnAssigneeId: null }, khoan);
 

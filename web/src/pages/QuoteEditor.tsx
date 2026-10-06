@@ -735,7 +735,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const hnTables = q.hnTables as HnTable[];
   // 2026-10-06: không còn khoá CẢ PHẦN HN — hàng đã duyệt (và hàng chờ duyệt, với người không có quyền duyệt) khoá
   // RIÊNG trong lưới (HnTables `hangHnBiKhoa`, bản sao luật máy chủ reconcileTrangThaiHn).
-  const duyetHn = hasPerm("quote:internal:approve");
+  // Người duyệt phần HN — GIỮ QUYỀN CŨ: quote:hn:manage và không phải account phụ (máy chủ: reviewHn).
+  const duyetHn = hasPerm("quote:hn:manage") && !laPhu;
   const coSuaGiDo = editable && phamVi.length > 0;
   const senderCo = companies.find((c) => c.id === q.companyId);
   if (senderCo?.address) q.fromAddress = senderCo.address;
@@ -1558,7 +1559,7 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} daChi={daChi?.sheet} />
+        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} moCotNoiBo={!laPhu || hasPerm("quote:internal:approve")} onMarkDirty={mark} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} daChi={daChi?.sheet} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
@@ -1573,7 +1574,7 @@ Lý do (không bắt buộc):`,
           editable={coScope("hanoi") && !saving}
           canApprove={duyetHn} onMarkDirty={mark}
           cheDo="chu" moCotNoiBo={hasPerm("quote:hn:manage") && !laPhu}
-          onHanhDong={!isNew && duyetHn && coScope("hanoi") && !laPhu ? hanhDongHn : undefined}
+          onHanhDong={!isNew && duyetHn ? hanhDongHn : undefined}
           dangXuLy={hnXuLy || saving} dongBo={hnDongBoRef.current}
           thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }}
           /* Account vừa gửi mà khối đóng thì việc chờ duyệt nằm khuất — mở sẵn cho quản lý thấy. */
@@ -1584,7 +1585,7 @@ Lý do (không bắt buộc):`,
               {!isNew && (hasPerm("quote:hn:manage") || duyetHn) && (
                 <HnManagerPanel quoteId={q.id} hnStatus={q.hnStatus} hnRejectNote={(q as Record<string, unknown>).hnRejectNote as string | undefined}
                   onReload={napLaiSauHn} giaoDuoc={hasPerm("quote:hn:manage")}
-                  duyetDuoc={duyetHn && coScope("hanoi") && !laPhu} soCho={ridTheoTrangThai(hnTables, ["cho-duyet"]).length}
+                  duyetDuoc={duyetHn} soCho={ridTheoTrangThai(hnTables, ["cho-duyet"]).length}
                   chanNeuChuaLuu={() => { if (!hnCoThayDoi(hnTables)) return false; toast("Bảng Hà Nội còn thay đổi chưa lưu — bấm Lưu trước rồi duyệt / trả", "info"); return true; }} />
               )}
               {ridTheoTrangThai(hnTables, ["da-duyet"]).length > 0 && <div className="khoi-sheet-note muted">Hàng Hà Nội ĐÃ DUYỆT bị khoá (không sửa / xoá được) — người có quyền duyệt bỏ tích Duyệt của hàng đó để mở lại.</div>}
@@ -1681,7 +1682,7 @@ function HnTrangThai({ st }: { st?: string | null }) {
 
 // Port renderManagerHnPanel — manager/admin GIAO phần Hà Nội cho Account HN + DUYỆT/TRẢ LẠI khi gửi.
 // 2026-10-06: Duyệt / Trả ở đây là thao tác HÀNG LOẠT trên mọi hàng đang chờ (duyệt / trả riêng từng hàng ở cột Duyệt);
-// cần quyền duyệt dòng bảng nội bộ như Chi phí HCM. Giao việc vẫn là quote:hn:manage, và giao lại được bất cứ lúc nào
+// quyền như duyệt cả phần trước đây (quote:hn:manage, không phải account phụ). Giao việc vẫn là quote:hn:manage, và giao lại được bất cứ lúc nào
 // (hàng đã duyệt không bị mở khoá khi giao lại).
 function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload, giaoDuoc = true, duyetDuoc = false, soCho = 0, chanNeuChuaLuu }: {
   quoteId: number; hnStatus?: string | null; hnRejectNote?: string | null; onReload: () => void;
