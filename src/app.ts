@@ -648,7 +648,10 @@ export function createApp() {
       }
     },
   }));
-  const sendReact = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };
+  // `no-transform`: Cloudflare (Web Analytics tự động) chèn <script> beacon.min.js vào HTML đi qua nó; CSP `script-src 'self'`
+  // chặn script đó nên MỌI trang in một lỗi console ở mọi người dùng. Tài liệu Cloudflare: phản hồi có no-transform thì
+  // proxy không sửa nội dung → không chèn. Chỉ đặt cho TÀI LIỆU HTML — asset JS/CSS vẫn để Cloudflare nén như cũ.
+  const sendReact = (res: Response) => { res.setHeader("Cache-Control", "no-cache, no-transform"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };
   // SPA CŨ (vanilla ES module ở public/js) ĐÃ GỠ HẲN 2026-08-26. Từ 2026-07-06 gốc "/" đã phục vụ
   // React cho mọi môi trường, còn /app chỉ còn là đường lui KHÔNG ai đi tới: React không có một
   // liên kết nào trỏ về đó. Nhưng nó vẫn CHẠY được với cùng cookie phiên và cùng API, và mang theo

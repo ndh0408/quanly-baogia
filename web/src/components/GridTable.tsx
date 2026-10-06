@@ -2935,8 +2935,10 @@ function GridTableInner(props: GridTableProps) {
         td.removeAttribute("data-fx-shown"); td.removeAttribute("data-fx-val"); td.removeAttribute("title");
       });
       if (!document.querySelector("[data-fx-shown]")) {
-        const inEl = document.getElementById("fx-input") as HTMLInputElement | null; if (inEl && inEl.readOnly) inEl.value = "";
-        const addrEl = document.getElementById("fx-addr"); if (addrEl) addrEl.textContent = "—";
+        // MỌI thanh công thức, không chỉ thanh đầu: lưới chính VÀ bảng nội bộ (Chi phí HCM / Phí KH…) đều có fx-bar với cùng
+        // id, getElementById chỉ trả thanh đầu → thanh của bảng nội bộ giữ nguyên ô / công thức cũ (soát DevTools 2026-10-06).
+        document.querySelectorAll<HTMLInputElement>("input.fx-input").forEach((inEl) => { if (inEl.readOnly) inEl.value = ""; });
+        document.querySelectorAll<HTMLElement>(".fx-addr").forEach((addrEl) => { addrEl.textContent = "—"; });
         document.querySelectorAll<HTMLElement>("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); t.style.removeProperty("--ref-color"); });
       }
     };
