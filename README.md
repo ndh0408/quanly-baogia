@@ -11,7 +11,7 @@ comes out of it.
 
 ![Quote editor](editor.png)
 
-**33 Prisma models · 144 HTTP endpoints · 373 test files**
+**33 Prisma models · 145 HTTP endpoints · 375 test files**
 
 <sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
 `node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.

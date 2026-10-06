@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 144 endpoint
+# Ma trận phân quyền — toàn bộ 145 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -63,7 +63,7 @@ Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`
 > Giới hạn tần suất: `/login` + `/token` 10 lần/15 phút mỗi IP (`skipSuccessfulRequests`); `/forgot-password` 5/15 phút.
 > Chống dò tài khoản: bcrypt luôn chạy với dummy hash; `/forgot-password` trả 200 **trước** khi làm việc nền.
 
-## `/api/quotes` — 30 endpoint
+## `/api/quotes` — 31 endpoint
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
