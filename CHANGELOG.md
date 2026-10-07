@@ -12,12 +12,16 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1074 commit**, từ 2026-05-29 tới 2026-10-07.
+**1078 commit**, từ 2026-05-29 tới 2026-10-07.
 
 ---
 
 ## 2026-10-07
 
+- `ab631dd` feat(menu trái): nút ẩn/hiện menu ở màn rộng (Ctrl+B, nhớ theo máy) + email/tên dài không tràn khỏi menu
+- `a3a9aae` fix(chứng từ nội bộ): khoản tiền mặt mở ra "Ảnh phiếu chi" — thôi gọi là ủy nhiệm chi
+- `7767c11` feat(hóa đơn đầu vào): hình thức thanh toán Chuyển khoản / Tiền mặt — khoản tiền mặt thôi bị nhắc "⚠ chưa có ảnh"
+- `ba4e7a1` docs(CHANGELOG): sinh lại
 - `c227513` fix(tích hợp): Nhật ký lọc được chia/làm lại hóa đơn; số tài liệu 147 endpoint · 175 tệp test web; dòng trỏ semgrep; bài deploy digest nới trần giờ
 - `d721ead` docs(CHANGELOG): sinh lại sau khi ráp duyệt từng hàng + chia hóa đơn
 - `19efd60` docs: 147 endpoint, 380 tệp test backend sau khi ráp duyệt HN/HCM từng hàng + chia hóa đơn đầu ra
