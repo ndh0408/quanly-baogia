@@ -210,7 +210,7 @@ describe("hộp 'Khoản chi' — lệnh ghi", () => {
     h.ghi.mockResolvedValue({ row: dto(r, { paid: true, paidAt: "2026-10-06T03:00:00.000Z", accountingNote: "Đã nhận HĐ đỏ" }) });
     await bam(nutTrongHop("Lưu")!);
     expect(h.ghi).toHaveBeenCalledTimes(1);
-    expect(h.ghi.mock.calls[0]).toEqual([41, "sheet", "rid/có dấu", { baseVersion: 2, paid: true, accountingNote: "Đã nhận HĐ đỏ" }]);
+    expect(h.ghi.mock.calls[0]).toEqual([41, "sheet", "rid/có dấu", { baseVersion: 2, paid: true, paidMethod: "chuyen-khoan", accountingNote: "Đã nhận HĐ đỏ" }]);
     expect(hopThoai(), "lưu xong đóng hộp").toBeNull();
   });
 
@@ -262,7 +262,7 @@ describe("hộp 'Khoản chi' — lệnh ghi", () => {
     const goiTruoc = h.goi;
     h.ghi.mockRejectedValueOnce(new ApiError("Nội dung không phải ảnh PNG/JPG/WEBP", 415, { error: "Nội dung không phải ảnh PNG/JPG/WEBP", code: "khong-phai-anh" }));
     await bam(nutTrongHop("Lưu")!);
-    expect(h.ghi.mock.calls[0][3]).toEqual({ baseVersion: 1, paid: true, paidProof: h.anhNen });
+    expect(h.ghi.mock.calls[0][3]).toEqual({ baseVersion: 1, paid: true, paidMethod: "chuyen-khoan", paidProof: h.anhNen });
     expect(h.toast).toHaveBeenCalledWith("Nội dung không phải ảnh PNG/JPG/WEBP", "error");
     expect(hopThoai(), "hộp còn mở").not.toBeNull();
     expect(trongHop<HTMLImageElement>(".inv-in-hop-anh img").getAttribute("src"), "ảnh vừa chọn còn nguyên").toBe(h.anhNen);
@@ -270,7 +270,7 @@ describe("hộp 'Khoản chi' — lệnh ghi", () => {
     expect(h.goi, "415 không nạp lại danh sách").toBe(goiTruoc);
     h.ghi.mockResolvedValueOnce({ row: dto(r, { paid: true, hasPaidProof: true }) });
     await bam(nutTrongHop("Lưu")!);
-    expect(h.ghi.mock.calls[1][3]).toEqual({ baseVersion: 1, paid: true, paidProof: h.anhNen });
+    expect(h.ghi.mock.calls[1][3]).toEqual({ baseVersion: 1, paid: true, paidMethod: "chuyen-khoan", paidProof: h.anhNen });
   });
 
   it("'Xác nhận số tiền hiện tại' (số tiền đổi sau khi chi) gửi paid:true", async () => {
@@ -673,7 +673,7 @@ describe("hộp 'Khoản chi' — không mất, không ghi đè im lặng, khôn
     expect(nutTrongHop("Lưu")!.disabled).toBe(false);
     h.ghi.mockResolvedValue({ row: dto(r, { paid: true, hasPaidProof: true }) });
     await bam(nutTrongHop("Lưu")!);
-    expect(h.ghi.mock.calls[0][3]).toEqual({ baseVersion: 3, paid: true, paidProof: h.anhNen });
+    expect(h.ghi.mock.calls[0][3]).toEqual({ baseVersion: 3, paid: true, paidMethod: "chuyen-khoan", paidProof: h.anhNen });
   });
 
   it("W6: Ngày hóa đơn ngoài 2000–2100 (gõ thiếu số năm) → báo ngay + khoá Lưu; sửa đúng thì mở", async () => {

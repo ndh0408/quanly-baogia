@@ -117,7 +117,8 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
           </div>
         );
       })}
-      {xemCt && <XemChungTu quoteId={quoteId} side={xemCt.hn ? "hn" : "sheet"} rid={xemCt.rid} loai={xemCt.loai} tenHang={xemCt.ten} onDong={dongXemCt} />}
+      {xemCt && <XemChungTu quoteId={quoteId} side={xemCt.hn ? "hn" : "sheet"} rid={xemCt.rid} loai={xemCt.loai} tenHang={xemCt.ten}
+                            hinhThuc={(xemCt.hn ? daChi?.hn : daChi?.sheet)?.get(xemCt.rid)?.paidMethod} onDong={dongXemCt} />}
     </div>
   );
 }

@@ -699,6 +699,10 @@ model InputInvoiceEntry {
   paidAt         DateTime? // máy chủ đóng dấu lúc tích — không nhập lùi
   paidById       Int? // KHÔNG FK: xoá tài khoản không kéo theo chứng từ
   paidByName     String? // tên CHỤP lúc tích (như QuoteListNote.updatedByName)
+  // HÌNH THỨC CHI (chủ repo 2026-10-07: "thanh toán hóa đơn đầu vào có khi là tiền mặt") — 'chuyen-khoan' | 'tien-mat'.
+  // NULL = khoản tích trước cột này (hoặc chưa chi) — mọi nơi đọc coi là CHUYỂN KHOẢN (src/khoanChi.ts hinhThucHieuLuc).
+  // Tiền mặt không có ủy nhiệm chi: ảnh (phiếu chi) không bắt buộc, không hiện "⚠ chưa có ảnh". Bỏ tích → NULL như paidAt.
+  paidMethod     String?
   // Hàng lúc TÍCH { name, unit, quantity, unitPrice, days, amount, category, tableName } — bằng chứng "chi cho
   // cái gì, bao nhiêu"; trang so với số hiện tại để báo "Số tiền đã đổi sau khi chi". Null với khoản gieo từ
   // cờ JSON cũ (không biết số lúc trả).

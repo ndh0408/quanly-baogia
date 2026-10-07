@@ -4,7 +4,7 @@
 // Máy chủ là nguồn sự thật (src/khoanChi.ts · src/services/inputInvoiceService.ts · KhoanChiSchema ở src/validators.ts).
 // Trang (pages/InvoicesIn.tsx) và hộp "Khoản chi" (components/HopKhoanChi.tsx) đọc CÙNG các hàm ở đây, để hai nơi không
 // tự suy luận khác nhau về "đã đổi gì", "tích được không", "hàng này đang ở trạng thái nào".
-import { TEN_PHAM_VI, type InputInvoiceRow, type PhiaKhoanChi, type ThanKhoanChi, type TrangThaiHangDauVao } from "./api";
+import { TEN_PHAM_VI, type HinhThucChi, type InputInvoiceRow, type PhiaKhoanChi, type ThanKhoanChi, type TrangThaiHangDauVao } from "./api";
 import { fmtMoney } from "./format";
 
 /** Nhãn loại bảng nội bộ — cùng chữ với bộ lọc "Loại bảng" và huy hiệu ở cột Hạng mục. */
@@ -113,6 +113,24 @@ export function trangThaiVat(chungTu: unknown, paid: boolean, coHdVat: boolean):
 }
 export const NHAN_TRANG_THAI_VAT: Record<TrangThaiVat, string> = { "chua-vat": "chưa VAT", "da-vat": "đã có VAT", "vat-chua-tt": "Có HĐ VAT · chưa TT" };
 
+// ── HÌNH THỨC CHI (chủ repo 2026-10-07: "thanh toán hóa đơn đầu vào có khi là tiền mặt") ─────────────────────────────
+export const NHAN_HINH_THUC: Record<HinhThucChi, string> = { "chuyen-khoan": "Chuyển khoản", "tien-mat": "Tiền mặt" };
+/**
+ * Hình thức HIỆU LỰC của một dòng / hàng — bản sao CỐ Ý của hinhThucHieuLuc ở src/khoanChi.ts: chưa chi → null; vắng / null /
+ * giá trị lạ → chuyển khoản (khoản tích trước khi có hình thức, cờ JSON cũ, máy chủ cũ — hiện y như trước).
+ */
+export const hinhThucCua = (r: { paid?: boolean; paidMethod?: HinhThucChi | null }): HinhThucChi | null =>
+  r.paid === false ? null : r.paidMethod === "tien-mat" ? "tien-mat" : "chuyen-khoan";
+/**
+ * Hình thức GỢI Ý khi tích mới "Đã chi": hàng có chứng từ "TM" gợi ý TIỀN MẶT, còn lại chuyển khoản. "TM" là một trong ba
+ * loại chứng từ của dòng chi phí (VAT / HĐNS / TM — cột Chứng từ ở bảng nội bộ, người soạn chọn): VAT và HĐNS là có hóa đơn,
+ * TM là chi bằng TIỀN MẶT. Chỉ là gợi ý: chứng từ do người soạn đặt, còn trả thật bằng gì là việc kế toán — đổi được trước khi Lưu.
+ */
+export const hinhThucGoiY = (chungTu: unknown): HinhThucChi => (chungTu === "TM" ? "tien-mat" : "chuyen-khoan");
+/** Thiếu ảnh có đáng cảnh báo không: chỉ CHUYỂN KHOẢN (ủy nhiệm chi là chứng từ bắt buộc); tiền mặt thì ảnh phiếu chi là tuỳ chọn. */
+export const thieuAnhChungTu = (r: { paid: boolean; hasPaidProof: boolean; paidMethod?: HinhThucChi | null }): boolean =>
+  r.paid && !r.hasPaidProof && hinhThucCua(r) === "chuyen-khoan";
+
 // ── HỘP "KHOẢN CHI": PHẦN NGƯỜI DÙNG ĐÃ SỬA → THÂN LỆNH GHI ────────────────────────────────────────────────────────
 /**
  * Phần người dùng ĐÃ SỬA trong hộp. Trường VẮNG = chưa đụng: ô hiện và so theo DÒNG HIỆN TẠI — dòng nạp lại sau 409 /
@@ -120,6 +138,8 @@ export const NHAN_TRANG_THAI_VAT: Record<TrangThaiVat, string> = { "chua-vat": "
  */
 export type NhapKhoanChi = {
   paid?: boolean;
+  /** Hình thức đang chọn — vắng = theo dòng (đã chi) / gợi ý (tích mới, xem hinhThucGoiY — hộp đặt sẵn lúc tích). */
+  paidMethod?: HinhThucChi;
   /** data-URL ảnh MỚI đã nén (lib/anhChungTu.ts) — chuỗi rỗng coi như không có. */
   anhMoi?: string;
   /** Gỡ ảnh hiện tại (máy chủ rút vào lịch sử, không xoá). */
@@ -136,11 +156,13 @@ export type NhapKhoanChi = {
 };
 /** Quyền theo TRƯỜNG (máy chủ kiểm y hệt): tích + ảnh ← invoice:input:pay; ngày HĐ + ghi chú ← invoice:edit. */
 export type QuyenKhoanChi = { canPay: boolean; canEdit: boolean };
-export type DongKhoanChi = Pick<InputInvoiceRow, "version" | "paid" | "hasPaidProof" | "hasVatProof" | "tienDoi" | "invoiceDate" | "accountingNote">;
+export type DongKhoanChi = Pick<InputInvoiceRow, "version" | "paid" | "paidMethod" | "hasPaidProof" | "hasVatProof" | "tienDoi" | "invoiceDate" | "accountingNote">;
 
 /**
  * THÂN lệnh PUT khoản chi: CHỈ trường thật sự đổi so với dòng hiện tại + `baseVersion`; `null` = không có gì để gửi.
- *   · BỎ tích → đúng `{ paid: false }`: máy chủ tự rút ảnh hiện tại (lý do 'bo-danh-dau'); kèm ảnh là 400.
+ *   · BỎ tích → đúng `{ paid: false }`: máy chủ tự rút ảnh hiện tại (lý do 'bo-danh-dau') và xoá hình thức; kèm ảnh / hình
+ *     thức là 400.
+ *   · TÍCH mới luôn kèm `paidMethod` (vắng trong `n` = chuyển khoản); khoản đã chi chỉ gửi `paidMethod` khi ĐỔI.
  *   · KHÔNG BAO GIỜ `paidProof: ""` (chuỗi rỗng không phải cách gỡ ảnh — máy chủ 400): gỡ ảnh là `null`, ảnh mới là data-URL.
  *   · Ngày / ghi chú xoá trắng → `null`; ghi chú so SAU khi cắt khoảng trắng hai đầu (máy chủ cũng trim).
  *   · Trường thiếu quyền không bao giờ vào thân — ô đó khoá ở giao diện, máy chủ 403 cả lệnh nếu lọt.
@@ -152,9 +174,11 @@ export function thanKhoanChi(r: DongKhoanChi, n: NhapKhoanChi, q: QuyenKhoanChi)
     const anh = typeof n.anhMoi === "string" && n.anhMoi ? n.anhMoi : null;
     if (paid !== r.paid) {
       than.paid = paid;
+      if (paid) than.paidMethod = n.paidMethod ?? "chuyen-khoan";
       if (paid && anh) than.paidProof = anh;   // tích + ảnh trong MỘT lệnh
     } else if (paid) {
       if (n.xacNhanTien && r.tienDoi) than.paid = true;
+      if (n.paidMethod && n.paidMethod !== hinhThucCua(r)) than.paidMethod = n.paidMethod;
       if (anh) than.paidProof = anh;
       else if (n.goAnh && r.hasPaidProof) than.paidProof = null;
     }
@@ -179,15 +203,16 @@ export function thanKhoanChi(r: DongKhoanChi, n: NhapKhoanChi, q: QuyenKhoanChi)
 // Realtime nạp lại dòng trong lúc hộp đang mở: ô CHƯA đụng tự lấy giá trị mới (NhapKhoanChi), `baseVersion` theo dòng mới —
 // nên lần Lưu sau KHÔNG nhận 409 và ghi đè im lặng phần người kia vừa ghi vào ĐÚNG ô mình đang sửa. Hộp chụp giá trị của
 // mỗi ô lúc BẮT ĐẦU sửa ô đó; lúc Lưu, ô nào sắp ghi mà dòng hiện tại đã khác bản chụp → hỏi trước khi ghi đè.
-export type TruongKhoanChi = "paid" | "anh" | "vat" | "invoiceDate" | "accountingNote";
+export type TruongKhoanChi = "paid" | "hinhThuc" | "anh" | "vat" | "invoiceDate" | "accountingNote";
 export type GocKhoanChi = Partial<Record<TruongKhoanChi, string>>;
-type DongXungDot = Pick<InputInvoiceRow, "paid" | "hasPaidProof" | "hasVatProof" | "invoiceDate" | "accountingNote" | "proofs">;
-export const NHAN_TRUONG_KHOAN: Record<TruongKhoanChi, string> = { paid: "Đã chi", anh: "Ảnh chứng từ", vat: "Hóa đơn VAT", invoiceDate: "Ngày hóa đơn", accountingNote: "Ghi chú kế toán" };
+type DongXungDot = Pick<InputInvoiceRow, "paid" | "paidMethod" | "hasPaidProof" | "hasVatProof" | "invoiceDate" | "accountingNote" | "proofs">;
+export const NHAN_TRUONG_KHOAN: Record<TruongKhoanChi, string> = { paid: "Đã chi", hinhThuc: "Hình thức thanh toán", anh: "Ảnh chứng từ", vat: "Hóa đơn VAT", invoiceDate: "Ngày hóa đơn", accountingNote: "Ghi chú kế toán" };
 
 /** Giá trị SO SÁNH ĐƯỢC của một ô trên dòng (ảnh: id ảnh hiện tại — thay ảnh là đổi). */
 export function giaTriTruong(r: DongXungDot, t: TruongKhoanChi): string {
   switch (t) {
     case "paid": return r.paid ? "1" : "0";
+    case "hinhThuc": return hinhThucCua(r) ?? "";
     case "anh": return String(r.proofs?.find((p) => p.hienTai && p.loai !== "vat")?.id ?? (r.hasPaidProof ? "json-cu" : ""));
     case "vat": return String(r.proofs?.find((p) => p.hienTai && p.loai === "vat")?.id ?? (r.hasVatProof ? "co" : ""));
     case "invoiceDate": return r.invoiceDate ?? "";
@@ -199,6 +224,7 @@ export function giaTriTruong(r: DongXungDot, t: TruongKhoanChi): string {
 export function xungDotKhoanChi(goc: GocKhoanChi, r: DongXungDot, than: ThanKhoanChi): TruongKhoanChi[] {
   const ghi: TruongKhoanChi[] = [];
   if ("paid" in than) ghi.push("paid");
+  if ("paidMethod" in than) ghi.push("hinhThuc");
   if ("paidProof" in than) ghi.push("anh");
   if ("vatProof" in than) ghi.push("vat");
   if ("invoiceDate" in than) ghi.push("invoiceDate");
@@ -209,6 +235,7 @@ export function xungDotKhoanChi(goc: GocKhoanChi, r: DongXungDot, than: ThanKhoa
 /** "Ghi chú kế toán → “…”" cho hộp hỏi ghi đè: người dùng thấy người kia vừa ghi GÌ trước khi quyết định. */
 export function moTaXungDot(r: DongXungDot, t: TruongKhoanChi): string {
   const gt = t === "paid" ? (r.paid ? "Đã chi" : "Chưa chi")
+    : t === "hinhThuc" ? (r.paid ? NHAN_HINH_THUC[hinhThucCua(r) ?? "chuyen-khoan"] : "Chưa chi")
     : t === "anh" ? (r.hasPaidProof ? "ảnh khác" : "đã gỡ ảnh")
     : t === "vat" ? (r.hasVatProof ? "hóa đơn khác" : "đã gỡ hóa đơn")
     : t === "invoiceDate" ? fmtNgayThuan(r.invoiceDate) || "(trống)"
