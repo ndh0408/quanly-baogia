@@ -1,10 +1,12 @@
-// CHIA SHEET THÀNH HÓA ĐƠN — trang Hóa đơn đầu ra (chủ repo 2026-10-06: "cho chức năng chọn sheet nào là hóa đơn 1,
-// sheet nào hóa đơn 2, và có thể bỏ cái nào chưa muốn xuất để xuất sau hay là không làm … để qua bên hóa đơn đầu ra cho
-// kế toán biết làm").
+// CHIA SHEET THÀNH HÓA ĐƠN (chủ repo 2026-10-06: "cho chức năng chọn sheet nào là hóa đơn 1, sheet nào hóa đơn 2, và có
+// thể bỏ cái nào chưa muốn xuất để xuất sau hay là không làm"; 2026-10-07: "không nó phải nằm ở chỗ duyệt cơ", "account
+// chủ báo giá là người làm cái đó, chọn xuất hóa đơn chia như nào; trang hóa đơn là tách ra theo mã khi mà account chọn").
 //
 // Hợp đồng (src/invoiceSplit.ts, src/services/invoiceSplitService.ts):
 //   · Dữ liệu cũ (invoiceGroup / invoiceHold NULL hết) = "chưa chia": mỗi sheet một hóa đơn như trước.
-//   · PUT /api/quotes/:id/invoice-split: kế toán (invoice:edit) / admin; người khác 403. Phải liệt kê đủ sheet tươi.
+//   · Ai chia / làm lại: CHỦ BÁO GIÁ + admin (cùng luật nút chốt). Kế toán, account phụ, account khác → 403.
+//   · Chia ngay lúc chốt: POST /mark-converted kèm `invoiceSplit` — chốt + chia trong MỘT transaction (chia sai → không chốt).
+//   · PUT /api/quotes/:id/invoice-split sau khi chốt. Phải liệt kê đủ sheet tươi.
 //   · Hóa đơn gom nhiều sheet: trường hóa đơn hợp nhất rồi ghi ĐỒNG LOẠT; nhập số HĐ trên một sheet = cả hóa đơn.
 //   · Sheet Để sau / Không xuất không nhận trường hóa đơn (409).
 //   · Hóa đơn ĐÃ XUẤT đứng yên (tập sheet + số thứ tự); khoá sửa báo giá khi đã xuất giữ nguyên.
@@ -22,7 +24,7 @@ const TAG = `hdchia${Date.now()}`;
 const PWD = "Test1234!a";
 
 describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn đầu ra", () => {
-  let app, admin, keToan, account, companyId, templateId;
+  let app, admin, keToan, chu, phu, accKhac, phuU, companyId, templateId;
 
   const dangNhap = async (u) => {
     const a = agentWithCsrf(app);
@@ -32,17 +34,21 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
   };
   const taoUser = async (ten, role) => prisma.user.create({ data: { username: `${TAG}-${ten}`, displayName: `${TAG} ${ten}`, role, passwordHash: await bcrypt.hash(PWD, 4) } });
 
-  /** Báo giá 3 sheet (A 1.000.000, B 2.000.000, C 4.000.000), VAT 8%, đã chốt. */
-  const taoBaoGiaChot = async (title) => {
+  /** Báo giá 3 sheet (A 1.000.000, B 2.000.000, C 4.000.000), VAT 8%, CHỦ = account `chu` (manager), chưa chốt. */
+  const taoBaoGia = async (title) => {
     const sh = (name, order, gia) => ({ name, order, templateId, items: [{ kind: "item", name: `HM ${name}`, quantity: 1, unitPrice: gia, order: 1 }] });
-    const r = await admin.post("/api/quotes").send({
+    const r = await chu.post("/api/quotes").send({
       title: `${TAG} ${title}`, companyId, toCompany: "Khách thử", vatPercent: 8,
       sheets: [sh("Sân khấu", 1, 1_000_000), sh("Âm thanh", 2, 2_000_000), sh("Ánh sáng", 3, 4_000_000)],
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
-    const c = await admin.post(`/api/quotes/${r.body.id}/mark-converted`).send({});
-    expect(c.status, JSON.stringify(c.body)).toBe(200);
     return r.body.id;
+  };
+  const taoBaoGiaChot = async (title) => {
+    const id = await taoBaoGia(title);
+    const c = await chu.post(`/api/quotes/${id}/mark-converted`).send({});
+    expect(c.status, JSON.stringify(c.body)).toBe(200);
+    return id;
   };
   const sheetsCua = (quoteId) => prisma.quoteSheet.findMany({ where: { quoteId }, orderBy: { order: "asc" } });
   const chia = (agent, quoteId, ds) => agent.put(`/api/quotes/${quoteId}/invoice-split`).send({ sheets: ds });
@@ -56,7 +62,10 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     templateId = (await prisma.quoteTemplate.create({ data: { companyId: co.id, name: "Mẫu thử", code: `${TAG}k`, filePath: "templates/GN_KhongNgay.xlsx" } })).id;
     admin = await dangNhap(await taoUser("admin", "admin"));
     keToan = await dangNhap(await taoUser("kt", "accountant"));
-    account = await dangNhap(await taoUser("acc", "manager"));
+    chu = await dangNhap(await taoUser("chu", "manager"));
+    phuU = await taoUser("phu", "manager");
+    phu = await dangNhap(phuU);
+    accKhac = await dangNhap(await taoUser("acckhac", "manager"));
   }, 120_000);
 
   afterAll(async () => {
@@ -77,21 +86,57 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     }
   });
 
-  it("quyền: kế toán + admin được chia; account (không có invoice:page) 403; báo giá chưa chốt 403", async () => {
+  it("quyền: CHỦ báo giá + admin được chia / làm lại; kế toán, account phụ (đủ 4 vùng), account khác → 403; chưa chốt → 403", async () => {
     const id = await taoBaoGiaChot("quyen");
     const [a, b, c] = await sheetsCua(id);
+    expect((await chu.put(`/api/quotes/${id}/members`).send({ members: [{ userId: phuU.id, scopes: ["main", "hcm", "hanoi", "khach"] }] })).status).toBe(200);
     const ds = [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: 2, hold: null }];
-    expect((await chia(account, id, ds)).status).toBe(403);
+    expect((await chia(keToan, id, ds)).status, "kế toán KHÔNG còn chia (trang Hóa đơn chỉ hiển thị)").toBe(403);
+    expect((await chia(phu, id, ds)).status, "account phụ được thêm vào báo giá").toBe(403);
+    expect((await chia(accKhac, id, ds)).status, "account không liên quan (IDOR)").toBe(403);
     expect((await sheetsCua(id)).every((s) => s.invoiceGroup == null), "403 không được ghi gì").toBe(true);
-    expect((await chia(keToan, id, ds)).status).toBe(200);
+    expect((await chia(chu, id, ds)).status).toBe(200);
     expect((await chia(admin, id, ds)).status).toBe(200);
 
-    const nhap = await admin.post("/api/quotes").send({ title: `${TAG} nhap`, companyId, toCompany: "K", vatPercent: 8, sheets: [{ name: "X", order: 1, templateId, items: [] }] });
-    expect(nhap.status).toBe(201);
-    expect((await chia(keToan, nhap.body.id, [{ sheetId: nhap.body.sheets[0].id, group: 1, hold: null }])).status).toBe(403);
+    // Làm lại hóa đơn: cùng luật.
+    expect((await keToan.put(`/api/quotes/sheets/${a.id}/invoice`).send({ invoiceNo: "Q-1" })).status, "kế toán VẪN nhập số HĐ").toBe(200);
+    const lamLai = (agent) => agent.post(`/api/quotes/${id}/invoice-redo`).send({ sheetId: a.id });
+    expect((await lamLai(keToan)).status).toBe(403);
+    expect((await lamLai(phu)).status).toBe(403);
+    expect((await lamLai(accKhac)).status).toBe(403);
+    expect((await sheetsCua(id))[0].invoiceNo, "403 không gỡ gì").toBe("Q-1");
+    expect((await lamLai(admin)).status).toBe(200);
+
+    const nhap = await taoBaoGia("nhap");
+    const sNhap = await sheetsCua(nhap);
+    expect((await chia(chu, nhap, sNhap.map((s) => ({ sheetId: s.id, group: 1, hold: null })))).status, "chưa chốt — chọn trong hộp chốt").toBe(403);
 
     // IDOR: sheet của báo giá KHÁC trong danh sách → 409 (không khớp tập sheet), không ghi gì.
-    expect((await chia(keToan, id, [...ds.slice(0, 2), { sheetId: nhap.body.sheets[0].id, group: 2, hold: null }])).status).toBe(409);
+    expect((await chia(chu, id, [...ds.slice(0, 2), { sheetId: sNhap[0].id, group: 2, hold: null }])).status).toBe(409);
+  });
+
+  it("CHIA LÚC CHỐT: mark-converted kèm invoiceSplit → chốt + chia cùng lúc, có nhật ký; phép chia sai → KHÔNG chốt dở", async () => {
+    const id = await taoBaoGia("chot");
+    const [a, b, c] = await sheetsCua(id);
+    // Sai: liệt kê thiếu sheet → 409, báo giá VẪN chưa chốt, không phép chia nào được ghi.
+    const sai = await chu.post(`/api/quotes/${id}/mark-converted`).send({ invoiceSplit: [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: 1, hold: null }] });
+    expect(sai.status).toBe(409);
+    expect((await prisma.quote.findUnique({ where: { id } })).status, "chia lỗi thì không được chốt dở").not.toBe("converted");
+    expect((await sheetsCua(id)).every((s) => s.invoiceGroup == null && s.invoiceHold == null)).toBe(true);
+    // Sai hình dạng → 400, cũng không chốt.
+    expect((await chu.post(`/api/quotes/${id}/mark-converted`).send({ invoiceSplit: [{ sheetId: a.id, group: 1, hold: "later" }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: 1, hold: null }] })).status).toBe(400);
+    expect((await prisma.quote.findUnique({ where: { id } })).status).not.toBe("converted");
+
+    const r = await chu.post(`/api/quotes/${id}/mark-converted`).send({ invoiceSplit: [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: null, hold: "later" }] });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.status).toBe("converted");
+    expect((await sheetsCua(id)).map((s) => [s.invoiceGroup, s.invoiceHold])).toEqual([[1, null], [1, null], [null, "later"]]);
+    const nk = await prisma.auditEvent.findFirst({ where: { action: "quote.invoice.split", resourceId: String(id) }, orderBy: { id: "desc" } });
+    expect(nk?.after).toMatchObject({ luc: "chot" });
+
+    // Chốt KHÔNG kèm invoiceSplit (báo giá 1 sheet / không đổi gì) → y như cũ: chưa chia.
+    const id2 = await taoBaoGiaChot("chot-cu");
+    expect((await sheetsCua(id2)).every((s) => s.invoiceGroup == null && s.invoiceHold == null)).toBe(true);
   });
 
   it("gom A+B vào Hóa đơn 1, C Để sau: trường hóa đơn hợp nhất + ghi đồng loạt; C không nhận số HĐ", async () => {
@@ -99,7 +144,7 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     const [a, b, c] = await sheetsCua(id);
     // Kế toán đã gõ PO trên B trước khi chia — gom lại không được mất.
     expect((await keToan.put(`/api/quotes/sheets/${b.id}/invoice`).send({ poNumber: "PO-77" })).status).toBe(200);
-    const r = await chia(keToan, id, [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: null, hold: "later" }]);
+    const r = await chia(chu, id, [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: null, hold: "later" }]);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     let [a1, b1, c1] = await sheetsCua(id);
     expect([a1.invoiceGroup, b1.invoiceGroup, c1.invoiceHold]).toEqual([1, 1, "later"]);
@@ -126,16 +171,16 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     const id = await taoBaoGiaChot("daxuat");
     const [a, b, c] = await sheetsCua(id);
     const g = (x, group, hold = null) => ({ sheetId: x.id, group, hold });
-    expect((await chia(keToan, id, [g(a, 1), g(b, 1), g(c, null, "later")])).status).toBe(200);
+    expect((await chia(chu, id, [g(a, 1), g(b, 1), g(c, null, "later")])).status).toBe(200);
     expect((await keToan.put(`/api/quotes/sheets/${a.id}/invoice`).send({ invoiceNo: "0000456" })).status).toBe(200);
 
-    expect((await chia(keToan, id, [g(a, 1), g(b, 1), g(c, 1)])).status, "gom thêm C vào HĐ đã xuất").toBe(409);
-    expect((await chia(keToan, id, [g(a, 1), g(b, 2), g(c, null, "later")])).status, "tách B khỏi HĐ đã xuất").toBe(409);
-    expect((await chia(keToan, id, [g(a, 2), g(b, 2), g(c, null, "later")])).status, "đổi số HĐ đã xuất (_01 → _02)").toBe(409);
-    expect((await chia(keToan, id, [g(a, null), g(b, null), g(c, null)])).status, "bỏ chia = tách HĐ đã xuất thành từng sheet").toBe(409);
+    expect((await chia(chu, id, [g(a, 1), g(b, 1), g(c, 1)])).status, "gom thêm C vào HĐ đã xuất").toBe(409);
+    expect((await chia(chu, id, [g(a, 1), g(b, 2), g(c, null, "later")])).status, "tách B khỏi HĐ đã xuất").toBe(409);
+    expect((await chia(chu, id, [g(a, 2), g(b, 2), g(c, null, "later")])).status, "đổi số HĐ đã xuất (_01 → _02)").toBe(409);
+    expect((await chia(chu, id, [g(a, null), g(b, null), g(c, null)])).status, "bỏ chia = tách HĐ đã xuất thành từng sheet").toBe(409);
     expect((await sheetsCua(id)).map((s) => s.invoiceHold), "409 không ghi gì").toEqual([null, null, "later"]);
 
-    expect((await chia(keToan, id, [g(a, 1), g(b, 1), g(c, 2)])).status).toBe(200);
+    expect((await chia(chu, id, [g(a, 1), g(b, 1), g(c, 2)])).status).toBe(200);
     expect((await sheetsCua(id)).map((s) => s.invoiceGroup)).toEqual([1, 1, 2]);
     // C nay là hóa đơn riêng → nhận số HĐ riêng, không đụng HĐ 1.
     expect((await keToan.put(`/api/quotes/sheets/${c.id}/invoice`).send({ invoiceNo: "0000789" })).status).toBe(200);
@@ -147,8 +192,8 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     const [a, b, c] = await sheetsCua(id);
     expect((await keToan.put(`/api/quotes/sheets/${b.id}/invoice`).send({ invoiceNo: "B-OLD" })).status).toBe(200);
     const g = (x, group, hold = null) => ({ sheetId: x.id, group, hold });
-    expect((await chia(keToan, id, [g(a, 1), g(b, 1), g(c, 3)])).status, "B (mã _02) bị gom vào HĐ 1").toBe(409);
-    expect((await chia(keToan, id, [g(a, 1), g(b, 2), g(c, 1)])).status, "B giữ số 2 một mình — A+C gom HĐ 1").toBe(200);
+    expect((await chia(chu, id, [g(a, 1), g(b, 1), g(c, 3)])).status, "B (mã _02) bị gom vào HĐ 1").toBe(409);
+    expect((await chia(chu, id, [g(a, 1), g(b, 2), g(c, 1)])).status, "B giữ số 2 một mình — A+C gom HĐ 1").toBe(200);
     expect((await sheetsCua(id)).map((s) => s.invoiceNo)).toEqual([null, "B-OLD", null]);
   });
 
@@ -156,27 +201,27 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     const id = await taoBaoGiaChot("tuchoi");
     const [a, b, c] = await sheetsCua(id);
     const g = (x, group, hold = null) => ({ sheetId: x.id, group, hold });
-    expect((await chia(keToan, id, [g(a, 1), g(b, 1), g(c, 2)])).status).toBe(200);
+    expect((await chia(chu, id, [g(a, 1), g(b, 1), g(c, 2)])).status).toBe(200);
     const tc = await admin.post(`/api/quotes/sheets/${b.id}/customer-decision`).send({ status: "rejected" });
     expect(tc.status, JSON.stringify(tc.body)).toBe(200);
     expect((await keToan.put(`/api/quotes/sheets/${a.id}/invoice`).send({ invoiceNo: "TC-1" })).status).toBe(200);
     expect((await sheetsCua(id)).map((s) => s.invoiceNo)).toEqual(["TC-1", null, null]);
-    expect((await chia(keToan, id, [g(a, 1), g(b, null, "skip"), g(c, 2)])).status).toBe(200);
+    expect((await chia(chu, id, [g(a, 1), g(b, null, "skip"), g(c, 2)])).status).toBe(200);
   });
 
   it("LÀM LẠI HÓA ĐƠN: gỡ số HĐ + ngày + link khỏi MỌI sheet của hóa đơn, GIỮ ngày thu; audit; hết khoá sửa; chia lại được", async () => {
     const id = await taoBaoGiaChot("lamlai");
     const [a, b, c] = await sheetsCua(id);
     const g = (x, group, hold = null) => ({ sheetId: x.id, group, hold });
-    expect((await chia(keToan, id, [g(a, 1), g(b, 1), g(c, 2)])).status).toBe(200);
+    expect((await chia(chu, id, [g(a, 1), g(b, 1), g(c, 2)])).status).toBe(200);
     expect((await keToan.put(`/api/quotes/sheets/${a.id}/invoice`).send({ invoiceNo: "R-1", invoiceDate: "2026-10-01", invoiceLink: "https://hd.vn/r1", paidAt: "2026-10-05" })).status).toBe(200);
     const lamLai = (agent, sheetId) => agent.post(`/api/quotes/${id}/invoice-redo`).send({ sheetId });
 
-    expect((await lamLai(account, b.id)).status, "không có invoice:page").toBe(403);
-    expect((await lamLai(keToan, 999999999)).status, "sheet không thuộc báo giá").toBe(409);
+    expect((await lamLai(keToan, b.id)).status, "kế toán không làm lại — báo chủ báo giá").toBe(403);
+    expect((await lamLai(chu, 999999999)).status, "sheet không thuộc báo giá").toBe(409);
     expect((await sheetsCua(id))[0].invoiceNo, "bị từ chối thì không gỡ gì").toBe("R-1");
 
-    const r = await lamLai(keToan, b.id);
+    const r = await lamLai(chu, b.id);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const sau = await sheetsCua(id);
     expect(sau.map((s) => [s.invoiceNo, s.invoiceDate, s.invoiceLink])).toEqual([[null, null, null], [null, null, null], [null, null, null]]);
@@ -184,7 +229,7 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     const nk = await prisma.auditEvent.findFirst({ where: { action: "quote.invoice.redo", resourceId: String(id) }, orderBy: { id: "desc" } });
     expect(nk?.before).toMatchObject({ invoiceNo: ["R-1"], invoiceLink: ["https://hd.vn/r1"] });
     expect(nk.before.sheets.map((x) => x.sheetId)).toEqual([a.id, b.id]);
-    expect((await lamLai(keToan, a.id)).status, "hết số HĐ → không có gì để làm lại").toBe(409);
+    expect((await lamLai(chu, a.id)).status, "hết số HĐ → không có gì để làm lại").toBe(409);
 
     // Hết số HĐ → báo giá hết khoá sửa như luật cũ.
     const q0 = (await admin.get(`/api/quotes/${id}`)).body;
@@ -192,18 +237,18 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     const [a2, b2, c2] = await sheetsCua(id);
 
     // Luật tiền đã thu: gom sheet đã thu với sheet chưa thu → 409; sheet đã thu Để sau / Không xuất → 409.
-    expect((await chia(keToan, id, [g(a2, 1), g(b2, 1), g(c2, 1)])).status).toBe(409);
-    expect((await chia(keToan, id, [g(a2, 1), g(b2, null, "later"), g(c2, 2)])).status).toBe(409);
-    expect((await chia(keToan, id, [g(a2, 1), g(b2, null, "skip"), g(c2, 2)])).status).toBe(409);
+    expect((await chia(chu, id, [g(a2, 1), g(b2, 1), g(c2, 1)])).status).toBe(409);
+    expect((await chia(chu, id, [g(a2, 1), g(b2, null, "later"), g(c2, 2)])).status).toBe(409);
+    expect((await chia(chu, id, [g(a2, 1), g(b2, null, "skip"), g(c2, 2)])).status).toBe(409);
     // Tách hai sheet đã thu thành hai hóa đơn: mỗi sheet giữ ngày thu của mình — được.
-    expect((await chia(keToan, id, [g(a2, 1), g(b2, 2), g(c2, 3)])).status).toBe(200);
+    expect((await chia(chu, id, [g(a2, 1), g(b2, 2), g(c2, 3)])).status).toBe(200);
     expect((await sheetsCua(id)).map((s) => s.paidAt?.toISOString().slice(0, 10) ?? null)).toEqual(["2026-10-05", "2026-10-05", null]);
   });
 
   it("Không xuất: sheet skip giữ nguyên tiền/sheet, không nhận số HĐ", async () => {
     const id = await taoBaoGiaChot("skip");
     const [a, b, c] = await sheetsCua(id);
-    expect((await chia(keToan, id, [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: null, hold: "skip" }, { sheetId: c.id, group: 1, hold: null }])).status).toBe(200);
+    expect((await chia(chu, id, [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: null, hold: "skip" }, { sheetId: c.id, group: 1, hold: null }])).status).toBe(200);
     expect((await keToan.put(`/api/quotes/sheets/${b.id}/invoice`).send({ invoiceDate: "2026-10-06" })).status).toBe(409);
     const q = await duAn(id);
     expect(q.sheets.map((s) => s.subtotal)).toEqual([1_000_000, 2_000_000, 4_000_000]);
@@ -213,15 +258,15 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
   it("thân yêu cầu sai: sheet vừa có số HĐ vừa Để sau / thiếu xếp / liệt kê thiếu → 400 / 409", async () => {
     const id = await taoBaoGiaChot("sai");
     const [a, b, c] = await sheetsCua(id);
-    expect((await chia(keToan, id, [{ sheetId: a.id, group: 1, hold: "later" }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: 1, hold: null }])).status).toBe(400);
-    expect((await chia(keToan, id, [{ sheetId: a.id, group: null, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: 1, hold: null }])).status).toBe(400);
-    expect((await chia(keToan, id, [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: 1, hold: null }])).status).toBe(409);
+    expect((await chia(chu, id, [{ sheetId: a.id, group: 1, hold: "later" }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: 1, hold: null }])).status).toBe(400);
+    expect((await chia(chu, id, [{ sheetId: a.id, group: null, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: 1, hold: null }])).status).toBe(400);
+    expect((await chia(chu, id, [{ sheetId: a.id, group: 1, hold: null }, { sheetId: b.id, group: 1, hold: null }])).status).toBe(409);
   });
 
   it("sale Lưu báo giá (xoá sheet rồi tạo lại) KHÔNG làm mất phép chia; đã xuất HĐ thì vẫn khoá sửa như cũ", async () => {
     const id = await taoBaoGiaChot("luu");
     const [a, b, c] = await sheetsCua(id);
-    expect((await chia(keToan, id, [{ sheetId: a.id, group: 2, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: null, hold: "later" }])).status).toBe(200);
+    expect((await chia(chu, id, [{ sheetId: a.id, group: 2, hold: null }, { sheetId: b.id, group: 1, hold: null }, { sheetId: c.id, group: null, hold: "later" }])).status).toBe(200);
     const q0 = (await admin.get(`/api/quotes/${id}`)).body;
     const luu = await admin.put(`/api/quotes/${id}`).send({
       baseUpdatedAt: q0.updatedAt, title: `${TAG} luu v2`,

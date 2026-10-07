@@ -20,6 +20,7 @@ import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
 import { codeLabel } from "../quoteCode.js";
 import { INVOICE_SHARED_FIELDS, daChiaHoaDon, khoaHoaDon } from "../invoiceSplit.js";
+import { apDungChiaTrongTx, kiemQuyenChiaHoaDon, kiemThanChia, type GanSheet, type KetQuaChia } from "./invoiceSplitService.js";
 import { can, canScoped, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
@@ -1783,6 +1784,15 @@ export async function markConverted(req: Request) {
   if (["converted", "lost"].includes(existing.status)) {
     throw httpError(400, "Báo giá đã chốt / không chốt rồi");
   }
+  // ── CHIA HÓA ĐƠN NGAY LÚC CHỐT (chủ repo 2026-10-07: "không nó phải nằm ở chỗ duyệt cơ") ─────────────
+  // Hộp "✓ Khách chốt cả báo giá" gửi kèm `invoiceSplit` (cùng hình dạng PUT /:id/invoice-split). Áp TRONG transaction
+  // chốt dưới đây, SAU khi đã chuyển trạng thái: phép chia sai (sheet lệch, gom sheet đã thu với chưa thu…) ném lỗi →
+  // rollback TRỌN, báo giá KHÔNG bị chốt dở mà thiếu phép chia người dùng vừa chọn. Vắng `invoiceSplit` = y như cũ.
+  const chiaKhiChot: GanSheet[] | null = Array.isArray(req.body?.invoiceSplit) ? req.body.invoiceSplit : null;
+  if (chiaKhiChot) {
+    kiemQuyenChiaHoaDon(req.session, existing, "chia hóa đơn");
+    kiemThanChia(chiaKhiChot);
+  }
   // ── DOANH THU GHI NHẬN = TỔNG TRỪ NHỮNG TRANG KHÁCH KHÔNG DUYỆT ─────────
   // `QuoteSheet.custStatus` tồn tại từ lâu để ghi ý kiến khách cho TỪNG trang, nhưng trước
   // 2026-09-17 KHÔNG một dòng mã nào đọc nó: hàm này chuyển cả báo giá sang `converted` rồi phát
@@ -1800,7 +1810,7 @@ export async function markConverted(req: Request) {
   // bản trước đọc trang NGOÀI transaction rồi mới updateMany — một lần Lưu chen giữa làm doanh thu
   // chốt tính từ giá CŨ. Cùng thứ tự khoá với updateQuote/saveHn → không deadlock.
   // Tính bằng tinhConvertedTotal (Decimal, kẹp ≥ 0) — CÙNG hàm mà các đường tính lại sau khi chốt dùng.
-  const { upd, trang } = await prisma.$transaction(async (tx) => {
+  const { upd, trang, chia } = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
     const trang = await tx.quoteSheet.findMany({
       where: { quoteId: id },
@@ -1819,7 +1829,8 @@ export async function markConverted(req: Request) {
       where: { id, status: { notIn: ["converted", "lost"] } },
       data: { status: "converted", convertedAt: new Date(), convertedTotal },
     });
-    return { upd, trang };
+    const chia: KetQuaChia | null = upd.count && chiaKhiChot ? await apDungChiaTrongTx(tx, id, chiaKhiChot) : null;
+    return { upd, trang, chia };
   });
   if (!upd.count) {
     throw httpError(409, "Báo giá vừa đổi trạng thái — vui lòng tải lại");
@@ -1827,6 +1838,7 @@ export async function markConverted(req: Request) {
   const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   await audit(req, "quote.convert", { resource: "quote", resourceId: id, before: { status: existing.status } });
+  if (chia) await audit(req, "quote.invoice.split", { resource: "quote", resourceId: id, before: { sheets: chia.truoc }, after: { sheets: chia.sau, luc: "chot" } });
   // `total` GIỮ NGUYÊN trong webhook (bên nhận cũ vẫn đọc được), và thêm `convertedTotal` —
   // số thật sự chốt. Đổi nghĩa `total` ở đây là làm sai mọi tích hợp đang chạy.
   emitWebhook("quote.converted", {

@@ -2814,6 +2814,23 @@ button.qn-text:hover {
   gap: 6px;
   margin-top: 16px;
 }
+/* Một MÃ hóa đơn = một khối: các cột gộp dọc (rowspan), cột Hạng mục mỗi sheet một dòng con có vạch ngăn. */
+.inv-table td[rowspan] {
+  vertical-align: top;
+}
+.inv-table td.inv-hm {
+  min-width: 180px;
+}
+.inv-table tr.inv-hm-dong td.inv-hm {
+  border-top: 1px dashed var(--line-strong);
+}
+.inv-hm-cu {
+  font-size: 12px;
+  margin-top: 2px;
+}
+.inv-chia-goiy {
+  margin: 4px 0 8px;
+}
 .inv-in-hop-dau {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

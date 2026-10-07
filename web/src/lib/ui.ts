@@ -1,6 +1,8 @@
 // Toast + confirm modal (DOM-based) — thay confirm()/alert() trình duyệt cho đồng bộ + đẹp.
 import { useEffect, useState } from "react";
-import { ApiError } from "./api";
+import { ApiError, type ProjectQuote } from "./api";
+import { daChia, luaChonBanDau, nhomHoaDon, soHoaDonToiDa, thanhPhepChia, type GanSheet } from "./hoaDonChia";
+import { soMa } from "./format";
 
 /* Hook đóng modal bằng ESC — trước đây mỗi modal tự copy addEventListener (Profile/Users/Customers…). */
 export function useEscClose(onClose: () => void, enabled = true) {
@@ -341,6 +343,9 @@ export type TrangChot = {
 
 const tienVN = (n: number) => Math.round(n).toLocaleString("vi-VN") + " đ";
 
+/** Kết quả hộp chốt: các trang ĐỔI ý kiến khách (như cũ) + phép chia hóa đơn nếu người dùng đã đổi so với hiện có. */
+export type KetQuaChot = Array<{ id: number; status: string | null }> & { chiaHoaDon?: GanSheet[] };
+
 /**
  * Trả về danh sách trang cần ĐỔI trạng thái (chỉ những trang người dùng vừa sửa trong hộp), hoặc
  * `null` nếu huỷ. Người gọi chịu trách nhiệm gửi từng thay đổi lên máy chủ TRƯỚC khi chốt.
@@ -352,22 +357,74 @@ export function modalChotBaoGia(
   soBaoGia: string,
   trangs: TrangChot[],
   vatPct: number,
-): Promise<Array<{ id: number; status: string | null }> | null> {
+  // CHIA HÓA ĐƠN NGAY LÚC CHỐT (chủ repo 2026-10-07: "không nó phải nằm ở chỗ duyệt cơ"): báo giá ở dạng lib/hoaDonChia
+  // (baoGiaChoHoaDon). Có từ 2 trang thì mỗi dòng thêm ô chọn Hóa đơn 1/2/…/Để sau/Không xuất + khung xem trước mã
+  // _01/_02 và tiền từng hóa đơn — CÙNG hàm nhomHoaDon với trang Hóa đơn đầu ra. Báo giá 1 trang: không có gì thêm.
+  chiaHD?: { quote: ProjectQuote },
+): Promise<KetQuaChot | null> {
   return new Promise((resolve) => {
     // Bản nháp trạng thái trong hộp — chỉ áp ra ngoài khi bấm Chốt.
     const nhap = new Map<number, string | null>(trangs.map((t) => [t.id, t.custStatus]));
+    const coChia = !!chiaHD && trangs.length > 1;
+    const sheetsGoc = chiaHD?.quote.sheets || [];
+    const chiaSan = daChia(sheetsGoc);
+    // Báo giá để XEM TRƯỚC: thành tiền đang hiện trong hộp + ý kiến khách vừa chọn (trang không duyệt bị loại như trang
+    // Hóa đơn sẽ làm sau khi chốt).
+    const bgXem = (): ProjectQuote => ({
+      ...chiaHD!.quote,
+      sheets: sheetsGoc.map((sh) => {
+        const t = trangs.find((x) => x.id === sh.id);
+        return t ? { ...sh, subtotal: t.net, custStatus: nhap.get(t.id) ?? null } : sh;
+      }),
+    });
+    const chon: Record<number, string> = coChia ? luaChonBanDau(bgXem()) : {};
+    // Chưa chia: mặc định trang khách không duyệt = Không xuất, còn lại = số mã cũ. Đổi ý kiến khách trong hộp mà ô chọn
+    // đang đúng mặc định cũ → theo mặc định mới (đồng ý lại một trang thì nó về hóa đơn của nó, không kẹt ở Không xuất).
+    const macDinhCua = (id: number, st: string | null) => {
+      const i = sheetsGoc.findIndex((s) => s.id === id);
+      return st === "rejected" ? "skip" : String(soMa(sheetsGoc[i], i));
+    };
+    const datTrangThai = (id: number, st: string | null) => {
+      if (coChia && !chiaSan && chon[id] === macDinhCua(id, nhap.get(id) ?? null)) chon[id] = macDinhCua(id, st);
+      nhap.set(id, st);
+    };
 
     const back = document.createElement("div");
     back.className = "modal-backdrop";
     back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" data-focus-trap="own" aria-label="Chốt báo giá">
       <div class="modal-head"><h3>Chốt cả báo giá ${esc(soBaoGia)} — ${trangs.length} trang</h3></div>
       <div class="modal-body" data-than style="max-height:60vh;overflow:auto"></div>
+      <div data-chia style="padding:0 16px 8px"></div>
       <div class="modal-foot">
         <button class="btn" data-no>Hủy</button>
         <button class="btn btn-success" data-yes></button>
       </div></div>`;
 
     const than = back.querySelector("[data-than]") as HTMLElement;
+    const khungChia = back.querySelector("[data-chia]") as HTMLElement;
+    const veChia = () => {
+      if (!coChia) { khungChia.hidden = true; return; }
+      const kq = nhomHoaDon(bgXem(), chon);
+      const ten = (i: number) => esc(sheetsGoc[i]?.name || `Sheet ${i + 1}`);
+      khungChia.innerHTML = `<b>Hóa đơn sẽ xuất</b> <span class="muted" style="font-size:12.5px">(trang Hóa đơn đầu ra của kế toán tách theo đúng mã này)</span>
+        <ul data-xem-chia style="margin:4px 0 0;padding-left:18px">
+          ${kq.hoaDon.map((hd) => `<li><b>${esc(hd.code)}</b> — ${hd.sheets.map((x) => ten(x.i)).join(", ")} · trước VAT ${esc(tienVN(hd.subtotal))} · sau VAT <b>${esc(tienVN(hd.amount))}</b></li>`).join("")}
+          ${kq.deSau.length ? `<li class="muted">Để sau: ${kq.deSau.map((x) => ten(x.i)).join(", ")}</li>` : ""}
+          ${kq.khongXuat.length ? `<li class="muted">Không xuất: ${kq.khongXuat.map((x) => ten(x.i)).join(", ")}</li>` : ""}
+          ${kq.hoaDon.length ? "" : `<li class="muted">Chưa có hóa đơn nào — mọi trang đang Để sau / Không xuất.</li>`}
+        </ul>`;
+    };
+    const oChon = (t: TrangChot) => {
+      if (!coChia) return "";
+      const toiDa = soHoaDonToiDa(sheetsGoc, chon);
+      const v = chon[t.id] ?? "later";
+      const sh = sheetsGoc.find((s) => s.id === t.id);
+      const khoa = !!String(sh?.invoiceNo ?? "").trim();
+      const op = (val: string, nhan: string) => `<option value="${val}"${v === val ? " selected" : ""}>${nhan}</option>`;
+      return `<select name="chotHoaDon-${t.id}" autocomplete="off" data-chon="${t.id}" aria-label="Hóa đơn của trang ${esc(t.ten)}"${khoa ? " disabled" : ""}>
+          ${Array.from({ length: toiDa }, (_, k) => op(String(k + 1), `Hóa đơn ${k + 1}`)).join("")}${op("later", "Để sau")}${op("skip", "Không xuất")}
+        </select>`;
+    };
     const nutChot = back.querySelector("[data-yes]") as HTMLButtonElement;
 
     const NHAN: Record<string, string> = {
@@ -405,6 +462,7 @@ export function modalChotBaoGia(
             <span class="muted" style="font-variant-numeric:tabular-nums;min-width:110px;text-align:right">${esc(tienVN(t.net))}</span>
             <span style="min-width:126px;${mau}">${NHAN[st]}</span>
             <span style="display:flex;gap:4px">${nut}</span>
+            ${oChon(t)}
           </li>`;
       };
 
@@ -438,20 +496,24 @@ export function modalChotBaoGia(
         : "";
 
       than.querySelector("[data-duyet-het]")?.addEventListener("click", () => {
-        for (const t of chuaYKien) nhap.set(t.id, "approved");
+        for (const t of chuaYKien) datTrangThai(t.id, "approved");
         ve();
       });
       than.querySelector("[data-tuchoi-het]")?.addEventListener("click", () => {
-        for (const t of chuaYKien) nhap.set(t.id, "rejected");
+        for (const t of chuaYKien) datTrangThai(t.id, "rejected");
         ve();
       });
       for (const b of than.querySelectorAll<HTMLElement>("[data-dat]")) {
         b.addEventListener("click", () => {
           const [id, st] = (b.dataset.dat || "").split("|");
-          nhap.set(Number(id), st || null);
+          datTrangThai(Number(id), st || null);
           ve();
         });
       }
+      for (const o of than.querySelectorAll<HTMLSelectElement>("select[data-chon]")) {
+        o.addEventListener("change", () => { chon[Number(o.dataset.chon)] = o.value; veChia(); });
+      }
+      veChia();
     };
 
     let releaseFocus = () => {};
@@ -460,9 +522,12 @@ export function modalChotBaoGia(
     const chot = () => {
       if (nutChot.disabled) return;
       // CHỈ trả về trang THẬT SỰ đổi — gửi lại trạng thái cũ là đẻ ra bản ghi audit rỗng.
-      const doi = trangs
+      const doi: KetQuaChot = trangs
         .filter((t) => (nhap.get(t.id) ?? null) !== t.custStatus)
         .map((t) => ({ id: t.id, status: nhap.get(t.id) ?? null }));
+      // Phép chia CHỈ gửi khi khác hiện có — chưa chia mà không đổi gì thì "chưa chia" giữ nguyên nghĩa cũ.
+      const chia = coChia ? thanhPhepChia(bgXem().sheets || [], chon) : null;
+      if (chia) doi.chiaHoaDon = chia;
       cleanup();
       resolve(doi);
     };

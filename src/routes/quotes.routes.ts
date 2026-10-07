@@ -48,6 +48,13 @@ import { ghiKhoanChi, docAnhKhoanChi, phuKeToanBanTrinhBay, daChiCuaBaoGia, docC
 import { setInvoiceSplit, setInvoiceRedo } from "../services/invoiceSplitService.js";
 
 const router = Router();
+
+// Phép chia sheet thành hóa đơn — dùng chung cho PUT /:id/invoice-split và hộp chốt (POST /:id/mark-converted).
+const PhepChiaSchema = z.array(z.object({
+  sheetId: z.number().int().positive(),
+  group: z.number().int().min(1).max(99).nullable(),
+  hold: z.enum(["later", "skip"]).nullable(),
+}).strict()).min(1).max(200);
 router.use(requireAuth);
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
@@ -203,31 +210,26 @@ router.put(
 );
 
 // CHIA SHEET THÀNH HÓA ĐƠN (trang Hóa đơn đầu ra, kế toán): gán từng sheet vào Hóa đơn 1, 2… / Để sau / Không xuất.
-// Vào bằng invoice:page; service đòi thêm invoice:edit. Luật + khoá "hóa đơn đã xuất đứng yên": src/services/invoiceSplitService.ts.
+// 2026-10-07: CHỦ BÁO GIÁ + admin làm trong màn báo giá (quote:send + sửa được báo giá + không phải account phụ — cùng
+// luật nút chốt); kế toán KHÔNG còn chia. Luật + khoá "hóa đơn đã xuất đứng yên": src/services/invoiceSplitService.ts.
 router.put(
   "/:id/invoice-split",
+  requirePermission(P.QUOTE_SEND),
   validate({
     params: z.object({ id: z.coerce.number().int().positive() }),
-    body: z.object({
-      sheets: z.array(z.object({
-        sheetId: z.number().int().positive(),
-        group: z.number().int().min(1).max(99).nullable(),
-        hold: z.enum(["later", "skip"]).nullable(),
-      }).strict()).min(1).max(200),
-    }).strict(),
+    body: z.object({ sheets: PhepChiaSchema }).strict(),
   }),
-  requireAnyPermission(P.INVOICE_PAGE),
   asyncHandler(async (req: Request, res: Response) => res.json(await setInvoiceSplit(req)))
 );
 
 // LÀM LẠI HÓA ĐƠN: gỡ số HĐ (+ ngày, link) khỏi mọi sheet của một hóa đơn — giữ nguyên ngày thu tiền. Sau đó chia lại được.
 router.post(
   "/:id/invoice-redo",
+  requirePermission(P.QUOTE_SEND),
   validate({
     params: z.object({ id: z.coerce.number().int().positive() }),
     body: z.object({ sheetId: z.number().int().positive() }).strict(),
   }),
-  requireAnyPermission(P.INVOICE_PAGE),
   asyncHandler(async (req: Request, res: Response) => res.json(await setInvoiceRedo(req)))
 );
 
@@ -318,10 +320,12 @@ router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decis
 // Segregation of duties: marking a deal WON is terminal, immutable and feeds
 // revenue/leaderboard KPIs — require QUOTE_SEND authority (manager/admin) so the
 // salesperson who benefits from the KPI can't self-close their own quote.
+// `invoiceSplit` (tuỳ chọn): phép chia sheet thành hóa đơn chọn trong hộp chốt — áp CÙNG transaction (markConverted).
+// z.object KHÔNG strict: khoá lạ (vd convertedTotal tự khai) bị bỏ im như trước, tiền vẫn do máy chủ tính.
 router.post(
   "/:id/mark-converted",
   requirePermission(P.QUOTE_SEND),
-  validate({ params: idParam }),
+  validate({ params: idParam, body: z.object({ invoiceSplit: PhepChiaSchema.optional() }) }),
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await markConverted(req);
     res.json(await trinhBay(quote));

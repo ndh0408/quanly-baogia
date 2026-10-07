@@ -10,6 +10,8 @@ import { HnTables, mauBangHn, hnCoThayDoi, gopTrangThaiHn, ridTheoTrangThai, typ
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
 import { CustomerPicker } from "../components/CustomerPicker";
+import { HopChiaHoaDon } from "../components/HopChiaHoaDon";
+import { baoGiaChoHoaDon, type GanSheet } from "../lib/hoaDonChia";
 import { sapXepTheoFile } from "../lib/importApply";
 import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { giuBanNhap } from "../lib/pendingQuote";
@@ -374,6 +376,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  // Hộp "Chia hóa đơn" SAU KHI CHỐT (chủ báo giá / admin) — xem components/HopChiaHoaDon.tsx.
+  const [chiaOpen, setChiaOpen] = useState(false);
   // ĐỔI KHÁCH HÀNG (danh mục) ngay trong báo giá: hộp chọn + khoá dựng lại các ô "Bên nhận" (chúng UNCONTROLLED — defaultValue
   // chỉ đọc lúc dựng, nên đổi `q.toCompany…` bằng mã mà không đổi `key` thì màn hình vẫn hiện khách CŨ). Hook ở ĐÂY, trước hai
   // lệnh return sớm (xem ghi chú ở `dangTai`).
@@ -1040,7 +1044,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       custStatus: (s.custStatus as string | null) ?? null,
     }));
 
-    const doi = await modalChotBaoGia(q.quoteNumber || `#${q.id}`, trangs, Number(q.vatPercent) || 0);
+    // CHIA HÓA ĐƠN NGAY TRONG HỘP CHỐT (chủ repo 2026-10-07): xem trước theo đúng thành tiền đang hiện (`net`).
+    const chiaHD = { quote: baoGiaChoHoaDon(q, new Map(trangs.map((t) => [t.id, { subtotal: t.net }]))) };
+    const doi = await modalChotBaoGia(q.quoteNumber || `#${q.id}`, trangs, Number(q.vatPercent) || 0, chiaHD);
     if (doi === null || !songRef.current) return;   // L61: hộp treo sau khi đã rời báo giá này
 
     try {
@@ -1052,7 +1058,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         const s = sheets.find((x) => x.id === d.id);
         if (s) { s.custStatus = r.custStatus; s.custStatusAt = r.custStatusAt; s.custNote = r.custNote; s.custStatusBy = r.custStatusBy; }
       }
-      const u = await api.markConverted(q.id);
+      // Phép chia (nếu người dùng đổi) đi CÙNG lệnh chốt — máy chủ áp trong một transaction: chia lỗi thì không chốt.
+      const u = doi.chiaHoaDon ? await api.markConverted(q.id, doi.chiaHoaDon) : await api.markConverted(q.id);
       vanTayMainRef.current = vanTayMain(u);
       qRef.current = { ...u, _activeSheet: ai } as QuoteFull;
       stampKeys(qRef.current, q);
@@ -1064,6 +1071,24 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       redraw();
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
+  // CHIA HÓA ĐƠN SAU KHI CHỐT (chủ báo giá / admin — máy chủ cùng luật nút chốt). Lưu trước nếu còn sửa dở: phép chia
+  // liệt kê id sheet ĐÃ LƯU, sheet chưa lưu (hoặc lưu xong đổi id) sẽ bị máy chủ trả 409.
+  const moChiaHoaDon = async () => {
+    if (!(await luuTruocNeuCan("chia hóa đơn"))) return;
+    const cur = qRef.current as QuoteFull;
+    if (((cur.sheets || []) as Sheet[]).some((s) => !s.id)) { toast("Còn trang chưa lưu — bấm Lưu trước rồi chia hóa đơn", "info"); return; }
+    setChiaOpen(true);
+  };
+  // Vá kết quả vào bản đang mở (máy chủ không đổi Quote.updatedAt khi chia / làm lại — chỉ ghi QuoteSheet).
+  const vaSheet = (ids: number[], p: (s: Record<string, unknown>) => void) => {
+    for (const s of ((qRef.current as QuoteFull).sheets || []) as Record<string, unknown>[]) if (ids.includes(Number(s.id))) p(s);
+    redraw();
+  };
+  const daChiaXong = (ds: GanSheet[]) => {
+    for (const g of ds) vaSheet([g.sheetId], (s) => { s.invoiceGroup = g.group; s.invoiceHold = g.hold; });
+  };
+  // Làm lại hóa đơn xong: các sheet đó hết số HĐ → không còn sheet nào mang số thì báo giá hết khoá sửa (daXuatHoaDon).
+  const daLamLai = (ids: number[]) => vaSheet(ids, (s) => { s.invoiceNo = null; s.invoiceDate = null; s.invoiceLink = null; });
   const lost = async () => {
     // markLost không đụng tiền, nhưng sau đó qRef bị thay bằng bản máy chủ → phần chưa lưu mất.
     if (!(await luuTruocNeuCan("đánh dấu không chốt"))) return;
@@ -1632,6 +1657,11 @@ Lý do (không bắt buộc):`,
               title={`Đánh dấu CẢ báo giá này (${(q.sheets || []).length} trang) là không chốt được. KHÔNG đảo lại được.`}
             >✗ Khách không chốt</button>
           )}
+          {/* Sau khi chốt: CHỦ báo giá / admin chia lại hóa đơn hoặc làm lại hóa đơn đã xuất (kế toán báo khi cần). */}
+          {!isNew && laChu && q.status === "converted" && hasPerm("quote:send") && (
+            <button className="btn" onClick={() => void moChiaHoaDon()}
+              title="Chọn sheet nào thuộc Hóa đơn 1, 2… / Để sau / Không xuất — trang Hóa đơn đầu ra của kế toán tách theo mã này. Làm lại hóa đơn đã xuất ở đây.">Chia hóa đơn</button>
+          )}
           {!isNew && (
             <div className="kebab-wrap">
               <button ref={moreBtnRef} className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>
@@ -1661,6 +1691,7 @@ Lý do (không bắt buộc):`,
         />
       )}
       {versions && <VersionsModal quoteId={q.id} versions={versions} onClose={() => setVersions(null)} />}
+      {chiaOpen && <HopChiaHoaDon q={baoGiaChoHoaDon(q)} onClose={() => setChiaOpen(false)} onSaved={daChiaXong} onDaLamLai={daLamLai} />}
       {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={q.members || []} onClose={() => setMembersOpen(false)} onSaved={(ms) => { q.members = ms; setMembersOpen(false); redraw(); }} />}
       {khOpen && <CustomerPicker chonId={q.customerId != null ? Number(q.customerId) : null} onClose={() => setKhOpen(false)} onPick={chonKhach} />}
     </div>

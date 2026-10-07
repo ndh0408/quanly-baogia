@@ -1,54 +1,63 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
-import { toast, confirmModal } from "../lib/ui";
+import { toast } from "../lib/ui";
 import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, dash, Stat } from "../lib/format";
 import { smartTextMatch } from "../lib/filterText";
-import { nhomHoaDon, tienCoVat } from "../lib/hoaDonChia";
-import { HopChiaHoaDon } from "../components/HopChiaHoaDon";
+import { nhomHoaDon, tienCoVat, nhanHangMuc } from "../lib/hoaDonChia";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
 // (QuoteSheet): kế toán NHẬP ở đây → trang Dự án THAM CHIẾU (read-only). Mỗi sheet đã chốt = 1 dòng.
 // - Tình trạng HĐ: TỰ ĐỘNG "Hoàn tất" khi có Số HĐơn + Ngày HĐơn (không nhập tay).
-// - Kế toán nhập: Hạng mục, PO/HĐ, CTy (GN/SM/CLF), Số HĐơn, Ngày HĐơn, Hình thức TT, Ngày đóng ĐH,
+// - Kế toán nhập: PO/HĐ, CTy (GN/SM/CLF), Số HĐơn, Ngày HĐơn, Hình thức TT, Ngày đóng ĐH,
 //   Link HĐ, Ngày thanh toán (quyền invoice:pay riêng), Chứng từ gửi/trả, Năm, Note.
-// - Tự động: Khách hàng, Mã KH, Mã sản xuất, Số tiền (thành tiền VAT), Acc (người tạo — suy từ MSX),
+// - Tự động: Khách hàng, Mã KH, Mã sản xuất, Trước VAT + Sau VAT (chủ repo 2026-10-07 tách cột "Số tiền" làm hai;
+//   CÙNG số với hộp chia: lib/hoaDonChia nhomHoaDon — Trước = tổng thành tiền các sheet CỦA MÃ ĐÓ, Sau = tienCoVat trên
+//   tổng ấy; sheet hóa đơn khác / Để sau / Không xuất không cộng vào), Acc (người tạo — suy từ MSX),
 //   Công nợ (số ngày từ Ngày HĐơn khi chưa thanh toán — ĐỎ nếu quá HẠN CÔNG NỢ RIÊNG của khách
 //   (đặt ở trang Mã khách hàng); khách chưa đặt thì dùng ngưỡng mặc định chỉnh được ở toolbar),
 //   Ký chứng từ (tham chiếu từ trang Quản lý dự án — hiện AI ký + ngày ký).
 // - Mọi ô nhập tay CHƯA điền tô HỒNG; có dữ liệu thì tự trở lại nền trắng.
-// - CHIA HÓA ĐƠN (2026-10-06, lib/hoaDonChia + components/HopChiaHoaDon): kế toán gom sheet thành Hóa đơn 1, 2… (mã
-//   _01/_02), Để sau, Không xuất. Chưa chia = mỗi sheet một dòng như trước. Hóa đơn gom nhiều sheet là MỘT dòng; ô nhập
-//   ghi qua sheet đầu và máy chủ chép đồng loạt sang các sheet còn lại của hóa đơn.
+// - CHIA HÓA ĐƠN (lib/hoaDonChia): CHỦ BÁO GIÁ chia trong màn báo giá — lúc khách chốt hoặc nút "Chia hóa đơn" sau đó
+//   (chủ repo 2026-10-07: "account chủ báo giá là người làm cái đó … trang hóa đơn là tách ra theo mã khi mà account
+//   chọn"). Trang này CHỈ HIỂN THỊ kết quả: mỗi MÃ hóa đơn (_01, _02…) là MỘT khối — các cột gộp dọc (rowSpan), riêng
+//   cột Hạng mục mỗi sheet một dòng con; sheet Để sau nhóm riêng, Không xuất ẩn tới khi tích. Chưa chia = mỗi sheet một
+//   mã như trước. Ô nhập ghi qua sheet đầu, máy chủ chép đồng loạt sang các sheet còn lại của hóa đơn.
+// - HẠNG MỤC TỰ SINH (chủ repo 2026-10-07: "hạng mục là tên rút gọn_tên sheet, nếu không có tên rút gọn thì lấy theo
+//   tên chính"): không còn ô gõ tay. Chữ kế toán gõ trước đây (QuoteSheet.invoiceDesc) KHÔNG xoá — khác chữ tự sinh thì
+//   hiện nhỏ "ghi cũ: …" dưới dòng con đầu, và vẫn tìm được.
 
-const HEADERS = ["Khách hàng", "Mã KH", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Số tiền", "Công nợ", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thanh toán", "Chứng từ gửi đi", "Chứng từ trả về", "Ký chứng từ", "Năm", "Note"];
+const HEADERS = ["Khách hàng", "Mã KH", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Trước VAT", "Sau VAT", "Công nợ", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thanh toán", "Chứng từ gửi đi", "Chứng từ trả về", "Ký chứng từ", "Năm", "Note"];
 const COMPANIES = ["GN", "SM", "CLF"];
 const PAY_METHODS = ["CK", "TM"];
 const DEBT_DEFAULT = 30;   // hạn công nợ (ngày) cho khách CHƯA đặt hạn riêng ở trang Mã khách hàng
 
 // Cột sort được (kế toán cần sắp theo ngày/tiền/nợ để đòi nợ) + cột SỐ (căn phải, tabular-nums qua .num).
-type SortKey = "invoiceDate" | "amount" | "debt";
-const SORT_COLS: Record<string, SortKey> = { "Ngày HĐơn": "invoiceDate", "Số tiền": "amount", "Công nợ": "debt" };
-const NUM_COLS = new Set(["Số tiền", "Công nợ"]);
+type SortKey = "invoiceDate" | "subtotal" | "amount" | "debt";
+const SORT_COLS: Record<string, SortKey> = { "Ngày HĐơn": "invoiceDate", "Trước VAT": "subtotal", "Sau VAT": "amount", "Công nợ": "debt" };
+const NUM_COLS = new Set(["Trước VAT", "Sau VAT", "Công nợ"]);
 
 // Nhãn cột cho aria-label từng ô nhập trong bảng (screen reader): vd "Số HĐơn — GN2607_2".
 const FIELD_LABEL: Record<string, string> = {
-  invoiceDesc: "Hạng mục", poNumber: "PO/HĐ", invoiceCompany: "CTy", invoiceNo: "Số HĐơn",
+  poNumber: "PO/HĐ", invoiceCompany: "CTy", invoiceNo: "Số HĐơn",
   invoiceDate: "Ngày HĐơn", paymentMethod: "Hình thức TT", orderClosedAt: "Ngày đóng ĐH",
   invoiceLink: "Link HĐ", paidAt: "Ngày thanh toán", docSentAt: "Chứng từ gửi đi",
   docReturnedAt: "Chứng từ trả về", invoiceYear: "Năm", invoiceNote: "Note",
 };
 
 // Field kế toán lưu qua saveField + field kiểu NGÀY (chuẩn hoá về yyyy-mm-dd như input khi so sánh).
-const SAVE_FIELDS = ["invoiceDesc", "poNumber", "invoiceCompany", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "invoiceYear", "invoiceNote"] as const;
+const SAVE_FIELDS = ["poNumber", "invoiceCompany", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "invoiceYear", "invoiceNote"] as const;
 const DATE_FIELDS = new Set(["invoiceDate", "orderClosedAt", "paidAt", "docSentAt", "docReturnedAt"]);
 type StatusFilter = "" | "complete" | "incomplete";
 type CollectionFilter = "" | "paid" | "unpaid" | "dueSoon" | "overdue";
-type MissingFilter = "" | "any" | "invoiceDesc" | "poNumber" | "invoiceNo" | "invoiceDate" | "paymentMethod" | "orderClosedAt" | "invoiceLink" | "paidAt" | "docSentAt" | "docReturnedAt" | "signedAt" | "invoiceYear" | "invoiceNote";
+type MissingFilter = "" | "any" | "poNumber" | "invoiceNo" | "invoiceDate" | "paymentMethod" | "orderClosedAt" | "invoiceLink" | "paidAt" | "docSentAt" | "docReturnedAt" | "signedAt" | "invoiceYear" | "invoiceNote";
 
 type Row = {
-  key: string; q: ProjectQuote; code: string; sheetId: number | null; amount: number;
-  sheetNames: string[];   // tên các sheet của hóa đơn — "Hạng mục" gợi ý khi kế toán chưa gõ
+  key: string; q: ProjectQuote; code: string; sheetId: number | null;
+  subtotal: number;   // TRƯỚC VAT — tổng thành tiền các sheet của mã
+  amount: number;     // SAU VAT — tienCoVat(subtotal, VAT của báo giá)
+  sheetNames: string[];   // tên các sheet của hóa đơn
+  hangMuc: string[];      // HẠNG MỤC tự sinh, mỗi sheet một dòng con: "<tiêu đề rút gọn | tiêu đề>_<tên sheet>"
   invoiceDesc: string | null; poNumber: string | null; invoiceCompany: string | null;
   invoiceNo: string | null; invoiceDate: string | null; paymentMethod: string | null;
   orderClosedAt: string | null; invoiceLink: string | null; paidAt: string | null;
@@ -69,7 +78,8 @@ export function buildRows(quotes: ProjectQuote[]): Row[] {
       const kyHet = hd.sheets.every((x) => !!x.sh.signedAt);
       out.push({
         key: chia ? `${q.id}-hd${hd.so}` : `${q.id}-${i}`, q, code: hd.code, sheetId: sh.id || null,
-        amount: hd.amount, sheetNames: hd.sheets.map((x) => x.sh.name || `Sheet ${x.i + 1}`),
+        subtotal: hd.subtotal, amount: hd.amount, sheetNames: hd.sheets.map((x) => x.sh.name || `Sheet ${x.i + 1}`),
+        hangMuc: hd.sheets.map((x) => nhanHangMuc(q, x.sh, x.i)),
         invoiceDesc: sh.invoiceDesc || null, poNumber: sh.poNumber || null,
         invoiceCompany: sh.invoiceCompany || null, invoiceNo: sh.invoiceNo || null,
         invoiceDate: sh.invoiceDate || null, paymentMethod: sh.paymentMethod || null,
@@ -84,7 +94,7 @@ export function buildRows(quotes: ProjectQuote[]): Row[] {
 }
 
 /** Sheet Để sau / Không xuất của các báo giá đã chốt — nhóm riêng dưới bảng hóa đơn để kế toán biết còn phải xuất. */
-export type HeldRow = { key: string; q: ProjectQuote; code: string; name: string; amount: number; hold: "later" | "skip" };
+export type HeldRow = { key: string; q: ProjectQuote; code: string; name: string; subtotal: number; amount: number; hold: "later" | "skip" };
 export function buildHeld(quotes: ProjectQuote[]): HeldRow[] {
   const out: HeldRow[] = [];
   for (const q of quotes) {
@@ -92,7 +102,7 @@ export function buildHeld(quotes: ProjectQuote[]): HeldRow[] {
     const { deSau, khongXuat } = nhomHoaDon(q);
     const day = (ds: typeof deSau, hold: "later" | "skip") => ds.forEach((x) => out.push({
       key: `${q.id}-${hold}-${x.i}`, q, code: x.code, name: x.sh.name || `Sheet ${x.i + 1}`,
-      amount: tienCoVat(Number(x.sh.subtotal) || 0, q.vatPercent), hold,
+      subtotal: Number(x.sh.subtotal) || 0, amount: tienCoVat(Number(x.sh.subtotal) || 0, q.vatPercent), hold,
     }));
     day(deSau, "later"); day(khongXuat, "skip");
   }
@@ -128,8 +138,13 @@ const isDueSoon = (r: Row) => {
   const limit = rowLimit(r);
   return days != null && days <= limit && days >= Math.max(0, limit - 7);
 };
+/** Chữ Hạng mục kế toán gõ tay trước khi hạng mục tự sinh — còn trong CSDL; chỉ hiện khi khác chữ tự sinh. */
+const ghiCu = (r: Row): string | null => {
+  const v = String(r.invoiceDesc ?? "").trim();
+  return v && !r.hangMuc.includes(v) && v !== r.hangMuc.join(", ") ? v : null;
+};
 const missingFields = (r: Row): MissingFilter[] => [
-  "invoiceDesc", "poNumber", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt",
+  "poNumber", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt",
   "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "signedAt", "invoiceYear", "invoiceNote",
 ].filter((field) => !hasValue(r[field as keyof Row])) as MissingFilter[];
 
@@ -169,7 +184,6 @@ export function InvoicesPage({ me }: { me: Me }) {
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
   const held = useMemo(() => buildHeld(data?.data || []), [data]);
   const [hienKhongXuat, setHienKhongXuat] = useState(false);
-  const [chiaQ, setChiaQ] = useState<ProjectQuote | null>(null);   // báo giá đang mở hộp Chia hóa đơn
   const load = () => { qc.invalidateQueries({ queryKey: ["quoteProjects"] }); };
 
   const years = useMemo(() => [...new Set(rows.map((r) => r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : null)).filter(Boolean))].sort() as number[], [rows]);
@@ -184,9 +198,9 @@ export function InvoicesPage({ me }: { me: Me }) {
     if (dateTo && (!inputDate || inputDate > dateTo)) return false;
     if (cty && (r.invoiceCompany || defaultCty(r.q)) !== cty) return false;
     if (!smartTextMatch(q, [
-      r.q.customerName, r.q.customerCode, r.q.title, r.code, r.invoiceDesc, r.invoiceNo, r.poNumber,
+      r.q.customerName, r.q.customerCode, r.q.title, r.code, ...r.hangMuc, r.invoiceDesc, r.invoiceNo, r.poNumber,
       r.invoiceCompany || defaultCty(r.q), r.paymentMethod, r.invoiceNote, r.q.createdBy?.displayName,
-      r.signedByName, r.amount, fmtMoney(r.amount), r.invoiceDate, fmtDate(r.invoiceDate),
+      r.signedByName, r.subtotal, fmtMoney(r.subtotal), r.amount, fmtMoney(r.amount), r.invoiceDate, fmtDate(r.invoiceDate),
       done ? "hoàn tất" : "chưa đủ", r.paidAt ? "đã thu đã thanh toán" : "chưa thu chưa thanh toán",
       isOverdue(r) ? "quá hạn nợ quá hạn" : "", isDueSoon(r) ? "sắp đến hạn sap den han" : "",
     ])) return false;
@@ -219,12 +233,13 @@ export function InvoicesPage({ me }: { me: Me }) {
     setQ(""); setCty(""); setYear(""); setMonth(""); setStatus(""); setCollection(""); setMissing(""); setDateFrom(""); setDateTo("");
   };
 
-  // Sort client 3 cột chính (Ngày HĐơn / Số tiền / Công nợ) — pattern th.sortable + aria-sort như trang Mã khách hàng.
+  // Sort client 4 cột chính (Ngày HĐơn / Trước VAT / Sau VAT / Công nợ) — pattern th.sortable + aria-sort như trang Mã khách hàng.
   const [sortKey, setSortKey] = useState<SortKey | "">("");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const toggleSort = (k: SortKey) => { if (sortKey === k) setSortDir((d) => (d === 1 ? -1 : 1)); else { setSortKey(k); setSortDir(1); } };
   const sortVal = (r: Row, k: SortKey): number | null => {
     if (k === "amount") return r.amount;
+    if (k === "subtotal") return r.subtotal;
     if (k === "invoiceDate") { if (!r.invoiceDate) return null; const t = new Date(r.invoiceDate).getTime(); return isNaN(t) ? null : t; }
     return debtDays(r);
   };
@@ -241,12 +256,14 @@ export function InvoicesPage({ me }: { me: Me }) {
   // Sheet Để sau / Không xuất trong phạm vi ô tìm kiếm + CTy (bảng nhóm riêng bên dưới dùng cùng phép lọc).
   const heldLoc = (hold: "later" | "skip") => held.filter((h) => h.hold === hold
     && (!cty || defaultCty(h.q) === cty)
-    && smartTextMatch(q, [h.q.customerName, h.q.customerCode, h.q.title, h.code, h.name, h.amount, fmtMoney(h.amount)]));
+    && smartTextMatch(q, [h.q.customerName, h.q.customerCode, h.q.title, h.code, h.name, h.subtotal, fmtMoney(h.subtotal), h.amount, fmtMoney(h.amount)]));
   // "Để sau" chưa xuất nhưng VẪN PHẢI THU → cộng vào Tổng + Chưa thu (chủ repo 2026-10-06); "Không xuất" thì không.
   // Chỉ cộng khi không lọc theo thứ chỉ hóa đơn mới có (số/ngày HĐ, đã thu, quá hạn, ô thiếu) — sheet chưa xuất không có.
   const tinhDeSau = !status && !missing && (collection === "" || collection === "unpaid") && !year && !month && !dateFrom && !dateTo;
   const deSauTien = tinhDeSau ? heldLoc("later").reduce((s, h) => s + h.amount, 0) : 0;
+  const deSauTruoc = tinhDeSau ? heldLoc("later").reduce((s, h) => s + h.subtotal, 0) : 0;
   const sumAmount = shown.reduce((s, r) => s + r.amount, 0) + deSauTien;
+  const sumTruoc = shown.reduce((s, r) => s + r.subtotal, 0) + deSauTruoc;
   const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
   // Hạn công nợ áp cho TỪNG DÒNG: ưu tiên hạn RIÊNG của khách (trang Mã khách hàng), chưa đặt → 30 ngày.
   const overdue = shown.filter(isOverdue);
@@ -264,24 +281,6 @@ export function InvoicesPage({ me }: { me: Me }) {
       toast("Đã lưu", "success");
       // Đồng bộ cache cho trang Quản lý dự án / Dashboard (tham chiếu cùng nguồn) thấy ngay giá trị mới.
       qc.invalidateQueries({ queryKey: ["quoteProjects"] });
-    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
-  };
-
-  // LÀM LẠI HÓA ĐƠN (chủ repo 2026-10-06: "back lại cho họ tự chọn lại để làm lại hóa đơn"): gỡ số HĐ + ngày + link khỏi
-  // mọi sheet của hóa đơn; tiền đã thu GIỮ NGUYÊN. Sau đó các sheet chọn lại được trong "Chia HĐ".
-  const lamLai = async (r: Row) => {
-    if (!r.sheetId) return;
-    const thu = r.paidAt ? ` Đã thu ${fmtMoney(r.amount)} ngày ${fmtDate(r.paidAt)} — GIỮ NGUYÊN, không gỡ.` : "";
-    const ok = await confirmModal(
-      `Làm lại hóa đơn ${r.code}?`,
-      `Gỡ số HĐ ${r.invoiceNo}${r.invoiceDate ? `, Ngày HĐ ${fmtDate(r.invoiceDate)}` : ""}${r.invoiceLink ? ", Link HĐ" : ""} khỏi ${r.sheetNames.length > 1 ? `${r.sheetNames.length} sheet (${r.sheetNames.join(", ")})` : `sheet ${r.sheetNames[0] || ""}`}. Sau đó chọn lại sheet ở "Chia HĐ" rồi nhập số HĐ mới.${thu}`,
-      { danger: true, confirmText: "Gỡ số HĐ" },
-    );
-    if (!ok) return;
-    try {
-      await api.lamLaiHoaDon(r.q.id, r.sheetId);
-      toast(`Đã gỡ số HĐ ${r.invoiceNo}`, "success");
-      load();
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
   };
 
@@ -346,21 +345,22 @@ export function InvoicesPage({ me }: { me: Me }) {
     const tieuDe = hold === "later" ? "Sheet để sau — chưa xuất hóa đơn" : "Sheet không xuất hóa đơn";
     return (
       <section className={`inv-chia-nhom${hold === "skip" ? " inv-chia-khong" : ""}`} aria-label={tieuDe}>
-        <h2>{tieuDe} <span className="muted">({ds.length} sheet · {fmtMoney(ds.reduce((s, h) => s + h.amount, 0))})</span></h2>
+        <h2>{tieuDe} <span className="muted">({ds.length} sheet · {fmtMoney(ds.reduce((s, h) => s + h.amount, 0))} sau VAT)</span></h2>
+        {hold === "later" && <p className="muted inv-chia-goiy">Muốn xếp các sheet này vào hóa đơn: báo chủ báo giá (cột Acc) — chủ báo giá chia trong màn báo giá.</p>}
         <div className="tbl-scroll">
           <table className="list-table">
-            <thead><tr><th scope="col">Khách hàng</th><th scope="col">Mã sản xuất</th><th scope="col">Sheet</th><th scope="col" className="num">Số tiền</th><th scope="col">Acc</th>{canEdit && <th scope="col" aria-label="Thao tác" />}</tr></thead>
+            <thead><tr><th scope="col">Khách hàng</th><th scope="col">Mã sản xuất</th><th scope="col">Sheet</th><th scope="col" className="num">Trước VAT</th><th scope="col" className="num">Sau VAT</th><th scope="col">Acc (chủ báo giá)</th></tr></thead>
             <tbody>
               {ds.map((h) => (
                 <tr key={h.key} className="qrow" tabIndex={0} title="Bấm để mở báo giá"
-                    onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; location.hash = "#/quotes/" + h.q.id; }}
+                    onClick={() => { location.hash = "#/quotes/" + h.q.id; }}
                     onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + h.q.id; }}>
                   <td><strong>{h.q.customerName || h.q.customerCode || tieuDeHienThi(h.q)}</strong></td>
                   <td>{h.code}</td>
                   <td>{h.name}</td>
+                  <td className="num">{fmtMoney(h.subtotal)}</td>
                   <td className="num">{fmtMoney(h.amount)}</td>
                   <td>{h.q.createdBy?.displayName || dash}</td>
-                  {canEdit && <td><button type="button" className="btn btn-xs" onClick={() => setChiaQ(h.q)} aria-label={`Xếp vào hóa đơn — ${h.name}`}>Xếp vào hóa đơn</button></td>}
                 </tr>
               ))}
             </tbody>
@@ -373,7 +373,8 @@ export function InvoicesPage({ me }: { me: Me }) {
   return (
     <div>
       <h1>Hóa đơn đầu ra</h1>
-      <p className="muted">Hóa đơn <b>xuất cho khách</b> — theo dõi theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng; <b>Chia HĐ</b> để gom nhiều sheet thành một hóa đơn _01/_02, để sau hoặc không xuất). Hóa đơn nhận từ nhà cung cấp xem ở <a href="#/invoices-in">Hóa đơn đầu vào</a>. <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
+      <p className="muted">Hóa đơn <b>xuất cho khách</b> — theo dõi theo <b>dự án đã chốt</b> (mỗi <b>mã hóa đơn</b> một khối; Hạng mục tự sinh = tiêu đề rút gọn_tên sheet, mỗi sheet một dòng). Hóa đơn nhận từ nhà cung cấp xem ở <a href="#/invoices-in">Hóa đơn đầu vào</a>. <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
+      <p className="muted inv-chia-goiy" role="note">Chia sheet thành hóa đơn (_01, _02…, Để sau, Không xuất) hoặc <b>làm lại một hóa đơn đã xuất</b> do <b>chủ báo giá</b> làm trong màn báo giá — cần đổi thì báo chủ báo giá (cột <b>Acc</b>).</p>
 
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">
@@ -386,7 +387,7 @@ export function InvoicesPage({ me }: { me: Me }) {
           </select>
           <select name="missing" value={missing} onChange={(e) => setMissing(e.target.value as MissingFilter)} aria-label="Lọc thông tin còn thiếu">
             <option value="">Thiếu dữ liệu: Tất cả</option><option value="any">Có ô còn thiếu</option>
-            <option value="invoiceDesc">Thiếu Hạng mục</option><option value="poNumber">Thiếu PO/HĐ</option>
+            <option value="poNumber">Thiếu PO/HĐ</option>
             <option value="invoiceNo">Thiếu Số HĐ</option><option value="invoiceDate">Thiếu Ngày HĐ</option>
             <option value="paymentMethod">Thiếu Hình thức TT</option><option value="orderClosedAt">Thiếu Ngày đóng ĐH</option>
             <option value="invoiceLink">Thiếu Link HĐ</option><option value="paidAt">Thiếu Ngày thanh toán</option>
@@ -425,10 +426,11 @@ export function InvoicesPage({ me }: { me: Me }) {
       ) : err && !data ? null : (   /* lỗi tải mà CHƯA có dữ liệu → chỉ hiện banner lỗi, không hiện stat 0 gây hiểu nhầm */
         <>
           <div className="stat-row">
-            <Stat label="Tổng số tiền (VAT)" value={fmtMoney(sumAmount)} title={deSauTien ? `Gồm ${fmtMoney(deSauTien)} của sheet Để sau (chưa xuất HĐ)` : undefined} />
-            <Stat label="Đã thu" value={fmtMoney(collected)} tone="ok" active={collection === "paid"} onClick={() => setCollection((v) => v === "paid" ? "" : "paid")} title="Bấm để lọc hóa đơn đã thu" />
-            <Stat label="Chưa thu" value={fmtMoney(sumAmount - collected)} tone={sumAmount - collected > 0 ? "danger" : undefined} active={collection === "unpaid"} onClick={() => setCollection((v) => v === "unpaid" ? "" : "unpaid")} title="Bấm để lọc hóa đơn chưa thu" />
-            <Stat label="Nợ quá hạn" value={overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0"} tone={overdue.length ? "danger" : "ok"} active={collection === "overdue"} onClick={() => setCollection((v) => v === "overdue" ? "" : "overdue")} title="Bấm để lọc nợ quá hạn" />
+            <Stat label="Tổng trước VAT" value={fmtMoney(sumTruoc)} />
+            <Stat label="Tổng sau VAT" value={fmtMoney(sumAmount)} title={deSauTien ? `Gồm ${fmtMoney(deSauTien)} của sheet Để sau (chưa xuất HĐ)` : undefined} />
+            <Stat label="Đã thu (sau VAT)" value={fmtMoney(collected)} tone="ok" active={collection === "paid"} onClick={() => setCollection((v) => v === "paid" ? "" : "paid")} title="Bấm để lọc hóa đơn đã thu" />
+            <Stat label="Chưa thu (sau VAT)" value={fmtMoney(sumAmount - collected)} tone={sumAmount - collected > 0 ? "danger" : undefined} active={collection === "unpaid"} onClick={() => setCollection((v) => v === "unpaid" ? "" : "unpaid")} title="Bấm để lọc hóa đơn chưa thu" />
+            <Stat label="Nợ quá hạn (sau VAT)" value={overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0"} tone={overdue.length ? "danger" : "ok"} active={collection === "overdue"} onClick={() => setCollection((v) => v === "overdue" ? "" : "overdue")} title="Bấm để lọc nợ quá hạn" />
             <Stat label="Số hóa đơn" value={String(shown.length)} />
           </div>
 
@@ -458,65 +460,74 @@ export function InvoicesPage({ me }: { me: Me }) {
                       const nDays = debtDays(r);                        // null = đã thanh toán / chưa có Ngày HĐơn
                       const limit = rowLimit(r);                        // hạn riêng của khách ?? mặc định toolbar
                       const over = nDays != null && nDays > limit;      // quá hạn → ĐỎ (đi đòi nợ)
-                      return (
-                        <tr key={r.key} className="qrow" title="Bấm để mở báo giá" tabIndex={0}
-                            onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select,[data-edit]")) return; location.hash = "#/quotes/" + r.q.id; }}
-                            onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + r.q.id; }}>
-                          <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || tieuDeHienThi(r.q)}</strong></td>
-                          <td>{r.q.customerCode || dash}</td>
-                          <td className="nowrap">
-                            <strong>{r.code}</strong>
-                            {canEdit && (r.q.sheets?.length || 0) > 1 && (
-                              <button type="button" className="btn btn-xs btn-ghost inv-chia-nut" title="Gom / tách sheet thành hóa đơn, Để sau, Không xuất"
-                                      aria-label={`Chia hóa đơn — ${r.code}`} onClick={() => setChiaQ(r.q)}>Chia HĐ</button>
-                            )}
-                            {canEdit && r.invoiceNo && (
-                              <button type="button" className="btn btn-xs btn-ghost inv-chia-nut" title="Gỡ số HĐ để chọn lại sheet và làm lại hóa đơn"
-                                      aria-label={`Làm lại hóa đơn — ${r.code}`} onClick={() => void lamLai(r)}>Làm lại HĐ</button>
-                            )}
-                            {r.sheetNames.length > 1 && <div className="muted inv-chia-sheets">{r.sheetNames.length} sheet</div>}
-                          </td>
-                          {r.invoiceDesc || editKey === ck(r, "invoiceDesc")
-                            ? textCell(r, "invoiceDesc", 210)
-                            : editable(r, "invoiceDesc")
-                              ? viewTd(r, "invoiceDesc", <span className="muted" title="Chưa gõ Hạng mục — gợi ý theo tên sheet">{r.sheetNames.join(", ") || dash}</span>)
-                              : <td className="cell-miss"><span className="muted">{r.sheetNames.join(", ") || dash}</span></td>}
-                          <td>{done ? <span className="status approved">Hoàn tất</span> : <span className="status pending">Chưa đủ</span>}</td>
-                          {textCell(r, "poNumber", 90)}
-                          {selectCell(r, "invoiceCompany", COMPANIES, defaultCty(r.q))}
-                          {textCell(r, "invoiceNo", 90)}
-                          {dateCell(r, "invoiceDate")}
-                          <td className="num"><strong>{fmtMoney(r.amount)}</strong></td>
-                          <td className={"num nowrap" + (over ? " cell-over" : "")}
-                              title={nDays == null ? undefined : `Hạn công nợ ${limit} ngày (${r.q.customerDebtDays != null ? "riêng khách này — đặt ở Mã khách hàng" : "mặc định"})${over ? ` — QUÁ HẠN, từ Ngày HĐơn ${fmtDate(r.invoiceDate)}, cần báo thanh toán` : ""}`}>
-                            {r.paidAt ? <span className="txt-ok">✓ Đã TT</span> : nDays == null ? dash : <>{over ? "⚠ " : ""}{nDays}/{limit} ngày</>}
-                          </td>
-                          {selectCell(r, "paymentMethod", PAY_METHODS)}
-                          {dateCell(r, "orderClosedAt")}
-                          <td>{r.q.createdBy?.displayName || dash}</td>
-                          {editable(r)
-                            ? (editKey === ck(r, "invoiceLink")
-                              ? <td className={missCls(r.invoiceLink)}><input name="invoiceLink" autoFocus defaultValue={r.invoiceLink || ""} style={{ width: 150 }} aria-label={fieldLabel("invoiceLink", r)}
-                                  onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, "invoiceLink", e.target.value.trim() || null); }} /></td>
-                              : viewTd(r, "invoiceLink", r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>Xem HĐ ↗</a> : dash, "nowrap"))
-                            : <td className={missCls(r.invoiceLink)}>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>}
-                          {dateCell(r, "paidAt")}
-                          {dateCell(r, "docSentAt")}
-                          {dateCell(r, "docReturnedAt")}
-                          <td className="nowrap">
-                            {r.signedAt
-                              ? <span className="status approved nowrap">✓ {r.signedByName || "Đã ký"} · {fmtDate(r.signedAt)}</span>
-                              : <span className="muted">Chưa ký</span>}
-                          </td>
-                          {editable(r)
-                            ? (editKey === ck(r, "invoiceYear")
-                              ? <td className={missCls(r.invoiceYear)}><input name="invoiceYear" autoFocus inputMode="numeric" defaultValue={r.invoiceYear ?? ""} style={{ width: 64 }} aria-label={fieldLabel("invoiceYear", r)}
-                                  onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); const v = e.target.value.replace(/[^\d]/g, ""); saveField(r, "invoiceYear", v || null); }} /></td>
-                              : viewTd(r, "invoiceYear", r.invoiceYear ?? dash))
-                            : <td className={missCls(r.invoiceYear)}>{r.invoiceYear ?? dash}</td>}
-                          {textCell(r, "invoiceNote", 130)}
-                        </tr>
+                      // MỘT MÃ = MỘT KHỐI (ảnh phác của chủ repo 2026-10-07): mọi cột gộp dọc qua `soCon` dòng, riêng
+                      // Hạng mục mỗi sheet một dòng con. Dòng con chỉ mang ô Hạng mục — các ô rowSpan đã chiếm chỗ.
+                      const soCon = Math.max(1, r.hangMuc.length);
+                      const gop = (el: ReactElement, k: number) => cloneElement(el as ReactElement<{ rowSpan?: number }>, { key: k, rowSpan: soCon > 1 ? soCon : undefined });
+                      const cu = ghiCu(r);
+                      const oHangMuc = (i: number) => (
+                        <td key="hm" className={"inv-hm" + (i > 0 ? " inv-hm-con" : "")} title={r.hangMuc[i]}>
+                          {r.hangMuc[i] || dash}
+                          {i === 0 && cu && <div className="muted inv-hm-cu" title="Hạng mục kế toán gõ trước khi hạng mục tự sinh — giữ để không mất thông tin">ghi cũ: {cu}</div>}
+                        </td>
                       );
+                      const moBaoGia = { title: "Bấm để mở báo giá",
+                        onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest("button,a,input,select,[data-edit]")) return; location.hash = "#/quotes/" + r.q.id; } };
+                      const truocHm = [
+                        <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || tieuDeHienThi(r.q)}</strong></td>,
+                        <td>{r.q.customerCode || dash}</td>,
+                        <td className="nowrap" title={`Chia / làm lại hóa đơn: báo chủ báo giá${r.q.createdBy?.displayName ? ` ${r.q.createdBy.displayName}` : ""}`}>
+                          <strong>{r.code}</strong>
+                          {r.sheetNames.length > 1 && <div className="muted inv-chia-sheets">{r.sheetNames.length} sheet</div>}
+                        </td>,
+                      ];
+                      return [
+                        <tr key={r.key} className="qrow" tabIndex={0} {...moBaoGia}
+                            onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + r.q.id; }}>
+                          {truocHm.map(gop)}
+                          {oHangMuc(0)}
+                          {[
+                            <td>{done ? <span className="status approved">Hoàn tất</span> : <span className="status pending">Chưa đủ</span>}</td>,
+                            textCell(r, "poNumber", 90),
+                            selectCell(r, "invoiceCompany", COMPANIES, defaultCty(r.q)),
+                            textCell(r, "invoiceNo", 90),
+                            dateCell(r, "invoiceDate"),
+                            <td className="num">{fmtMoney(r.subtotal)}</td>,
+                            <td className="num"><strong>{fmtMoney(r.amount)}</strong></td>,
+                            <td className={"num nowrap" + (over ? " cell-over" : "")}
+                                title={nDays == null ? undefined : `Hạn công nợ ${limit} ngày (${r.q.customerDebtDays != null ? "riêng khách này — đặt ở Mã khách hàng" : "mặc định"})${over ? ` — QUÁ HẠN, từ Ngày HĐơn ${fmtDate(r.invoiceDate)}, cần báo thanh toán` : ""}`}>
+                              {r.paidAt ? <span className="txt-ok">✓ Đã TT</span> : nDays == null ? dash : <>{over ? "⚠ " : ""}{nDays}/{limit} ngày</>}
+                            </td>,
+                            selectCell(r, "paymentMethod", PAY_METHODS),
+                            dateCell(r, "orderClosedAt"),
+                            <td>{r.q.createdBy?.displayName || dash}</td>,
+                            editable(r)
+                              ? (editKey === ck(r, "invoiceLink")
+                                ? <td className={missCls(r.invoiceLink)}><input name="invoiceLink" autoFocus defaultValue={r.invoiceLink || ""} style={{ width: 150 }} aria-label={fieldLabel("invoiceLink", r)}
+                                    onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, "invoiceLink", e.target.value.trim() || null); }} /></td>
+                                : viewTd(r, "invoiceLink", r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>Xem HĐ ↗</a> : dash, "nowrap"))
+                              : <td className={missCls(r.invoiceLink)}>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>,
+                            dateCell(r, "paidAt"),
+                            dateCell(r, "docSentAt"),
+                            dateCell(r, "docReturnedAt"),
+                            <td className="nowrap">
+                              {r.signedAt
+                                ? <span className="status approved nowrap">✓ {r.signedByName || "Đã ký"} · {fmtDate(r.signedAt)}</span>
+                                : <span className="muted">Chưa ký</span>}
+                            </td>,
+                            editable(r)
+                              ? (editKey === ck(r, "invoiceYear")
+                                ? <td className={missCls(r.invoiceYear)}><input name="invoiceYear" autoFocus inputMode="numeric" defaultValue={r.invoiceYear ?? ""} style={{ width: 64 }} aria-label={fieldLabel("invoiceYear", r)}
+                                    onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); const v = e.target.value.replace(/[^\d]/g, ""); saveField(r, "invoiceYear", v || null); }} /></td>
+                                : viewTd(r, "invoiceYear", r.invoiceYear ?? dash))
+                              : <td className={missCls(r.invoiceYear)}>{r.invoiceYear ?? dash}</td>,
+                            textCell(r, "invoiceNote", 130),
+                          ].map((el, k) => gop(el, k + truocHm.length + 1))}
+                        </tr>,
+                        ...r.hangMuc.slice(1).map((_, j) => (
+                          <tr key={`${r.key}-hm${j + 1}`} className="qrow inv-hm-dong" {...moBaoGia}>{oHangMuc(j + 1)}</tr>
+                        )),
+                      ];
                     })}
                   </tbody>
                 </table>
@@ -534,7 +545,6 @@ export function InvoicesPage({ me }: { me: Me }) {
           {hienKhongXuat && heldTable("skip")}
         </>
       )}
-      {chiaQ && <HopChiaHoaDon q={chiaQ} onClose={() => setChiaQ(null)} onSaved={load} />}
     </div>
   );
 }

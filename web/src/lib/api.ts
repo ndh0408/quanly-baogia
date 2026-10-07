@@ -720,7 +720,9 @@ export const api = {
   // im401: nhịp tim nền, KHÔNG được tự kéo lớp phủ mất-phiên lên giữa lúc người dùng đang gõ.
   presence: (quoteId: number, action: "open" | "heartbeat" | "close") =>
     req<{ editing: { id: number; name: string }[] }>("/stream/presence", { method: "POST", body: JSON.stringify({ quoteId, action }), im401: true }),
-  markConverted: (id: number) => req<QuoteFull>(`/quotes/${id}/mark-converted`, { method: "POST" }),
+  // `invoiceSplit` (tuỳ chọn): phép chia sheet → hóa đơn chọn trong hộp chốt — máy chủ áp CÙNG transaction với việc chốt.
+  markConverted: (id: number, invoiceSplit?: { sheetId: number; group: number | null; hold: "later" | "skip" | null }[]) =>
+    req<QuoteFull>(`/quotes/${id}/mark-converted`, invoiceSplit ? { method: "POST", body: JSON.stringify({ invoiceSplit }) } : { method: "POST" }),
   markLost: (id: number, reason: string) => req<QuoteFull>(`/quotes/${id}/mark-lost`, { method: "POST", body: JSON.stringify({ reason }) }),
   // NHẬP file Excel: server chỉ ĐỌC file rồi trả dữ liệu lưới để xem trước — không ghi gì.
   // Ghi thật vẫn đi qua Lưu báo giá (updateQuote) như thường.

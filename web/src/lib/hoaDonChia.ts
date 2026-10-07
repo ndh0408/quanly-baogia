@@ -1,4 +1,5 @@
-// CHIA SHEET THÀNH HÓA ĐƠN — dựng hóa đơn của MỘT báo giá đã chốt cho trang Hóa đơn đầu ra.
+// CHIA SHEET THÀNH HÓA ĐƠN — dựng hóa đơn của MỘT báo giá: trang Hóa đơn đầu ra (hiển thị), hộp "Khách chốt" và hộp
+// "Chia hóa đơn" của màn báo giá (xem trước mã + tiền). MỘT bộ luật cho cả ba chỗ — không có bản thứ hai.
 // ⚠️ Cùng luật với máy chủ src/invoiceSplit.ts (khoaHoaDon / soHoaDon) — đổi một bên phải đổi bên kia.
 //
 // · CHƯA CHIA (mọi sheet invoiceGroup = invoiceHold = null — toàn bộ dữ liệu cũ): mỗi sheet một hóa đơn, mã = mã sản
@@ -9,7 +10,7 @@
 // · Tiền hóa đơn = tổng thành tiền các sheet + VAT tính trên tổng đó (cách trang tính cho một sheet, áp cho cả hóa đơn).
 // · Sheet khách KHÔNG duyệt (trangKhachTuChoi) bị loại như trước — không vào hóa đơn, không vào Để sau.
 import type { ProjectQuote, ProjectSheet } from "./api";
-import { sheetCode, soMa, trangKhachTuChoi } from "./format";
+import { sheetCode, soMa, trangKhachTuChoi, tieuDeHienThi } from "./format";
 
 export type SheetTrongHoaDon = { sh: ProjectSheet; i: number; code: string };
 export type HoaDonDung = { so: number; code: string; sheets: SheetTrongHoaDon[]; subtotal: number; amount: number };
@@ -63,4 +64,79 @@ export function nhomHoaDon(q: ProjectQuote, chon?: Record<number, string>): KetQ
 /** Lựa chọn trên hộp có trùng "mặc định chưa chia" không (mỗi sheet một hóa đơn đúng số codeNo, không giữ lại sheet nào). */
 export function laMacDinh(sheets: ProjectSheet[], chon: Record<number, string>): boolean {
   return sheets.every((sh, i) => sh.id == null || chon[sh.id] === String(soMa(sh, i)) || (trangKhachTuChoi({ status: "converted" }, sh) && chon[sh.id] === "skip"));
+}
+
+/** HẠNG MỤC tự sinh của một sheet trên trang Hóa đơn đầu ra (chủ repo 2026-10-07: "hạng mục là tên rút gọn_tên sheet,
+ *  nếu không có tên rút gọn thì lấy theo tên chính"). Tiêu đề lấy qua tieuDeHienThi — CÙNG một chỗ quyết định "tiêu đề
+ *  rút gọn, không có thì tiêu đề chính" cho mọi bảng. Thiếu cả hai thì chỉ còn tên sheet. */
+export function nhanHangMuc(q: { shortTitle?: string | null; title?: string | null }, sh: { name?: string | null }, i: number): string {
+  const tieu = tieuDeHienThi(q);
+  const ten = String(sh.name ?? "").trim() || `Sheet ${i + 1}`;
+  return tieu ? `${tieu}_${ten}` : ten;
+}
+
+/** Lựa chọn BAN ĐẦU của hộp chia: đã chia → đúng phép chia đang lưu; chưa chia → mỗi sheet một hóa đơn theo số mã cũ,
+ *  sheet khách không duyệt → Không xuất (nó đã không vào hóa đơn nào). */
+export function luaChonBanDau(q: ProjectQuote): Record<number, string> {
+  const sheets = q.sheets || [];
+  const chia = daChia(sheets);
+  const o: Record<number, string> = {};
+  sheets.forEach((sh, i) => {
+    if (sh.id == null) return;
+    o[sh.id] = !chia && trangKhachTuChoi({ status: "converted" }, sh) ? "skip" : luaChonCua(sh, i, chia);
+  });
+  return o;
+}
+
+export type GanSheet = { sheetId: number; group: number | null; hold: "later" | "skip" | null };
+
+/**
+ * Thân gửi máy chủ (PUT /quotes/:id/invoice-split, hoặc `invoiceSplit` của mark-converted) từ lựa chọn trên hộp.
+ * Trùng mặc định ("mỗi sheet một hóa đơn như cũ") → mọi sheet null = BỎ CHIA. Báo giá CHƯA chia mà người dùng không
+ * đổi gì → `null`: không gửi gì, "chưa chia" giữ nguyên nghĩa cũ.
+ */
+export function thanhPhepChia(sheets: ProjectSheet[], chon: Record<number, string>): GanSheet[] | null {
+  const macDinh = laMacDinh(sheets, chon);
+  if (macDinh && !daChia(sheets)) return null;
+  return sheets.filter((sh) => sh.id != null).map((sh) => {
+    const v = chon[sh.id!] ?? "later";
+    if (macDinh) return { sheetId: sh.id!, group: null, hold: null };
+    const giu = v === "later" || v === "skip";
+    return { sheetId: sh.id!, group: giu ? null : Number(v), hold: giu ? (v as "later" | "skip") : null };
+  });
+}
+
+/** Số hóa đơn chọn được trên hộp: 1…max(số sheet, số mã đã cấp, số đang dùng) — đủ để mỗi sheet một hóa đơn và để hóa
+ *  đơn đã xuất giữ số cũ của nó. */
+export function soHoaDonToiDa(sheets: ProjectSheet[], chon: Record<number, string>): number {
+  return Math.max(1, sheets.length, ...sheets.map((sh, i) => soMa(sh, i)), ...Object.values(chon).map((v) => Number(v) || 0));
+}
+
+/**
+ * Báo giá ĐANG SOẠN (QuoteFull của màn báo giá) → dạng ProjectQuote mà các hàm trên đọc. `status` đặt "converted" vì
+ * hộp chia xem trước đúng như trang Hóa đơn sẽ hiện SAU khi chốt (sheet khách không duyệt bị loại — trangKhachTuChoi).
+ * `ghiDe` (theo id sheet) cho hộp chốt đè thành tiền đang hiện + ý kiến khách vừa chọn trong hộp.
+ */
+// (Không dùng `satisfies`: semgrep 1.97 của cổng quét bảo mật không đọc được toán tử này — xem 664631c.)
+export function baoGiaChoHoaDon(
+  q: { id: number; title?: string; shortTitle?: string | null; vatPercent?: number; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; sheets?: unknown[] },
+  ghiDe?: Map<number, { subtotal?: number; custStatus?: string | null }>,
+): ProjectQuote {
+  const sheets = ((q.sheets || []) as Record<string, unknown>[]).map((s) => {
+    const id = Number(s.id) || undefined;
+    const d = id != null ? ghiDe?.get(id) : undefined;
+    const chuoi = (v: unknown) => (v == null ? null : String(v));
+    const sh: ProjectSheet = {
+      id, name: chuoi(s.name), codeNo: s.codeNo == null ? null : Number(s.codeNo),
+      subtotal: d?.subtotal ?? (Number(s.subtotal) || 0),
+      custStatus: d && "custStatus" in d ? d.custStatus ?? null : chuoi(s.custStatus),
+      invoiceNo: chuoi(s.invoiceNo), invoiceDate: chuoi(s.invoiceDate), invoiceLink: chuoi(s.invoiceLink), paidAt: chuoi(s.paidAt),
+      invoiceGroup: s.invoiceGroup == null ? null : Number(s.invoiceGroup), invoiceHold: chuoi(s.invoiceHold),
+    };
+    return sh;
+  });
+  return {
+    id: q.id, title: q.title || "", shortTitle: q.shortTitle ?? null, status: "converted", vatPercent: Number(q.vatPercent) || 0,
+    quoteNumber: q.quoteNumber, projectCode: q.projectCode ?? null, projectVersion: q.projectVersion ?? null, sheets,
+  };
 }

@@ -1,21 +1,28 @@
 /** @vitest-environment jsdom */
 //
-// CHIA SHEET THÀNH HÓA ĐƠN — trang Hóa đơn đầu ra (chủ repo 2026-10-06). Kế toán gom sheet thành Hóa đơn 1, 2… (mã
-// _01/_02), Để sau (nhóm riêng — còn phải xuất), Không xuất (ẩn, bật bằng ô tích). Chưa chia = mỗi sheet một dòng như cũ.
-// ĐỎ trên mã cũ: buildHeld / hộp Chia hóa đơn chưa có, hóa đơn gom nhiều sheet vẫn tách từng dòng.
+// TRANG HÓA ĐƠN ĐẦU RA — HIỂN THỊ phép chia của chủ báo giá (chủ repo 2026-10-07: "trang hóa đơn là tách ra theo mã khi
+// mà account chọn", "thì kế toán báo account để làm lại"; ảnh phác: mỗi mã một khối, cột Hạng mục mỗi sheet một dòng;
+// "hạng mục là tên rút gọn_tên sheet, nếu không có tên rút gọn thì lấy theo tên chính"; cột Số tiền tách Trước VAT / Sau
+// VAT; tiền mỗi mã = CHỈ các sheet chủ báo giá chọn vào mã đó).
+//   · Mỗi MÃ (_01, _02…) một khối: các cột gộp dọc (rowSpan), Hạng mục mỗi sheet một dòng con.
+//   · Để sau nhóm riêng (hai cột tiền), Không xuất ẩn tới khi tích.
+//   · Kế toán KHÔNG chia / làm lại ở đây nữa — không còn nút; có dòng gợi ý báo chủ báo giá.
+// ĐỎ trên 643b491: còn nút Chia HĐ / Làm lại HĐ, Hạng mục là ô gõ tay, một cột "Số tiền".
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ProjectQuote } from "../lib/api";
+import { fmtMoney } from "../lib/format";
 
 const sh = (id: number, codeNo: number, name: string, subtotal: number, extra: Record<string, unknown> = {}) =>
   ({ id, codeNo, name, subtotal, invoiceNo: null, invoiceDate: null, invoiceGroup: null, invoiceHold: null, ...extra });
 const baoGia = (id: number, sheets: ReturnType<typeof sh>[], extra: Record<string, unknown> = {}): ProjectQuote =>
-  ({ id, title: "Sự kiện", status: "converted", vatPercent: 8, projectCode: `FP_${id}`, customerName: `Khách ${id}`, sheets, ...extra }) as ProjectQuote;
+  ({ id, title: "BẢNG BÁO GIÁ - Sự kiện ra mắt", shortTitle: "Ra mắt", status: "converted", vatPercent: 8, projectCode: `FP_${id}`, customerName: `Khách ${id}`, createdBy: { displayName: "Lan" }, sheets, ...extra }) as ProjectQuote;
 
-// Báo giá 7: ĐÃ CHIA — Sân khấu + Âm thanh = Hóa đơn 1, Ánh sáng Để sau, LED Không xuất.
-// Báo giá 8: CHƯA CHIA — hai sheet, mỗi sheet một hóa đơn như cũ.
+// Báo giá 7 (VAT 8%, có tiêu đề rút gọn): Sân khấu + Âm thanh = Hóa đơn 1, Ánh sáng Để sau, LED Không xuất.
+// Báo giá 8 (VAT 10%, KHÔNG có tiêu đề rút gọn): chưa chia — hai sheet, mỗi sheet một mã như cũ.
+// Báo giá 9 (VAT 0%): A + B → _01, C → _02; kế toán từng gõ tay Hạng mục cho HĐ 1.
 const DU_AN: ProjectQuote[] = [
   baoGia(7, [
     sh(71, 1, "Sân khấu", 1_000_000, { invoiceGroup: 1, poNumber: "PO-7" }),
@@ -23,45 +30,49 @@ const DU_AN: ProjectQuote[] = [
     sh(73, 3, "Ánh sáng", 4_000_000, { invoiceHold: "later" }),
     sh(74, 4, "LED", 500_000, { invoiceHold: "skip" }),
   ]),
-  baoGia(8, [sh(81, 1, "Trang A", 100_000), sh(82, 2, "Trang B", 200_000)]),
+  baoGia(8, [sh(81, 1, "Trang A", 100_000), sh(82, 2, "Trang B", 200_000)], { shortTitle: null, title: "Hội nghị khách hàng", vatPercent: 10 }),
+  baoGia(9, [
+    sh(91, 1, "A", 300_000, { invoiceGroup: 1, invoiceDesc: "Thi công gian hàng" }),
+    sh(92, 2, "B", 700_000, { invoiceGroup: 1, invoiceDesc: "Thi công gian hàng" }),
+    sh(93, 3, "C", 50_000, { invoiceGroup: 2 }),
+  ], { vatPercent: 0, shortTitle: "Hội chợ" }),
 ];
 
 vi.mock("../lib/api", async (goc) => {
   const that = await goc<typeof import("../lib/api")>();
-  return { ...that, api: { ...that.api, quoteProjects: vi.fn(async () => ({ data: DU_AN })), updateSheetInvoice: vi.fn(async () => ({})), chiaHoaDon: vi.fn(async () => ({ sheets: [] })) } };
+  return { ...that, api: { ...that.api, quoteProjects: vi.fn(async () => ({ data: DU_AN })), updateSheetInvoice: vi.fn(async () => ({})), chiaHoaDon: vi.fn(async () => ({ sheets: [] })), lamLaiHoaDon: vi.fn(async () => ({ sheetIds: [], invoiceNo: [] })) } };
 });
 vi.mock("../lib/ui", async (goc) => ({ ...(await goc<typeof import("../lib/ui")>()), toast: vi.fn() }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { InvoicesPage, buildRows, buildHeld } from "./Invoices";
-import { api } from "../lib/api";
 
-describe("buildRows / buildHeld — dựng hóa đơn theo phép chia", () => {
-  it("chưa chia: mỗi sheet một dòng, mã sản xuất _01/_02 y như cũ", () => {
+describe("buildRows / buildHeld — tiền mỗi mã chỉ cộng sheet chủ báo giá chọn vào mã đó", () => {
+  it("chưa chia: mỗi sheet một mã _01/_02 như cũ; Trước / Sau VAT 10%", () => {
     const rows = buildRows([DU_AN[1]]);
-    expect(rows.map((r) => [r.code, r.amount])).toEqual([["FP_8_01", 108_000], ["FP_8_02", 216_000]]);
+    expect(rows.map((r) => [r.code, r.subtotal, r.amount])).toEqual([["FP_8_01", 100_000, 110_000], ["FP_8_02", 200_000, 220_000]]);
   });
 
-  it("đã chia: Hóa đơn 1 gom hai sheet thành MỘT dòng mã _01, tiền = tổng sheet + VAT; Để sau / Không xuất không thành dòng", () => {
+  it("S1+S2 → _01, S3 Để sau, S4 Không xuất ⇒ _01 = S1+S2 (VAT 8% trên tổng); S3 riêng ở nhóm Để sau; S4 không ở đâu trong tổng", () => {
     const rows = buildRows([DU_AN[0]]);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ code: "FP_7_01", amount: 3_240_000, sheetId: 71, poNumber: "PO-7", sheetNames: ["Sân khấu", "Âm thanh"] });
-  });
-
-  it("một hóa đơn gom MỌI sheet, không còn sheet Để sau → mã không hậu tố (như báo giá một sheet)", () => {
-    const q = baoGia(9, [sh(91, 1, "A", 100, { invoiceGroup: 1 }), sh(92, 2, "B", 100, { invoiceGroup: 1 }), sh(93, 3, "C", 100, { invoiceHold: "skip" })]);
-    expect(buildRows([q]).map((r) => r.code)).toEqual(["FP_9"]);
-    // Có hóa đơn 2 → mọi hóa đơn mang hậu tố.
-    const q2 = baoGia(9, [sh(91, 1, "A", 100, { invoiceGroup: 1 }), sh(92, 2, "B", 100, { invoiceGroup: 2 })]);
-    expect(buildRows([q2]).map((r) => r.code)).toEqual(["FP_9_01", "FP_9_02"]);
-  });
-
-  it("buildHeld: sheet Để sau + Không xuất, mang mã sản xuất của chính sheet và tiền có VAT", () => {
-    expect(buildHeld(DU_AN).map((h) => [h.hold, h.code, h.name, h.amount])).toEqual([
-      ["later", "FP_7_03", "Ánh sáng", 4_320_000],
-      ["skip", "FP_7_04", "LED", 540_000],
+    expect(rows[0]).toMatchObject({ code: "FP_7_01", subtotal: 3_000_000, amount: 3_240_000, sheetId: 71, poNumber: "PO-7" });
+    expect(buildHeld([DU_AN[0]]).map((h) => [h.hold, h.code, h.name, h.subtotal, h.amount])).toEqual([
+      ["later", "FP_7_03", "Ánh sáng", 4_000_000, 4_320_000],
+      ["skip", "FP_7_04", "LED", 500_000, 540_000],
     ]);
+  });
+
+  it("VAT 0%: Trước = Sau; hai mã là hai dòng riêng, mỗi mã đúng tổng của mình", () => {
+    expect(buildRows([DU_AN[2]]).map((r) => [r.code, r.subtotal, r.amount])).toEqual([["FP_9_01", 1_000_000, 1_000_000], ["FP_9_02", 50_000, 50_000]]);
+  });
+
+  it("HẠNG MỤC tự sinh = tiêu đề rút gọn_tên sheet; không có rút gọn → tiêu đề chính (bỏ tiền tố BẢNG BÁO GIÁ)", () => {
+    expect(buildRows([DU_AN[0]])[0].hangMuc).toEqual(["Ra mắt_Sân khấu", "Ra mắt_Âm thanh"]);
+    expect(buildRows([DU_AN[1]]).map((r) => r.hangMuc)).toEqual([["Hội nghị khách hàng_Trang A"], ["Hội nghị khách hàng_Trang B"]]);
+    const q = { ...DU_AN[1], shortTitle: "  ", title: "BẢNG BÁO GIÁ - Lễ khai trương" } as ProjectQuote;
+    expect(buildRows([q])[0].hangMuc).toEqual(["Lễ khai trương_Trang A"]);
   });
 });
 
@@ -78,75 +89,107 @@ async function moTrang(permissions = ["invoice:edit", "invoice:pay", "invoice:pa
   await cho(20);
   return hop;
 }
-const doiChon = (el: HTMLSelectElement, v: string) => act(() => {
-  const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
-  set.call(el, v);
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-});
+/** Các <tr> của khối mã `code` trong bảng hóa đơn: dòng đầu (chứa ô mã) + các dòng con Hạng mục ngay sau nó. */
+function khoi(hop: HTMLElement, code: string) {
+  const ds = [...hop.querySelectorAll(".inv-table tbody tr")] as HTMLTableRowElement[];
+  const i = ds.findIndex((tr) => [...tr.cells].some((c) => c.querySelector("strong")?.textContent === code));
+  if (i < 0) throw new Error("không thấy khối " + code);
+  const out = [ds[i]];
+  for (let j = i + 1; j < ds.length && ds[j].classList.contains("inv-hm-dong"); j++) out.push(ds[j]);
+  return out;
+}
+const cotIdx = (hop: HTMLElement, ten: string) => [...hop.querySelectorAll(".inv-table thead th")].findIndex((th) => th.textContent?.replace(/[▲▼]/g, "").trim() === ten);
 
-describe("trang Hóa đơn đầu ra — giao diện chia", () => {
-  it("nhóm Để sau hiện riêng; Không xuất ẩn tới khi tích; Hạng mục trống gợi ý theo tên sheet", async () => {
+describe("trang Hóa đơn đầu ra — mỗi mã một khối, Hạng mục mỗi sheet một dòng", () => {
+  it("_01 gom 2 sheet = MỘT khối 2 dòng: ô mã / tiền gộp dọc (rowSpan 2), Hạng mục 2 dòng con", async () => {
+    const hop = await moTrang();
+    const k = khoi(hop, "FP_7_01");
+    expect(k).toHaveLength(2);
+    const oMa = [...k[0].cells].find((c) => c.querySelector("strong")?.textContent === "FP_7_01")!;
+    expect(oMa.rowSpan).toBe(2);
+    expect(k[0].querySelector("td.inv-hm")!.textContent).toBe("Ra mắt_Sân khấu");
+    expect(k[1].cells).toHaveLength(1);
+    expect(k[1].cells[0].textContent).toBe("Ra mắt_Âm thanh");
+    expect(hop.querySelector(".inv-table")!.textContent, "S2 không thành mã riêng").not.toContain("FP_7_02");
+  });
+
+  it("hai mã của một báo giá → hai khối riêng; báo giá chưa chia / 1 sheet mỗi mã → 1 dòng con", async () => {
+    const hop = await moTrang();
+    expect(khoi(hop, "FP_9_01")).toHaveLength(2);
+    expect(khoi(hop, "FP_9_02")).toHaveLength(1);
+    expect(khoi(hop, "FP_9_02")[0].querySelector("td.inv-hm")!.textContent).toBe("Hội chợ_C");
+    const k8 = khoi(hop, "FP_8_01");
+    expect(k8).toHaveLength(1);
+    expect(k8[0].querySelector("td.inv-hm")!.textContent).toBe("Hội nghị khách hàng_Trang A");
+  });
+
+  it("Hạng mục kế toán từng gõ tay KHÔNG mất: khác chữ tự sinh → hiện nhỏ 'ghi cũ: …'", async () => {
+    const hop = await moTrang();
+    const cu = khoi(hop, "FP_9_01")[0].querySelector(".inv-hm-cu");
+    expect(cu?.textContent).toBe("ghi cũ: Thi công gian hàng");
+    expect(khoi(hop, "FP_7_01")[0].querySelector(".inv-hm-cu")).toBeNull();
+  });
+
+  it("hai cột Trước VAT / Sau VAT đứng chỗ cột Số tiền cũ, đúng số từng mã (VAT 8% / 10% / 0%)", async () => {
+    const hop = await moTrang();
+    const truoc = cotIdx(hop, "Trước VAT"), sau = cotIdx(hop, "Sau VAT");
+    expect(truoc).toBeGreaterThan(0);
+    expect(sau).toBe(truoc + 1);
+    expect(cotIdx(hop, "Công nợ")).toBe(sau + 1);
+    expect(cotIdx(hop, "Số tiền")).toBe(-1);
+    const tien = (code: string) => {
+      const tr = khoi(hop, code)[0];
+      const nums = [...tr.cells].filter((c) => c.classList.contains("num")).map((c) => c.textContent);
+      return nums.slice(0, 2);
+    };
+    expect(tien("FP_7_01")).toEqual([fmtMoney(3_000_000), fmtMoney(3_240_000)]);
+    expect(tien("FP_8_02")).toEqual([fmtMoney(200_000), fmtMoney(220_000)]);
+    expect(tien("FP_9_01")).toEqual([fmtMoney(1_000_000), fmtMoney(1_000_000)]);
+  });
+
+  it("sắp xếp được theo Trước VAT và Sau VAT (aria-sort)", async () => {
+    const hop = await moTrang();
+    const th = (ten: string) => [...hop.querySelectorAll(".inv-table thead th")].find((x) => x.textContent?.startsWith(ten)) as HTMLElement;
+    act(() => th("Trước VAT").click());
+    expect(th("Trước VAT").getAttribute("aria-sort")).toBe("ascending");
+    const ma = () => [...hop.querySelectorAll(".inv-table tbody tr:not(.inv-hm-dong)")].map((tr) => [...tr.querySelectorAll("strong")].map((s) => s.textContent).find((t) => /^FP_/.test(t || "")));
+    expect(ma()[0]).toBe("FP_9_02");   // 50.000 nhỏ nhất
+    act(() => th("Sau VAT").click());
+    expect(th("Sau VAT").getAttribute("aria-sort")).toBe("ascending");
+    expect(th("Trước VAT").getAttribute("aria-sort")).toBe("none");
+  });
+
+  it("nhóm Để sau hiện riêng (hai cột tiền); Không xuất ẩn tới khi tích", async () => {
     const hop = await moTrang();
     const deSau = hop.querySelector('section[aria-label^="Sheet để sau"]');
-    expect(deSau, "nhóm Sheet để sau phải hiện").not.toBeNull();
     expect(deSau!.textContent).toContain("Ánh sáng");
     expect(deSau!.textContent).toContain("FP_7_03");
+    expect(deSau!.textContent).toContain(fmtMoney(4_000_000));
+    expect(deSau!.textContent).toContain(fmtMoney(4_320_000));
     expect(hop.querySelector('section[aria-label^="Sheet không xuất"]')).toBeNull();
-    const tich = hop.querySelector('input[name="hienKhongXuat"]') as HTMLInputElement;
-    expect(tich).not.toBeNull();
-    act(() => tich.click());
+    act(() => (hop.querySelector('input[name="hienKhongXuat"]') as HTMLInputElement).click());
     expect(hop.querySelector('section[aria-label^="Sheet không xuất"]')!.textContent).toContain("LED");
-
-    const bang = hop.querySelector(".inv-table")!;
-    expect(bang.textContent).toContain("FP_7_01");
-    expect(bang.textContent).toContain("Sân khấu, Âm thanh");
-    expect(bang.textContent).not.toContain("FP_7_02");
   });
 
-  it("Chia HĐ: xếp Ánh sáng vào Hóa đơn 2 → gửi đủ sheet, đúng nhóm; xem trước mã _01/_02", async () => {
+  it("ô tìm khớp chữ Hạng mục mới và cả hai số tiền", async () => {
     const hop = await moTrang();
-    const nut = hop.querySelector('button[aria-label="Chia hóa đơn — FP_7_01"]') as HTMLButtonElement;
-    expect(nut, "kế toán thấy nút Chia HĐ").not.toBeNull();
-    act(() => nut.click());
-    const hopThoai = document.querySelector('[role="dialog"]') as HTMLElement;
-    expect(hopThoai).not.toBeNull();
-    const chon = hopThoai.querySelector('select[name="chiaHoaDon-73"]') as HTMLSelectElement;
-    expect(chon.value).toBe("later");
-    doiChon(chon, "2");
-    expect(hopThoai.textContent).toContain("FP_7_02");
-    const luu = [...hopThoai.querySelectorAll("button")].find((b) => b.textContent === "Lưu")!;
-    await act(async () => { luu.click(); });
-    await cho(10);
-    expect(api.chiaHoaDon).toHaveBeenCalledWith(7, [
-      { sheetId: 71, group: 1, hold: null },
-      { sheetId: 72, group: 1, hold: null },
-      { sheetId: 73, group: 2, hold: null },
-      { sheetId: 74, group: null, hold: "skip" },
-    ]);
+    const tim = hop.querySelector('input[name="q"]') as HTMLInputElement;
+    const go = (v: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(tim, v);
+      tim.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    go("Ra mắt_Âm thanh");
+    expect(hop.querySelector(".inv-table")!.textContent).toContain("FP_7_01");
+    expect(hop.querySelector(".inv-table")!.textContent).not.toContain("FP_8_01");
+    go(fmtMoney(3_000_000));
+    expect(hop.querySelector(".inv-table")!.textContent).toContain("FP_7_01");
   });
 
-  it("báo giá chưa chia: gom hai sheet vào Hóa đơn 1; để nguyên mặc định thì gửi BỎ CHIA (mọi sheet null)", async () => {
-    const hop = await moTrang();
-    act(() => (hop.querySelector('button[aria-label="Chia hóa đơn — FP_8_01"]') as HTMLButtonElement).click());
-    let hopThoai = document.querySelector('[role="dialog"]') as HTMLElement;
-    expect((hopThoai.querySelector('select[name="chiaHoaDon-82"]') as HTMLSelectElement).value, "mặc định = số mã cũ").toBe("2");
-    const luu = () => [...(document.querySelector('[role="dialog"]') as HTMLElement).querySelectorAll("button")].find((b) => b.textContent === "Lưu")!;
-    await act(async () => { luu().click(); });
-    await cho(10);
-    expect(api.chiaHoaDon).toHaveBeenLastCalledWith(8, [{ sheetId: 81, group: null, hold: null }, { sheetId: 82, group: null, hold: null }]);
-
-    act(() => (hop.querySelector('button[aria-label="Chia hóa đơn — FP_8_01"]') as HTMLButtonElement).click());
-    hopThoai = document.querySelector('[role="dialog"]') as HTMLElement;
-    doiChon(hopThoai.querySelector('select[name="chiaHoaDon-82"]') as HTMLSelectElement, "1");
-    expect(hopThoai.textContent, "một hóa đơn gom mọi sheet → không hậu tố").toContain("FP_8 —");
-    await act(async () => { luu().click(); });
-    await cho(10);
-    expect(api.chiaHoaDon).toHaveBeenLastCalledWith(8, [{ sheetId: 81, group: 1, hold: null }, { sheetId: 82, group: 1, hold: null }]);
-  });
-
-  it("không có invoice:edit → không có nút Chia HĐ / Xếp vào hóa đơn", async () => {
-    const hop = await moTrang(["invoice:page"]);
-    expect(hop.querySelector('button[aria-label^="Chia hóa đơn"]')).toBeNull();
-    expect(hop.querySelector('button[aria-label^="Xếp vào hóa đơn"]')).toBeNull();
+  it("kế toán KHÔNG chia / làm lại ở đây: không còn nút, có gợi ý báo chủ báo giá", async () => {
+    const hop = await moTrang(["invoice:edit", "invoice:pay", "invoice:page", "user:manage"]);
+    const nut = [...hop.querySelectorAll("button")].map((b) => (b.getAttribute("aria-label") || "") + " " + b.textContent);
+    expect(nut.some((t) => /Chia H|Làm lại|Xếp vào hóa đơn/.test(t))).toBe(false);
+    expect(hop.querySelector('[role="note"]')!.textContent).toMatch(/chủ báo giá/);
+    expect(hop.querySelector(".inv-table textarea, .inv-table input[name=\"invoiceDesc\"], td[aria-label^=\"Sửa Hạng mục\"]")).toBeNull();
   });
 });
