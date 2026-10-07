@@ -12,12 +12,15 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1080 commit**, từ 2026-05-29 tới 2026-10-07.
+**1083 commit**, từ 2026-05-29 tới 2026-10-07.
 
 ---
 
 ## 2026-10-07
 
+- `46d20f2` docs(CHANGELOG): sinh lại sau khi thêm xem công thức khối tổng
+- `7e95ca6` feat(khối tổng): bấm Tổng sheet / VAT / Thành tiền → hiện công thức tham chiếu ô + tô ô góp vào, như ô công thức của lưới
+- `a9c767c` docs(CHANGELOG): sinh lại sau chia hóa đơn lúc khách chốt
 - `a93bb3f` feat(chia hóa đơn): chủ báo giá chia lúc khách chốt + nút "Chia hóa đơn" trong báo giá; trang Hóa đơn đầu ra chỉ hiển thị theo mã
 - `643b491` docs(CHANGELOG): sinh lại sau khi ráp tiền mặt + thu gọn menu
 - `ab631dd` feat(menu trái): nút ẩn/hiện menu ở màn rộng (Ctrl+B, nhớ theo máy) + email/tên dài không tràn khỏi menu
