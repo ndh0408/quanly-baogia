@@ -693,6 +693,9 @@ export const api = {
     req<ChungTuNoiBo>(`/quotes/${quoteId}/khoan-chi/${side}/${encodeURIComponent(rid)}/anh?loai=${loai}`),
   updateSheetInvoice: (sheetId: number, field: string, val: string | null) =>
     req<unknown>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [field]: val }) }),
+  // Ô TÍCH chứng từ gửi đi / trả về: chỉ gửi đã tích hay chưa — MÁY CHỦ đóng dấu thời điểm và trả lại (null khi bỏ tích).
+  tichChungTu: (sheetId: number, o: "docSent" | "docReturned", tich: boolean) =>
+    req<{ docSentAt: string | null; docReturnedAt: string | null }>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [o]: tich }) }),
   // Chia sheet thành hóa đơn (kế toán, invoice:edit): liệt kê ĐỦ sheet của báo giá; mọi phần tử {group:null, hold:null} = bỏ chia.
   chiaHoaDon: (quoteId: number, sheets: { sheetId: number; group: number | null; hold: "later" | "skip" | null }[]) =>
     req<{ sheets: { sheetId: number; group: number | null; hold: string | null }[] }>(`/quotes/${quoteId}/invoice-split`, { method: "PUT", body: JSON.stringify({ sheets }) }),

@@ -245,6 +245,42 @@ describe.runIf(dbAvailable)("chia sheet thành hóa đơn — trang Hóa đơn �
     expect((await sheetsCua(id)).map((s) => s.paidAt?.toISOString().slice(0, 10) ?? null)).toEqual(["2026-10-05", "2026-10-05", null]);
   });
 
+  it("CHỨNG TỪ Ô TÍCH: docSent/docReturned = true → máy chủ đóng dấu giờ, ghi đồng loạt cả mã; tích lại giữ dấu cũ; bỏ tích = null; quyền invoice:edit; có nhật ký", async () => {
+    const id = await taoBaoGiaChot("chungtu");
+    const [a, b, c] = await sheetsCua(id);
+    const g = (x, group, hold = null) => ({ sheetId: x.id, group, hold });
+    expect((await chia(chu, id, [g(a, 1), g(b, 1), g(c, null, "later")])).status).toBe(200);
+    const tich = (agent, x, body) => agent.put(`/api/quotes/sheets/${x.id}/invoice`).send(body);
+
+    expect((await tich(chu, a, { docSent: true })).status, "account không có invoice:edit / invoice:page").toBe(403);
+    expect((await tich(keToan, a, { docSent: "true" })).status, "z.boolean không coerce chuỗi").toBe(400);
+    const truoc = Date.now();
+    const r = await tich(keToan, b, { docSent: true });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.docSentAt, "máy chủ trả dấu giờ").toBeTruthy();
+    let [a1, b1, c1] = await sheetsCua(id);
+    expect(b1.docSentAt.getTime()).toBeGreaterThanOrEqual(truoc - 5_000);
+    expect(a1.docSentAt?.getTime(), "tích một lần cho cả mã — sheet A cùng hóa đơn mang cùng dấu").toBe(b1.docSentAt.getTime());
+    expect(c1.docSentAt, "sheet Để sau không bị kéo theo").toBeNull();
+    const dau = b1.docSentAt.getTime();
+
+    await new Promise((res) => setTimeout(res, 20));
+    expect((await tich(keToan, a, { docSent: true })).status).toBe(200);
+    [a1] = await sheetsCua(id);
+    expect(a1.docSentAt.getTime(), "tích lại GIỮ dấu cũ").toBe(dau);
+
+    expect((await tich(keToan, a, { docReturned: true })).status).toBe(200);
+    expect((await tich(keToan, a, { docSent: false })).status).toBe(200);
+    [a1, b1] = await sheetsCua(id);
+    expect([a1.docSentAt, b1.docSentAt], "bỏ tích = null cả mã").toEqual([null, null]);
+    expect(a1.docReturnedAt).not.toBeNull();
+    expect(b1.docReturnedAt?.getTime()).toBe(a1.docReturnedAt.getTime());
+
+    expect((await tich(keToan, c, { docSent: true })).status, "sheet Để sau chưa là hóa đơn").toBe(409);
+    const nk = await prisma.auditEvent.findFirst({ where: { action: "quote.invoice", resourceId: String(id) }, orderBy: { id: "desc" } });
+    expect(nk?.after).toMatchObject({ docSentAt: null });
+  });
+
   it("Không xuất: sheet skip giữ nguyên tiền/sheet, không nhận số HĐ", async () => {
     const id = await taoBaoGiaChot("skip");
     const [a, b, c] = await sheetsCua(id);

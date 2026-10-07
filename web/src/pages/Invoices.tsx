@@ -46,8 +46,11 @@ const FIELD_LABEL: Record<string, string> = {
 };
 
 // Field kế toán lưu qua saveField + field kiểu NGÀY (chuẩn hoá về yyyy-mm-dd như input khi so sánh).
-const SAVE_FIELDS = ["poNumber", "invoiceCompany", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "invoiceYear", "invoiceNote"] as const;
-const DATE_FIELDS = new Set(["invoiceDate", "orderClosedAt", "paidAt", "docSentAt", "docReturnedAt"]);
+const SAVE_FIELDS = ["poNumber", "invoiceCompany", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceLink", "paidAt", "invoiceYear", "invoiceNote"] as const;
+const DATE_FIELDS = new Set(["invoiceDate", "orderClosedAt", "paidAt"]);
+// Chứng từ gửi đi / trả về là Ô TÍCH (chủ repo 2026-10-07: "chứng từ gửi đi và trả về là dấu checkbox nha") — cột ngày
+// vẫn giữ: máy chủ đóng dấu lúc tích, có ngày = đã tích (dữ liệu cũ hiện đã tích sẵn).
+const O_TICH: Record<"docSentAt" | "docReturnedAt", "docSent" | "docReturned"> = { docSentAt: "docSent", docReturnedAt: "docReturned" };
 type StatusFilter = "" | "complete" | "incomplete";
 type CollectionFilter = "" | "paid" | "unpaid" | "dueSoon" | "overdue";
 type MissingFilter = "" | "any" | "poNumber" | "invoiceNo" | "invoiceDate" | "paymentMethod" | "orderClosedAt" | "invoiceLink" | "paidAt" | "docSentAt" | "docReturnedAt" | "signedAt" | "invoiceYear" | "invoiceNote";
@@ -284,6 +287,34 @@ export function InvoicesPage({ me }: { me: Me }) {
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
   };
 
+  // Tích / bỏ tích chứng từ: tích MỘT lần cho cả mã — máy chủ ghi đồng loạt mọi sheet của hóa đơn (INVOICE_SHARED_FIELDS).
+  const [dangTich, setDangTich] = useState<string | null>(null);
+  const tich = async (row: Row, field: "docSentAt" | "docReturnedAt", on: boolean) => {
+    if (!row.sheetId) return;
+    const k = `${row.key}:${field}`;
+    setDangTich(k);
+    try {
+      const kq = await api.tichChungTu(row.sheetId, O_TICH[field], on);
+      patch(row.key, { [field]: kq[field] ?? null } as unknown as Partial<Row>);
+      toast(on ? "Đã tích" : "Đã bỏ tích", "success");
+      qc.invalidateQueries({ queryKey: ["quoteProjects"] });
+    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
+    finally { setDangTich(null); }
+  };
+  const tickCell = (r: Row, field: "docSentAt" | "docReturnedAt") => {
+    const v = r[field];
+    const ngay = hasValue(v) ? fmtDate(v as string) : "";
+    const title = ngay ? `Đã tích ngày ${ngay}` : "Chưa tích";
+    if (!editable(r, field)) return <td className={["inv-tich", missCls(v)].filter(Boolean).join(" ")} title={title}>{ngay ? <span className="txt-ok" aria-label={`${FIELD_LABEL[field]}: ${title}`}>✓</span> : dash}</td>;
+    return (
+      <td className={["inv-tich", missCls(v)].filter(Boolean).join(" ")} title={title}>
+        <input type="checkbox" name={`${O_TICH[field]}-${r.key}`} checked={!!ngay} disabled={dangTich === `${r.key}:${field}`}
+               aria-label={`${fieldLabel(field, r)}${ngay ? ` — đã tích ngày ${ngay}` : ""}`}
+               onChange={(e) => void tich(r, field, e.target.checked)} />
+      </td>
+    );
+  };
+
   const fieldLabel = (f: string, r: Row) => `${FIELD_LABEL[f] || f} — ${r.code}`;
   const editable = (r: Row, field?: string) => (field === "paidAt" ? canPay : canEdit) && !!r.sheetId;
   // Một quy tắc duy nhất cho toàn bảng: null, chuỗi rỗng hoặc chỉ có khoảng trắng đều là CHƯA ĐIỀN.
@@ -508,8 +539,8 @@ export function InvoicesPage({ me }: { me: Me }) {
                                 : viewTd(r, "invoiceLink", r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>Xem HĐ ↗</a> : dash, "nowrap"))
                               : <td className={missCls(r.invoiceLink)}>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>,
                             dateCell(r, "paidAt"),
-                            dateCell(r, "docSentAt"),
-                            dateCell(r, "docReturnedAt"),
+                            tickCell(r, "docSentAt"),
+                            tickCell(r, "docReturnedAt"),
                             <td className="nowrap">
                               {r.signedAt
                                 ? <span className="status approved nowrap">✓ {r.signedByName || "Đã ký"} · {fmtDate(r.signedAt)}</span>

@@ -193,6 +193,10 @@ router.put(
       invoiceLink: z.string().max(1000).trim().refine((s) => !s || /^https?:\/\//i.test(s), "Link hóa đơn phải bắt đầu bằng http:// hoặc https://").optional().nullable(),
       docSentAt: z.coerce.date().nullable().optional().or(z.literal("")),
       docReturnedAt: z.coerce.date().nullable().optional().or(z.literal("")),
+      // Ô TÍCH chứng từ gửi đi / trả về (trang Hóa đơn đầu ra): máy chủ đóng dấu thời điểm. z.boolean KHÔNG coerce —
+      // chuỗi "false" không được thành true.
+      docSent: z.boolean().optional(),
+      docReturned: z.boolean().optional(),
       // Trang Hóa đơn (kế toán nhập)
       invoiceDate: z.coerce.date().nullable().optional().or(z.literal("")),
       paymentMethod: z.string().max(40).trim().optional().nullable(),

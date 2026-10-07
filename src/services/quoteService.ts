@@ -1723,7 +1723,7 @@ export async function updateSheetInvoice(req: Request) {
   // PHÂN QUYỀN NGUYÊN TỬ: đánh dấu thanh toán (paidAt) cần invoice:pay; sửa field hóa đơn khác cần invoice:edit.
   // → cho phép "kế toán A chỉ đánh dấu thanh toán, kế toán B chỉ nhập số HĐ" v.v.
   const touchesPaid = req.body.paidAt !== undefined;
-  const touchesEdit = ["invoiceNo", "poNumber", "hnInvoiceNo", "invoiceLink", "docSentAt", "docReturnedAt",
+  const touchesEdit = ["invoiceNo", "poNumber", "hnInvoiceNo", "invoiceLink", "docSentAt", "docReturnedAt", "docSent", "docReturned",
     "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceYear", "invoiceCompany", "invoiceDesc", "invoiceNote"].some((k) => req.body[k] !== undefined);
   if (touchesPaid && !can(req.session, P.INVOICE_PAY)) throw httpError(403, "Bạn không có quyền đánh dấu thanh toán hóa đơn");
   if (touchesEdit && !can(req.session, P.INVOICE_EDIT)) throw httpError(403, "Bạn không có quyền sửa thông tin hóa đơn");
@@ -1743,9 +1743,18 @@ export async function updateSheetInvoice(req: Request) {
   // trường hóa đơn rơi vào tập sheet cũ.
   const { updated, dongLoat } = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${sheet.quoteId} ORDER BY id FOR UPDATE`;
-    const anhEm = await tx.quoteSheet.findMany({ where: { quoteId: sheet.quoteId }, select: { id: true, invoiceGroup: true, invoiceHold: true, custStatus: true } });
+    const anhEm = await tx.quoteSheet.findMany({ where: { quoteId: sheet.quoteId }, select: { id: true, invoiceGroup: true, invoiceHold: true, custStatus: true, docSentAt: true, docReturnedAt: true } });
     const chia = daChiaHoaDon(anhEm);
     const ban = anhEm.find((x) => x.id === sheet.id);
+    // CHỨNG TỪ GỬI ĐI / TRẢ VỀ LÀ Ô TÍCH (chủ repo 2026-10-07: "chứng từ gửi đi và trả về là dấu checkbox nha"). Client
+    // gửi `docSent` / `docReturned` = true | false; MÁY CHỦ đóng dấu thời điểm — như ký chứng từ (signSheet) và ý kiến
+    // khách (custStatusAt): giờ máy chủ, không tin giờ máy người bấm. Đã tích rồi mà tích lại (bấm đúp, hai người cùng
+    // bấm) thì GIỮ dấu cũ — mốc "gửi đi lúc nào" không bị đẩy lùi về sau. Bỏ tích = null. Cột DateTime giữ nguyên nên dữ
+    // liệu cũ có ngày = đã tích. Đọc SAU khoá để "giữ dấu cũ" so với bản tươi.
+    for (const [o, cot] of [["docSent", "docSentAt"], ["docReturned", "docReturnedAt"]] as const) {
+      if (req.body[o] === undefined) continue;
+      data[cot] = req.body[o] ? (ban?.[cot] ?? new Date()) : null;
+    }
     const khoa = ban ? khoaHoaDon(ban, chia) : `s:${sheet.id}`;
     const dataChung: Record<string, any> = {};
     for (const f of INVOICE_SHARED_FIELDS) if (data[f] !== undefined) dataChung[f] = data[f];
@@ -1760,12 +1769,12 @@ export async function updateSheetInvoice(req: Request) {
       ? anhEm.filter((x) => khoaHoaDon(x, chia) === khoa && x.id !== sheet.id && x.custStatus !== "rejected").map((x) => x.id)
       : [];
     if (cung.length && Object.keys(dataChung).length) await tx.quoteSheet.updateMany({ where: { id: { in: cung } }, data: dataChung });
-    const u = await tx.quoteSheet.update({ where: { id: sheet.id }, data, select: { id: true, invoiceNo: true, paidAt: true } });
+    const u = await tx.quoteSheet.update({ where: { id: sheet.id }, data, select: { id: true, invoiceNo: true, paidAt: true, docSentAt: true, docReturnedAt: true } });
     return { updated: u, dongLoat: cung };
   });
   await audit(req, "quote.invoice", { resource: "quote", resourceId: sheet.quoteId, after: { sheetId: sheet.id, ...data, ...(dongLoat.length ? { cungHoaDon: dongLoat } : {}) } });
   const invStatus = (updated.invoiceNo && updated.paidAt) ? "done" : (updated.invoiceNo ? "payment" : "invoice");
-  return { id: updated.id, invoiceNo: updated.invoiceNo, paidAt: updated.paidAt, invStatus };
+  return { id: updated.id, invoiceNo: updated.invoiceNo, paidAt: updated.paidAt, docSentAt: updated.docSentAt, docReturnedAt: updated.docReturnedAt, invStatus };
 }
 
 // ============================================================================
