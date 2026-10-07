@@ -481,6 +481,9 @@ export const KhoanChiSchema = z
   .object({
     baseVersion: z.number("Thiếu mốc phiên bản của khoản (baseVersion)").int().min(0),
     paid: z.boolean("'Đã chi' phải là true hoặc false").optional(),
+    // HÌNH THỨC CHI (chủ repo 2026-10-07): chỉ hai giá trị; vắng = giữ nguyên (tích mới mà vắng = chuyển khoản). Không có
+    // `null`: bỏ tích là cách DUY NHẤT xoá hình thức (máy chủ tự xoá như paidAt) — một ý nghĩa, một cách viết.
+    paidMethod: z.enum(["chuyen-khoan", "tien-mat"], "Hình thức thanh toán chỉ nhận 'chuyen-khoan' (chuyển khoản) hoặc 'tien-mat' (tiền mặt)").optional(),
     paidProof: z.string().max(900_000, "Ảnh chứng từ quá lớn").regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").nullable().optional(),
     // HÓA ĐƠN VAT (chỉ hàng chứng từ VAT — máy chủ kiểm): data-URL ảnh hoặc PDF = đưa HĐ mới (bản cũ RÚT vào lịch sử); `null` = gỡ.
     // ĐỘC LẬP với `paid`: đưa trước hay sau khi tích đều được. Cùng trần 900.000 ký tự với ảnh chứng từ.
@@ -492,10 +495,11 @@ export const KhoanChiSchema = z
     accountingNote: z.string("Ghi chú kế toán phải là chữ").trim().max(GHI_CHU_KE_TOAN_TOI_DA, `Ghi chú kế toán tối đa ${GHI_CHU_KE_TOAN_TOI_DA} ký tự`).nullable().optional(),
   })
   .refine(
-    (b) => b.paid !== undefined || b.paidProof !== undefined || b.vatProof !== undefined || b.invoiceDate !== undefined || b.accountingNote !== undefined,
-    "Không có gì để đổi: cần gửi 'đã chi', ảnh chứng từ, hóa đơn VAT, ngày hóa đơn hoặc ghi chú kế toán",
+    (b) => b.paid !== undefined || b.paidMethod !== undefined || b.paidProof !== undefined || b.vatProof !== undefined || b.invoiceDate !== undefined || b.accountingNote !== undefined,
+    "Không có gì để đổi: cần gửi 'đã chi', hình thức thanh toán, ảnh chứng từ, hóa đơn VAT, ngày hóa đơn hoặc ghi chú kế toán",
   )
-  .refine((b) => !(b.paid === false && typeof b.paidProof === "string"), "Bỏ đánh dấu đã chi thì không đính ảnh chứng từ được");
+  .refine((b) => !(b.paid === false && typeof b.paidProof === "string"), "Bỏ đánh dấu đã chi thì không đính ảnh chứng từ được")
+  .refine((b) => !(b.paid === false && b.paidMethod !== undefined), "Bỏ đánh dấu đã chi thì không chọn hình thức thanh toán được");
 
 const sheetSchema = z.object({
   // id của sheet ĐANG CÓ trong DB (client gửi lại khi sửa). Lưu = xoá-tạo-lại sheet nên server dùng

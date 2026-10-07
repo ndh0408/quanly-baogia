@@ -29,7 +29,7 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     // ở màn soạn / tài khoản chi phí) vẫn lọc được — chỉ đổi nhãn.
     ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi / hóa đơn VAT"],
     ["quote.internal.vat", "Hóa đơn đầu vào: đưa / thay / gỡ hóa đơn VAT"],
-    ["quote.internal.ke-toan", "Hóa đơn đầu vào: ngày HĐ / ghi chú KT / ảnh chứng từ"],
+    ["quote.internal.ke-toan", "Hóa đơn đầu vào: hình thức chi / ngày HĐ / ghi chú KT / ảnh chứng từ"],
     ["quote.list-note", "Ghi chú / màu ở danh sách báo giá"],
     // MƯỜI MÃ DƯỚI ĐÂY (ở đây và ở nhóm Nhân sự) TỪNG VẮNG MẶT, và bài test phủ mã vẫn XANH:
     // bộ dò của nó chỉ khớp `audit(req, "chuỗi")`, bỏ hết dạng ternary và dạng truyền qua biến.
@@ -107,7 +107,7 @@ const FIELD_LABEL: Record<string, string> = {
   permissions: "Quyền", title: "Tiêu đề", status: "Trạng thái", role: "Vai trò",
   // Khoản chi của hàng nội bộ — trang Hóa đơn đầu vào (quote.internal.pay / unpay / ke-toan / proof-view ghi
   // before/after theo các khoá này; `paidById` tự ẩn như mọi …ById, `accountingNote` dùng chung nhãn ở trên).
-  invoiceDate: "Ngày hóa đơn", paid: "Đã chi", paidByName: "Người đánh dấu chi",
+  invoiceDate: "Ngày hóa đơn", paid: "Đã chi", paidByName: "Người đánh dấu chi", paidMethod: "Hình thức chi",
   proofId: "Ảnh chứng từ (mã)", proofSha256: "Dấu vân tay ảnh", side: "Phía bảng", rid: "Mã hàng nội bộ",
   nguon: "Nguồn dữ liệu", version: "Phiên bản khoản", ten: "Hạng mục",
   vatProofId: "Hóa đơn VAT (mã)", vatProofSha256: "Dấu vân tay hóa đơn VAT", loai: "Loại chứng từ", noiBo: "Xem từ bảng nội bộ",
@@ -128,6 +128,9 @@ const fmtVal = (v: unknown): string => {
   if (/^\d{4}-\d{2}-\d{2}T/.test(s)) { const d = new Date(s); if (!isNaN(d.getTime())) return fmtDateTime(s); }
   return s;
 };
+// Giá trị MÃ của vài khoá → chữ đọc được (máy chủ ghi mã ổn định để còn lọc / so được).
+const GIA_TRI_TRUONG: Record<string, Record<string, string>> = { paidMethod: { "chuyen-khoan": "Chuyển khoản", "tien-mat": "Tiền mặt" } };
+const fmtTruong = (k: string, v: unknown): string => (typeof v === "string" && GIA_TRI_TRUONG[k]?.[v]) || fmtVal(v);
 // "" ≡ null ≡ undefined → KHÔNG coi là thay đổi (tránh dòng "(trống) → (trống)" vô nghĩa).
 const normNullish = (x: unknown) => (x == null || x === "" ? null : x);
 export function diffRows(before?: Record<string, unknown> | null, after?: Record<string, unknown> | null) {
@@ -140,7 +143,7 @@ export function diffRows(before?: Record<string, unknown> | null, after?: Record
     if (k === "customerId" && coKhachHang) continue;
     const b = (before || {})[k], a = (after || {})[k];
     if (JSON.stringify(normNullish(b)) === JSON.stringify(normNullish(a))) continue;
-    out.push({ label: FIELD_LABEL[k] || k, from: fmtVal(b), to: fmtVal(a) });
+    out.push({ label: FIELD_LABEL[k] || k, from: fmtTruong(k, b), to: fmtTruong(k, a) });
   }
   return out;
 }

@@ -440,6 +440,11 @@ Hóa đơn đầu ra: liệt kê mọi **hàng bảng nội bộ ĐÃ DUYỆT** 
   ảnh"), **Ngày hóa đơn** + **Ghi chú kế toán** (`invoice:edit`, tối đa 1000 ký tự). Bỏ tích / thay ảnh / gỡ
   ảnh chỉ **rút** ảnh cũ vào lịch sử — vẫn xem lại được, tối đa 20 ảnh một khoản. Thiếu quyền ô nào thì ô
   đó khoá kèm lý do.
+- **Hình thức thanh toán** (từ 2026-10-07): tích Đã chi thì chọn **Chuyển khoản** / **Tiền mặt** (hàng chứng từ
+  TM gợi ý Tiền mặt; đổi được sau đó; bỏ tích là xoá). Tiền mặt không có ủy nhiệm chi: ô ảnh thành "Ảnh phiếu
+  chi (không bắt buộc)", **không** hiện "⚠ chưa có ảnh"; ô Kế toán ghi "✓ Đã chi · tiền mặt · ngày", cột Thanh
+  toán ở bảng nội bộ ghi "✓ Đã TT tiền mặt" (VAT: "· chưa VAT"). Lọc "Đã TT · tiền mặt / chuyển khoản". Khoản
+  tích trước ngày đó = chuyển khoản, hiện như cũ. Đổi hình thức có trong Nhật ký (`invoice:input:pay`).
 - **Không đụng báo giá.** Ghi vào bảng riêng nên không đổi `Quote.updatedAt` (người đang soạn báo giá không
   bị đá văng), không sinh phiên bản báo giá. Hai kế toán sửa cùng một khoản: người lưu sau nhận báo "vừa có
   người sửa", trang nạp lại và **giữ** phần đang nhập — không ghi đè im lặng; danh sách tự nạp lại (realtime)

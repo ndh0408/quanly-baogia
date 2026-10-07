@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { api, ApiError, isPreviewMode, type InputInvoiceRow, type KhoanChiDto } from "../lib/api";
+import { api, ApiError, isPreviewMode, type HinhThucChi, type InputInvoiceRow, type KhoanChiDto } from "../lib/api";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
 import { compressImage, docTepPdf, LOI_DOC_ANH } from "../lib/anhChungTu";
 import { TaiPdf } from "./XemChungTu";
 import { CHUNG_TU, dangGoIME } from "../lib/gridShared";
 import { fmtMoney, fmtDate, fmtDateTime } from "../lib/format";
 import {
-  LOAI_BANG, NHAN_LY_DO_RUT, anhHienDuoc, laPdfDataUrl, fmtSoLuong, giaTriTruong, laNgayHoaDon, lyDoKhongTich, moTaXungDot, nhanTrangThaiHang,
-  tenBangRieng, thanKhoanChi, xungDotKhoanChi, type GocKhoanChi, type NhapKhoanChi, type TruongKhoanChi,
+  LOAI_BANG, NHAN_HINH_THUC, NHAN_LY_DO_RUT, anhHienDuoc, laPdfDataUrl, fmtSoLuong, giaTriTruong, hinhThucCua, hinhThucGoiY, laNgayHoaDon,
+  lyDoKhongTich, moTaXungDot, nhanTrangThaiHang, tenBangRieng, thanKhoanChi, xungDotKhoanChi, type GocKhoanChi, type NhapKhoanChi, type TruongKhoanChi,
 } from "../lib/khoanChi";
 
 // HỘP "KHOẢN CHI" — trang Hóa đơn đầu vào (chủ repo 2026-10-06: "cái thanh toán bên đó là cho kế toán"). Kế toán tích
@@ -22,6 +22,11 @@ import {
 // · Realtime nạp lại dòng giữa chừng KHÔNG gây 409 (baseVersion theo dòng mới): ô mình đang sửa mà người khác vừa đổi →
 //   hỏi trước khi ghi đè (lib/khoanChi.ts xungDotKhoanChi).
 // · Còn thay đổi chưa lưu: F5 / đóng tab hỏi (beforeunload); Back / menu hỏi qua cờ dùng chung `__editorDirty` (Shell).
+// · HÌNH THỨC THANH TOÁN (chủ repo 2026-10-07: "có khi là tiền mặt"): chọn khi tích, đổi được sau đó; tích mới gợi ý theo
+//   chứng từ của dòng (TM → tiền mặt — lib/khoanChi.ts hinhThucGoiY). Tiền mặt không có ủy nhiệm chi: ô ảnh thành "Ảnh phiếu
+//   chi (không bắt buộc)" và không nhắc thiếu ảnh.
+
+const HINH_THUC: readonly HinhThucChi[] = ["chuyen-khoan", "tien-mat"];
 
 const GHI_CHU_TOI_DA = 1000;   // = GHI_CHU_KE_TOAN_TOI_DA ở src/validators.ts
 const NHAN_CHUNG_TU: Record<string, string> = Object.fromEntries(CHUNG_TU);
@@ -72,6 +77,10 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
   const than = thanKhoanChi(row, nhap, quyen);
   const coThayDoi = than !== null || !!ngayLoi;
   const paid = canPay ? nhap.paid ?? row.paid : row.paid;
+  // Hình thức ĐANG hiện: đã chọn trong hộp → của khoản (đã chi) → gợi ý (tích mới; doiDaChi cũng đặt sẵn vào `nhap`).
+  const hinhThuc: HinhThucChi | null = !paid ? null
+    : canPay ? nhap.paidMethod ?? (row.paid ? hinhThucCua(row) : hinhThucGoiY(row.chungTu)) : hinhThucCua(row);
+  const tienMat = hinhThuc === "tien-mat";
   const lyDoTich = lyDoKhongTich(row);
   const ghiDuoc = row.coTheGhi && !!row.rid && !mat;
   const khoaTich = !canPay || !!lyDoTich || !ghiDuoc;
@@ -185,7 +194,11 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
       if (!ok) return;
     }
     batDauSua("paid");
-    setNhap((x) => (v ? { ...x, paid: true } : { ...x, paid: false, anhMoi: undefined, goAnh: undefined, xacNhanTien: undefined }));
+    // Tích MỚI: đặt sẵn hình thức gợi ý (TM → tiền mặt). Tích lại khoản đã lưu là đã chi (vừa bỏ tích trong hộp): giữ hình
+    // thức của khoản. Bỏ tích: xoá — máy chủ cũng xoá hình thức khi bỏ tích.
+    setNhap((x) => (v
+      ? { ...x, paid: true, paidMethod: row.paid ? x.paidMethod : x.paidMethod ?? hinhThucGoiY(row.chungTu) }
+      : { ...x, paid: false, paidMethod: undefined, anhMoi: undefined, goAnh: undefined, xacNhanTien: undefined }));
   };
 
   const chonAnh = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -295,6 +308,24 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
             )}
           </div>
 
+          {paid && (
+            <div className="inv-in-hop-o inv-in-hop-hinh-thuc" role="radiogroup" aria-label="Hình thức thanh toán">
+              <span className="inv-in-hop-nhan">Hình thức thanh toán</span>
+              <div className="inv-in-hop-hang">
+                {HINH_THUC.map((v) => (
+                  <label key={v} className="inv-in-hop-tick">
+                    <input type="radio" name="paidMethod" value={v} checked={hinhThuc === v} disabled={!canPay || !ghiDuoc}
+                           onChange={() => { batDauSua("hinhThuc"); setNhap((x) => ({ ...x, paidMethod: v })); }} />
+                    <span>{NHAN_HINH_THUC[v]}</span>
+                  </label>
+                ))}
+              </div>
+              {canPay && !row.paid && nhap.paidMethod === "tien-mat" && row.chungTu === "TM" && (
+                <p className="inv-in-hop-lydo">Gợi ý theo chứng từ TM của dòng — đổi được trước khi Lưu.</p>
+              )}
+            </div>
+          )}
+
           {row.paid && row.tienDoi && (
             <div className="inv-in-warn" role="status">
               ⚠ Số tiền đã đổi sau khi chi: đã chi {fmtMoney(row.paidAmount)} — hiện {fmtMoney(row.amount)}.
@@ -309,7 +340,7 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
           )}
 
           <div className="inv-in-hop-o">
-            <span className="inv-in-hop-nhan">Ảnh chứng từ (ủy nhiệm chi)</span>
+            <span className="inv-in-hop-nhan">{tienMat ? "Ảnh phiếu chi (không bắt buộc)" : "Ảnh chứng từ (ủy nhiệm chi)"}</span>
             {canPay ? (
               <>
                 {nhap.anhMoi ? (
@@ -331,7 +362,7 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
                   <div className="inv-in-hop-hang">
                     {nhap.goAnh
                       ? <span className="inv-in-hop-canh">Ảnh hiện tại sẽ được gỡ khi Lưu (vẫn giữ trong lịch sử).</span>
-                      : <span className="muted">{paid ? "Chưa có ảnh chứng từ." : "Tích “Đã chi” rồi mới đính ảnh."}</span>}
+                      : <span className="muted">{!paid ? "Tích “Đã chi” rồi mới đính ảnh." : tienMat ? "Chưa có ảnh phiếu chi — tiền mặt không bắt buộc." : "Chưa có ảnh chứng từ."}</span>}
                     {nhap.goAnh && <button type="button" className="btn btn-sm" onClick={() => setNhap((x) => ({ ...x, goAnh: undefined }))}>Giữ ảnh</button>}
                     {dinhAnhDuoc && nutChonAnh("Chọn ảnh…")}
                   </div>

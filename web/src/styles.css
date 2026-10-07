@@ -2842,6 +2842,10 @@ button.qn-text:hover {
   color: var(--text);
   cursor: pointer;
 }
+/* Hình thức thanh toán: hai nút chọn trên một hàng, cách nhau đủ rộng để không bấm nhầm trên điện thoại. */
+.inv-in-hop-hinh-thuc .inv-in-hop-hang {
+  gap: 6px 20px;
+}
 .inv-in-hop-nhan {
   font-size: 13px;
   font-weight: 600;

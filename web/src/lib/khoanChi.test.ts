@@ -26,8 +26,8 @@ describe("thanKhoanChi — CHỈ trường đã đổi + baseVersion", () => {
   });
 
   it("tích mới → paid:true; tích + ảnh trong MỘT lệnh; baseVersion = version của dòng", () => {
-    expect(thanKhoanChi(dong(), { paid: true }, DU_QUYEN)).toEqual({ baseVersion: 3, paid: true });
-    expect(thanKhoanChi(dong({ version: 0 }), { paid: true, anhMoi: ANH }, DU_QUYEN)).toEqual({ baseVersion: 0, paid: true, paidProof: ANH });
+    expect(thanKhoanChi(dong(), { paid: true }, DU_QUYEN)).toEqual({ baseVersion: 3, paid: true, paidMethod: "chuyen-khoan" });
+    expect(thanKhoanChi(dong({ version: 0 }), { paid: true, anhMoi: ANH }, DU_QUYEN)).toEqual({ baseVersion: 0, paid: true, paidMethod: "chuyen-khoan", paidProof: ANH });
   });
 
   it("BỎ tích → đúng {paid:false}: không kèm ảnh mới, không kèm paidProof:null (máy chủ tự rút ảnh hiện tại)", () => {
@@ -80,7 +80,7 @@ describe("thanKhoanChi — CHỈ trường đã đổi + baseVersion", () => {
   it("quyền THEO TRƯỜNG: thiếu invoice:input:pay thì tích / ảnh không vào thân; thiếu invoice:edit thì ngày / ghi chú không vào", () => {
     const n: NhapKhoanChi = { paid: true, anhMoi: ANH, invoiceDate: "2026-10-05", accountingNote: "x" };
     expect(thanKhoanChi(dong(), n, { canPay: false, canEdit: true })).toEqual({ baseVersion: 3, invoiceDate: "2026-10-05", accountingNote: "x" });
-    expect(thanKhoanChi(dong(), n, { canPay: true, canEdit: false })).toEqual({ baseVersion: 3, paid: true, paidProof: ANH });
+    expect(thanKhoanChi(dong(), n, { canPay: true, canEdit: false })).toEqual({ baseVersion: 3, paid: true, paidMethod: "chuyen-khoan", paidProof: ANH });
     expect(thanKhoanChi(dong(), n, { canPay: false, canEdit: false })).toBeNull();
   });
 

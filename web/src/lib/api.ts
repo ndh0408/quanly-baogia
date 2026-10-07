@@ -124,6 +124,8 @@ export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: n
 // kế toán ngay trên trang này (bảng riêng InputInvoiceEntry). `paid`/`paidAt` là trạng thái HIỆU LỰC (khoản thắng cờ
 // JSON cũ). `version` là mốc khoá lạc quan của RIÊNG khoản — gửi lại làm `baseVersion` khi ghi.
 export type PhiaKhoanChi = "sheet" | "hn";
+/** Hình thức chi (máy chủ src/khoanChi.ts HinhThucChi) — tiền mặt không có ủy nhiệm chi, ảnh phiếu chi không bắt buộc. */
+export type HinhThucChi = "chuyen-khoan" | "tien-mat";
 export type TrangThaiHangDauVao = "binh-thuong" | "chua-duyet" | "hn-chua-duyet" | "khong-con-hang" | "bao-gia-da-xoa";
 export type AnhChungTuMeta = {
   id: number; uploadedAt: string | null; uploadedByName: string | null;
@@ -140,6 +142,8 @@ export type KhoanChiDto = {
   key: string; quoteId: number; side: PhiaKhoanChi; rid: string;
   version: number;
   paid: boolean; paidAt: string | null; paidByName: string | null; hasPaidProof: boolean;
+  /** Hình thức HIỆU LỰC: null khi chưa chi; khoản cũ = 'chuyen-khoan'. Vắng (máy chủ cũ) = chuyển khoản. */
+  paidMethod?: HinhThucChi | null;
   /** Hóa đơn VAT hiện tại — ĐỘC LẬP với đã chi (máy chủ cũ không gửi → coi như chưa có). */
   hasVatProof?: boolean; vatProofAt?: string | null; vatProofByName?: string | null;
   proofs: AnhChungTuMeta[];
@@ -155,6 +159,8 @@ export type KhoanChiDto = {
 /** Trạng thái CHỈ XEM một hàng (máy chủ src/khoanChi.ts khoanXemTheoRid) — không ảnh, chỉ cờ. */
 export type DaChiHang = {
   rid: string; paidAt: string | null; paidByName: string | null; coAnh: boolean;
+  /** Hình thức của hàng đã chi — vắng / null = chuyển khoản (cờ JSON cũ, máy chủ cũ). */
+  paidMethod?: HinhThucChi | null;
   /** Vắng = true (phần tử của `sheet`/`hn` luôn là hàng ĐÃ CHI); false = hàng chưa chi mà đã có HĐ VAT (`vatChuaChi`). */
   paid?: boolean;
   /** Đã có hóa đơn VAT + lúc đưa lên. */
@@ -186,6 +192,8 @@ export type InputInvoicesResp = { data: InputInvoiceRow[]; meta: { quotes: numbe
 export type ThanKhoanChi = {
   baseVersion: number;
   paid?: boolean;
+  /** Hình thức chi — gửi kèm khi tích mới, hoặc một mình khi đổi hình thức khoản đã chi. Không có `null` (bỏ tích tự xoá). */
+  paidMethod?: HinhThucChi;
   paidProof?: string | null;
   /** Hóa đơn VAT: data-URL ảnh / PDF mới; `null` = gỡ (rút vào lịch sử). */
   vatProof?: string | null;
