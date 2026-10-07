@@ -3,7 +3,10 @@
 // ĐÃ ĐO (audit): tệp 6,7 MB, 20.000 dòng × 150 cột = 3 triệu ô lọt inspectXlsx (79 MB, 20k dòng),
 // đốt 14 s CPU rồi worker chết ERR_WORKER_OUT_OF_MEMORY → 422 "Không đọc được file Excel: Worker
 // terminated due to reaching memory limit: JS heap out of memory".
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+// Bài này dựng rồi đọc một xlsx RẤT nhiều cột thật. Dưới tải của verify đầy đủ trên Windows quá 20s (đỏ ở hai lượt
+// verify 2026-10-07 lúc có tiến trình test khác chạy song song; chạy riêng xanh) — đỏ vì hết giờ chứ không vì sai.
+vi.setConfig({ testTimeout: 90_000 });
 import JSZip from "jszip";
 import { inspectXlsx, _TRAN_O_THAT_TEST as TRAN_O } from "../src/zipSafety.js";
 import { _loiTuWorkerNhap } from "../src/routes/import.routes.js";
