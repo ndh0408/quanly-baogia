@@ -157,6 +157,16 @@ const ICON: Record<string, ReactNode> = {
   profile: <svg {...S}><circle cx="12" cy="8" r="3.4" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>,
 };
 
+// ẨN MENU TRÁI ở màn rộng (chủ repo 2026-10-07: "thêm nút ẩn tắt cái menu" — Nhân sự, Quản lý dự án, Hóa đơn, lưới
+// báo giá đang cuộn ngang trong khi menu giữ 248px). Nhớ THEO MÁY chứ không theo tài khoản: đó là sở thích của cái
+// màn hình đang ngồi. Màn hẹp (≤920px) có drawer riêng (`sbOpen`) — cờ này không áp ở đó (CSS bọc trong @media màn
+// rộng, phím tắt bỏ qua) để hai cơ chế không giành nhau một thanh menu.
+const KHOA_AN_MENU = "quanly:anMenu";
+const docAnMenu = () => { try { return localStorage.getItem(KHOA_AN_MENU) === "1"; } catch { return false; } };
+const ghiAnMenu = (an: boolean) => { try { localStorage.setItem(KHOA_AN_MENU, an ? "1" : "0"); } catch { /* bộ nhớ bị chặn: chỉ nhớ tới lần tải lại */ } };
+// Cùng mốc với `@media (max-width: 920px)` (drawer) của public/style.css. jsdom không có matchMedia → coi là màn rộng.
+const laManHep = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 920px)").matches;
+
 // Đọc DOM (main.tsx đã set data-theme cả khi theo OS) — trước đây đọc localStorage nên user
 // dark-theo-OS thấy icon sai và bấm lần đầu bị chuyển ngược.
 const themeIcon = () => (document.documentElement.getAttribute("data-theme") === "dark" ? "☀️" : "🌙");
@@ -362,6 +372,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   const [theme, setTheme] = useState(themeIcon());
   const [sbOpen, setSbOpen] = useState(false); // drawer mobile
   const [unread, setUnread] = useState(0);
+  const [anMenu, setAnMenu] = useState(docAnMenu);   // menu trái ẩn (màn rộng) — xem KHOA_AN_MENU
+  const timSauKhiHien = useRef(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const drawerWasOpen = useRef(false);
   // Drawer mobile: mở → focus ô tìm trong sidebar; đóng → trả focus về nút ☰ (không cướp focus lúc mount).
@@ -369,6 +381,27 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
     if (sbOpen) { drawerWasOpen.current = true; document.getElementById("gs-input")?.focus(); }
     else if (drawerWasOpen.current) { drawerWasOpen.current = false; menuBtnRef.current?.focus(); }
   }, [sbOpen]);
+
+  // Ctrl/⌘+B ẩn/hiện menu — không chỗ nào khác trong app dùng B (kể cả lưới báo giá), và là phím quen của VS Code.
+  // Ctrl/⌘+K lúc menu đang ẩn: ô tìm nằm TRONG menu, display:none thì focus() của GlobalSearch trượt im — nên hiện
+  // menu ra rồi mới đặt con trỏ vào ô tìm (effect dưới).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.isComposing || laManHep()) return;
+      const k = e.key.toLowerCase();
+      if (k === "b" && !e.shiftKey) { e.preventDefault(); if (!e.repeat) setAnMenu(!anMenu); }
+      else if (k === "k" && anMenu) { timSauKhiHien.current = true; setAnMenu(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anMenu]);
+  useEffect(() => {
+    ghiAnMenu(anMenu);
+    if (anMenu || !timSauKhiHien.current) return;
+    timSauKhiHien.current = false;
+    const o = document.getElementById("gs-input") as HTMLInputElement | null;
+    o?.focus(); o?.select();
+  }, [anMenu]);
 
   const refreshBadge = () => { api.unreadCount().then((r) => setUnread(r.count || 0)).catch(() => {}); };
 
@@ -499,18 +532,27 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   return (
     <>
       <a href="#main" className="skip-link">Bỏ qua tới nội dung</a>
-      <div className="shell">
+      <div className={`shell${anMenu ? " sb-thu-gon" : ""}`}>
         <header className="mobile-topbar" role="banner">
           <button ref={menuBtnRef} className="icon-btn" aria-label="Mở menu" aria-expanded={sbOpen} onClick={() => setSbOpen(true)}>☰</button>
           <span className="mt-title">{active?.label ?? (isEditor || quotesM ? "Báo giá" : "Quản Lý")}</span>
           <button className="icon-btn" aria-label="Đổi giao diện sáng/tối" onClick={onTheme}>{theme}</button>
         </header>
         <div className={`sidebar-backdrop${sbOpen ? " show" : ""}`} onClick={() => setSbOpen(false)} />
-        <aside className={`sidebar${sbOpen ? " open" : ""}`} id="sidebar">
+        <aside className={`sidebar${sbOpen ? " open" : ""}${anMenu ? " thu-gon" : ""}`} id="sidebar">
+          {/* MỘT nút cho cả hai chiều: menu hiện → mấu tròn trên mép phải menu (đầu menu không còn chỗ cho nút thứ ba —
+              đo: thêm 34px là tên công ty bị cắt); menu ẩn → nút ☰ trên dải 48px còn lại. Cùng phần tử nên tiêu điểm
+              bàn phím ở lại trên nút sau khi bấm. Màn hẹp giấu nút này (drawer có ☰ riêng ở thanh đầu trang). */}
+          <button type="button" className="sb-an-hien" aria-expanded={!anMenu} aria-keyshortcuts="Control+B Meta+B"
+                  aria-label={anMenu ? `Hiện menu${unread > 0 ? ` — ${unread} thông báo chưa đọc` : ""}` : "Ẩn menu"}
+                  title={anMenu ? "Hiện menu (Ctrl+B)" : "Ẩn menu cho bảng rộng thêm (Ctrl+B)"} onClick={() => setAnMenu(!anMenu)}>
+            {anMenu ? "☰" : "«"}
+            {anMenu && unread > 0 && <span className="sb-an-hien-cham" aria-hidden="true" />}
+          </button>
           <div className="sb-head">
             <div className="sb-brand">
               <div className="sb-logo" aria-hidden="true">GN</div>
-              <div><h2>Quản Lý</h2><div className="org">Gia Nguyễn · nội bộ</div></div>
+              <div className="sb-brand-chu"><h2>Quản Lý</h2><div className="org" title="Gia Nguyễn · nội bộ">Gia Nguyễn · nội bộ</div></div>
             </div>
             <button className="icon-btn" aria-label="Đổi giao diện sáng/tối" title="Sáng / Tối" onClick={onTheme}>{theme}</button>
           </div>
@@ -522,17 +564,19 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
                 {visible.filter((n) => n.group === g).map((n) => (
                   <a key={n.key} className={key === n.key ? "active" : ""} href={`#/${n.key}`} {...(key === n.key ? { "aria-current": "page" as const } : {})}
                      onClick={async (e) => { e.preventDefault(); if (await guardLeave()) location.hash = `#/${n.key}`; }}>
-                    {ICON[n.key]}<span>{n.label}</span>
+                    {ICON[n.key]}<span title={n.label}>{n.label}</span>
                     {n.key === "notifications" && unread > 0 && <span className="badge-num" aria-label={`${unread} chưa đọc`}>{unread}</span>}
                   </a>
                 ))}
               </div>
             ))}
           </nav>
+          {/* Username thường là EMAIL — chữ liền không ngắt được, bản trước tràn khỏi menu sang trang. Cắt bằng … (CSS),
+              đủ chữ ở title khi rê chuột. */}
           <div className="who">
-            <strong>{me.displayName}</strong>
-            <span>@{me.username}</span><br />
-            <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
+            <strong className="who-ten" title={me.displayName}>{me.displayName}</strong>
+            <span className="who-tk" title={`@${me.username}`}>@{me.username}</span>
+            <span className="role-pill" title={ROLE_LABEL[me.role] ?? me.role}>{ROLE_LABEL[me.role] ?? me.role}</span>
             <PhienBanChanMenu />
             {/* FE-05: chỉ nạp lại khi máy chủ đã huỷ phiên — lỗi mạng thì nói thật là CHƯA thoát. */}
             <button className="logout" onClick={async () => { if (!(await guardLeave())) return; if (!(await dangXuat(() => api.logout()))) { toast("Chưa đăng xuất được — kiểm tra mạng rồi thử lại", "error"); return; } xoaMoiBanNhap(); quenGoiYMoSoan(); phatDangXuat(); location.reload(); }}>Đăng xuất</button>
