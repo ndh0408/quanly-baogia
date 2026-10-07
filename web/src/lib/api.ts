@@ -170,7 +170,11 @@ export type DaChiHang = {
 };
 export type DaChiBaoGiaResp = { quoteId: number; sheet: DaChiHang[]; hn: DaChiHang[]; vatChuaChi?: { sheet: DaChiHang[]; hn: DaChiHang[] } };
 /** Chứng từ HIỆN TẠI của một hàng, xem từ bảng nội bộ (GET /quotes/:id/khoan-chi/:side/:rid/anh). */
-export type ChungTuNoiBo = { dataUrl: string; mime: string | null; loai: "chi" | "vat"; uploadedAt: string | null; uploadedByName: string | null };
+export type ChungTuNoiBo = {
+  dataUrl: string; mime: string | null; loai: "chi" | "vat"; uploadedAt: string | null; uploadedByName: string | null;
+  /** Hình thức hiệu lực của khoản (ảnh `chi`): tiền mặt → ảnh là PHIẾU CHI. Vắng (máy chủ cũ) / null = chuyển khoản. */
+  paidMethod?: HinhThucChi | null;
+};
 export type InputInvoiceRow = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "side"> & {
   /** `quoteId:side:rid` khi hàng có rid duy nhất; hàng thiếu / trùng rid: khoá theo vị trí và `coTheGhi = false`. */
   key: string;

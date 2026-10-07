@@ -620,8 +620,15 @@ export async function docAnhKhoanChi(req: Request): Promise<KetQuaAnh> {
  * đoán mò là 404 — không có đường nào đọc tệp của hàng mà người gọi không nhìn thấy. Ảnh ủy nhiệm chi chỉ khi hàng ĐANG đã
  * chi (trạng thái hiệu lực); hàng chưa có khoản đọc dự phòng ảnh JSON cũ của đúng bản đầu. Mỗi lần xem ghi nhật ký
  * `quote.internal.proof-view` (`noiBo: true`), không chép ảnh.
+ *
+ * Ảnh của khoản TIỀN MẶT là ảnh PHIẾU CHI, không phải ủy nhiệm chi (chủ repo 2026-10-07): câu lỗi và `paidMethod` trả về theo
+ * hình thức HIỆU LỰC của khoản, để hộp xem (web/src/components/XemChungTu.tsx) đặt đúng tên tờ giấy.
  */
-export async function docChungTuNoiBo(req: Request): Promise<{ dataUrl: string; mime: string | null; loai: LoaiChungTu; uploadedAt: string | null; uploadedByName: string | null }> {
+export async function docChungTuNoiBo(req: Request): Promise<{
+  dataUrl: string; mime: string | null; loai: LoaiChungTu; uploadedAt: string | null; uploadedByName: string | null;
+  /** Hình thức hiệu lực của khoản (`loai=chi`) — null với hóa đơn VAT. */
+  paidMethod: HinhThucChi | null;
+}> {
   const side = String(req.params.side) as PhiaKhoanChi;
   const rid = String(req.params.rid).trim();
   const loai: LoaiChungTu = laLoaiVat(req.query.loai) ? "vat" : "chi";
@@ -637,14 +644,15 @@ export async function docChungTuNoiBo(req: Request): Promise<{ dataUrl: string; 
     if (!k.phia.includes(side)) throw httpError(403, "Bạn không có quyền xem chứng từ của phần này");
     quoteId = k.id; q = k.q;
   }
-  const khongThay = () => loiCoMa(404, "khong-thay-anh", loai === "vat" ? "Dòng này chưa có hóa đơn VAT" : "Dòng này chưa có ảnh ủy nhiệm chi");
-
   const hang = [...hangCuaPhia(side, await bangCuaPhia(prisma, quoteId, side))].find((h) => typeof h.it.rid === "string" && h.it.rid.trim() === rid);
   if (!hang) throw loiCoMa(404, "khong-thay-hang", "Không tìm thấy dòng này trong báo giá");
   if (!duocXemChungTu(req, q, side === "hn" ? "hanoi" : typeof hang.t.category === "string" ? hang.t.category : null)) {
     throw loiCoMa(403, "khong-xem-chung-tu", "Chỉ quản trị, chủ báo giá, kế toán và người được giao phần này mới xem được chứng từ thanh toán.");
   }
-  const e = await prisma.inputInvoiceEntry.findUnique({ where: { quoteId_side_rid: { quoteId, side, rid } }, select: { id: true, paid: true, paidAt: true, paidById: true, paidByName: true, currentProofId: true, currentVatProofId: true } });
+  const e = await prisma.inputInvoiceEntry.findUnique({ where: { quoteId_side_rid: { quoteId, side, rid } }, select: { id: true, paid: true, paidAt: true, paidById: true, paidByName: true, paidMethod: true, currentProofId: true, currentVatProofId: true } });
+  const hinhThuc = loai === "chi" ? hinhThucHieuLuc(trangThaiHieuLuc(e, hang.it).paid, e?.paidMethod) : null;
+  const khongThay = () => loiCoMa(404, "khong-thay-anh",
+    loai === "vat" ? "Dòng này chưa có hóa đơn VAT" : hinhThuc === "tien-mat" ? "Dòng này chưa có ảnh phiếu chi" : "Dòng này chưa có ảnh ủy nhiệm chi");
 
   let tep: { id: number | null; dataUrl: string; mime: string | null; uploadedAt: Date | null; uploadedByName: string | null } | null = null;
   let nguon: "bang" | "json-cu" = "bang";
@@ -668,5 +676,5 @@ export async function docChungTuNoiBo(req: Request): Promise<{ dataUrl: string; 
   }
   if (!tep) throw khongThay();
   await audit(req, "quote.internal.proof-view", { resource: "quote", resourceId: quoteId, after: { side, rid, proofId: tep.id, nguon, loai, noiBo: true } });
-  return { dataUrl: tep.dataUrl, mime: tep.mime, loai, uploadedAt: tep.uploadedAt ? tep.uploadedAt.toISOString() : null, uploadedByName: tep.uploadedByName };
+  return { dataUrl: tep.dataUrl, mime: tep.mime, loai, uploadedAt: tep.uploadedAt ? tep.uploadedAt.toISOString() : null, uploadedByName: tep.uploadedByName, paidMethod: hinhThuc };
 }

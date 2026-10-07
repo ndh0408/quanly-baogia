@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type PhiaKhoanChi } from "../lib/api";
+import { api, ApiError, type HinhThucChi, type PhiaKhoanChi } from "../lib/api";
 import { useEscClose } from "../lib/ui";
 import { fmtDateTime } from "../lib/format";
 import { anhHienDuoc, laPdfDataUrl } from "../lib/khoanChi";
@@ -14,8 +14,14 @@ import { anhHienDuoc, laPdfDataUrl } from "../lib/khoanChi";
 
 export type LoaiChungTu = "chi" | "vat";
 export const NHAN_LOAI_CHUNG_TU: Record<LoaiChungTu, string> = { chi: "Ảnh ủy nhiệm chi", vat: "Hóa đơn VAT" };
+/**
+ * Tên tờ chứng từ theo LOẠI + HÌNH THỨC (chủ repo 2026-10-07): ảnh của khoản TIỀN MẶT là "Ảnh phiếu chi" — không có ủy nhiệm
+ * chi nào cả. Chuyển khoản / vắng (khoản cũ, máy chủ cũ) → "Ảnh ủy nhiệm chi" như trước.
+ */
+export const nhanChungTu = (loai: LoaiChungTu, hinhThuc?: HinhThucChi | null): string =>
+  loai === "chi" && hinhThuc === "tien-mat" ? "Ảnh phiếu chi" : NHAN_LOAI_CHUNG_TU[loai];
 
-type TrangThai = { k: "dang-tai" } | { k: "loi"; loi: string } | { k: "xong"; src: string; pdf: boolean; luc: string | null; boi: string | null };
+type TrangThai = { k: "dang-tai" } | { k: "loi"; loi: string } | { k: "xong"; src: string; pdf: boolean; luc: string | null; boi: string | null; hinhThuc?: HinhThucChi | null };
 
 /** data-URL PDF → blob URL (để tải về). Không có URL.createObjectURL (jsdom) → "" (nút tải ẩn). */
 function blobTuPdf(dataUrl: string): string {
@@ -42,10 +48,12 @@ export function TaiPdf({ dataUrl, tenTep }: { dataUrl: string; tenTep: string })
   return <p className="xem-ct-pdf">📄 Hóa đơn dạng PDF.{" "}{blob ? <a className="btn btn-sm" href={blob} download={tenTep}>Tải PDF</a> : null}</p>;
 }
 
-export function XemChungTu({ quoteId, side, rid, loai, tenHang, onDong }: {
+export function XemChungTu({ quoteId, side, rid, loai, tenHang, hinhThuc, onDong }: {
   quoteId: number; side: PhiaKhoanChi; rid: string; loai: LoaiChungTu;
   /** Tên hàng — cho tiêu đề hộp. */
   tenHang?: string;
+  /** Hình thức của khoản theo cột Thanh toán lúc bấm — đặt tên ngay từ lúc đang tải; máy chủ trả lại bản chắc chắn. */
+  hinhThuc?: HinhThucChi | null;
   onDong: () => void;
 }) {
   const [tt, setTt] = useState<TrangThai>({ k: "dang-tai" });
@@ -62,7 +70,7 @@ export function XemChungTu({ quoteId, side, rid, loai, tenHang, onDong }: {
       if (!conSong.current || lan !== luot.current) return;
       const pdf = laPdfDataUrl(r?.dataUrl);
       const src = pdf ? (r.dataUrl as string) : anhHienDuoc(r?.dataUrl);
-      setTt({ k: "xong", src, pdf, luc: r?.uploadedAt ?? null, boi: r?.uploadedByName ?? null });
+      setTt({ k: "xong", src, pdf, luc: r?.uploadedAt ?? null, boi: r?.uploadedByName ?? null, hinhThuc: r?.paidMethod });
     }).catch((ex) => {
       if (!conSong.current || lan !== luot.current) return;
       setTt({ k: "loi", loi: ex instanceof ApiError ? ex.message : "Không tải được chứng từ — kiểm tra mạng rồi thử lại." });
@@ -74,7 +82,8 @@ export function XemChungTu({ quoteId, side, rid, loai, tenHang, onDong }: {
   useEffect(() => { tai(); }, [tai]);
   useEffect(() => { dongRef.current?.focus(); }, []);
 
-  const nhan = NHAN_LOAI_CHUNG_TU[loai];
+  // Máy chủ (đọc đúng lúc mở) thắng cột Thanh toán đã nạp từ trước — kế toán có thể vừa đổi hình thức.
+  const nhan = nhanChungTu(loai, tt.k === "xong" && tt.hinhThuc !== undefined ? tt.hinhThuc : hinhThuc);
   return (
     <div className="modal-backdrop xem-ct-nen" onClick={(e) => { if (e.target === e.currentTarget) dong(); }}
          onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>

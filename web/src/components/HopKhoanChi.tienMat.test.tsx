@@ -6,12 +6,15 @@
 //   · Ô Kế toán ở trang Hóa đơn đầu vào: "✓ Đã chi · tiền mặt · <ngày>", KHÔNG "⚠ chưa có ảnh"; chuyển khoản + khoản cũ như trước.
 //   · Cột Thanh toán chỉ-xem của bảng nội bộ: "✓ Đã TT tiền mặt <ngày>" (VAT: "… · chưa VAT"); khoản cũ như trước.
 //   · Bộ lọc "Đã TT · tiền mặt / chuyển khoản", tìm "tiền mặt"; Nhật ký đọc "Hình thức chi: Chuyển khoản → Tiền mặt".
+//   · Hộp xem chứng từ từ bảng nội bộ (XemChungTu): khoản tiền mặt → "Ảnh phiếu chi", chuyển khoản / khoản cũ → "Ảnh ủy nhiệm chi";
+//     máy chủ (đọc lúc mở) thắng cột Thanh toán đã nạp.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const h = vi.hoisted(() => ({ ghi: vi.fn(), anh: vi.fn(), resp: null as unknown }));
+const h = vi.hoisted(() => ({ ghi: vi.fn(), anh: vi.fn(), xem: vi.fn(), resp: null as unknown }));
+vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("../lib/venueCatalog")>()), loadCatalog: () => Promise.resolve({ entries: [], venues: [] }) }));
 vi.mock("../lib/ui", async (goc) => ({ ...(await goc<typeof import("../lib/ui")>()), toast: () => {}, confirmModal: async () => true }));
 vi.mock("../lib/api", async (goc) => {
   const that = await goc<typeof import("../lib/api")>();
@@ -19,16 +22,20 @@ vi.mock("../lib/api", async (goc) => {
     inputInvoices: vi.fn(async () => h.resp),
     ghiKhoanChi: h.ghi,
     anhKhoanChi: h.anh,
+    chungTuNoiBo: h.xem,
   } };
 });
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { HopKhoanChi } from "./HopKhoanChi";
 import { OThanhToan } from "./OThanhToan";
+import { XemChungTu, nhanChungTu } from "./XemChungTu";
+import { ExtraTables, type ExtraTable } from "./ExtraTables";
+import { dungMap } from "../lib/daChiHang";
 import { InvoicesInPage, locHang, BO_LOC_RONG } from "../pages/InvoicesIn";
 import { diffRows } from "../pages/Audit";
 import { hinhThucCua, hinhThucGoiY, thanKhoanChi, thieuAnhChungTu, xungDotKhoanChi, giaTriTruong } from "../lib/khoanChi";
-import type { InputInvoiceRow } from "../lib/api";
+import type { EditorTemplate, InputInvoiceRow } from "../lib/api";
 
 const NGAY = "2026-10-06T03:00:00.000Z";
 const dong = (o: Partial<InputInvoiceRow> = {}): InputInvoiceRow => ({
@@ -46,7 +53,7 @@ const DU_QUYEN = { canPay: true, canEdit: true };
 let thung: HTMLDivElement, goc: Root;
 beforeEach(() => {
   thung = document.createElement("div"); document.body.appendChild(thung); goc = createRoot(thung);
-  h.ghi.mockReset(); h.anh.mockReset();
+  h.ghi.mockReset(); h.anh.mockReset(); h.xem.mockReset();
   h.ghi.mockResolvedValue({ row: { key: "9:sheet:r1" } });
 });
 afterEach(() => { act(() => goc.unmount()); thung.remove(); document.body.innerHTML = ""; });
@@ -217,5 +224,61 @@ describe("Nhật ký — đổi hình thức đọc được", () => {
   it("diffRows: paidMethod mã → chữ", () => {
     expect(diffRows({ paidMethod: "chuyen-khoan" }, { paidMethod: "tien-mat" })).toEqual([{ label: "Hình thức chi", from: "Chuyển khoản", to: "Tiền mặt" }]);
     expect(diffRows({ paidMethod: "tien-mat" }, { paidMethod: null })).toEqual([{ label: "Hình thức chi", from: "Tiền mặt", to: "(trống)" }]);
+  });
+});
+
+const ANH = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+const tieuDeHop = () => document.querySelector('[role="dialog"].xem-ct h3')!.textContent;
+const tepXem = (paidMethod: unknown) => ({ dataUrl: ANH, mime: "image/png", loai: "chi", uploadedAt: null, uploadedByName: null, paidMethod });
+
+describe("Hộp xem chứng từ từ bảng nội bộ — tên tờ giấy theo hình thức", () => {
+  it("nhanChungTu: tiền mặt → 'Ảnh phiếu chi'; chuyển khoản / vắng → 'Ảnh ủy nhiệm chi'; HĐ VAT không đổi", () => {
+    expect(nhanChungTu("chi", "tien-mat")).toBe("Ảnh phiếu chi");
+    expect(nhanChungTu("chi", "chuyen-khoan")).toBe("Ảnh ủy nhiệm chi");
+    expect(nhanChungTu("chi", null)).toBe("Ảnh ủy nhiệm chi");
+    expect(nhanChungTu("chi")).toBe("Ảnh ủy nhiệm chi");
+    expect(nhanChungTu("vat", "tien-mat")).toBe("Hóa đơn VAT");
+  });
+
+  it("đang tải: tên theo cột Thanh toán; tải xong: máy chủ thắng (kế toán vừa đổi hình thức); ảnh mang đúng alt", async () => {
+    let tra: (v: unknown) => void = () => {};
+    h.xem.mockReturnValueOnce(new Promise((r) => { tra = r; }));
+    ve(<XemChungTu quoteId={9} side="sheet" rid="r1" loai="chi" tenHang="Nước uống" hinhThuc="tien-mat" onDong={() => {}} />);
+    expect(tieuDeHop()).toBe("Ảnh phiếu chi · Nước uống");
+    expect(document.querySelector('[role="dialog"].xem-ct')!.getAttribute("aria-label")).toBe("Ảnh phiếu chi — Nước uống");
+    await act(async () => { tra(tepXem("chuyen-khoan")); });
+    await cho();
+    expect(tieuDeHop(), "máy chủ báo chuyển khoản").toBe("Ảnh ủy nhiệm chi · Nước uống");
+    expect(document.querySelector<HTMLImageElement>(".xem-ct img")!.alt).toBe("Ảnh ủy nhiệm chi");
+  });
+
+  it("máy chủ cũ không gửi hình thức → giữ tên theo cột Thanh toán; khoản cũ (không hình thức) → 'Ảnh ủy nhiệm chi'", async () => {
+    h.xem.mockResolvedValueOnce({ dataUrl: ANH, mime: "image/png", loai: "chi", uploadedAt: null, uploadedByName: null });
+    ve(<XemChungTu quoteId={9} side="sheet" rid="r1" loai="chi" hinhThuc="tien-mat" onDong={() => {}} />);
+    await cho();
+    expect(tieuDeHop()).toBe("Ảnh phiếu chi");
+    act(() => goc.unmount()); goc = createRoot(thung);
+    h.xem.mockResolvedValueOnce(tepXem(null));
+    ve(<XemChungTu quoteId={9} side="sheet" rid="r1" loai="chi" onDong={() => {}} />);
+    await cho();
+    expect(tieuDeHop()).toBe("Ảnh ủy nhiệm chi");
+  });
+
+  it("lưới bảng nội bộ: bấm 📎 của hàng tiền mặt → hộp 'Ảnh phiếu chi' (hình thức đi từ map của cột Thanh toán)", async () => {
+    h.xem.mockResolvedValue(tepXem("tien-mat"));
+    const MAU = [{ id: 1, code: "gn", name: "GN (không ngày)", companyId: 1, layout: { hasDetail: false, reserveDetail: false, hasDays: false, numberSubsections: false } } as EditorTemplate];
+    const s = { id: 1, templateId: 1, _activeExtra: 0, extraTables: [{ category: "hcm", templateId: 1, name: "B", items: [
+      { kind: "item", rid: "r1", name: "Nước uống", unit: "thùng", quantity: 1, unitPrice: 90000, notes: "", approved: true, chungTu: "TM" },
+    ] }] as unknown as ExtraTable[] };
+    const daChi = dungMap(42, "sheet", { sheet: [{ rid: "r1", paidAt: NGAY, paidByName: "Kế toán Lan", coAnh: true, paidMethod: "tien-mat", xemChungTu: true }], hn: [] });
+    ve(<ExtraTables sheet={s} templates={MAU} companyId={1} editable canApprove onMarkDirty={() => {}} daChi={daChi} />);
+    act(() => { (thung.querySelectorAll(".khoi-sheet-nut")[0] as HTMLButtonElement).click(); });
+    const nut = thung.querySelector<HTMLButtonElement>('td.col-pay button[data-loai="chi"]')!;
+    expect(nut.getAttribute("aria-label")).toBe("Xem ảnh phiếu chi");
+    await act(async () => { nut.click(); });
+    expect(tieuDeHop()).toMatch(/^Ảnh phiếu chi/);
+    await cho();
+    expect(h.xem).toHaveBeenCalledWith(42, "sheet", "r1", "chi");
+    expect(tieuDeHop()).toMatch(/^Ảnh phiếu chi/);
   });
 });

@@ -8,6 +8,8 @@
 //     giá trị lạ / kèm bỏ tích / khoản chưa chi → 400 và không ghi gì; thiếu invoice:input:pay → 403.
 //   · Nhật ký: before/after mang hình thức HIỆU LỰC — đổi hình thức đọc được "chuyen-khoan → tien-mat".
 //   · GET /:id/khoan-chi (cột Thanh toán nội bộ) và GET /input-invoices (trang kế toán) trả hình thức.
+//   · GET /:id/khoan-chi/:side/:rid/anh (xem chứng từ từ bảng nội bộ): câu "chưa có ảnh" theo hình thức (tiền mặt → "ảnh phiếu
+//     chi", chuyển khoản → "ảnh ủy nhiệm chi"), phản hồi mang `paidMethod`; HĐ VAT không đổi.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import bcrypt from "bcryptjs";
 import { readFileSync } from "node:fs";
@@ -182,5 +184,27 @@ describe.runIf(dbAvailable)("hình thức thanh toán của khoản chi — máy
     expect(r2.status).toBe(403);
     expect(await khoan("ck")).toMatchObject({ paid: true, paidMethod: "chuyen-khoan", version: truoc.version });
     expect((await khoan("chua"))?.paidMethod ?? null).toBeNull();
+  });
+
+  it("xem chứng từ từ bảng nội bộ: chưa có ảnh → câu theo hình thức (phiếu chi / ủy nhiệm chi); có ảnh → 200 kèm paidMethod", async () => {
+    const xem = async (rid, loai = "chi") => (await dn(admin)).get(`/api/quotes/${q.id}/khoan-chi/sheet/${rid}/anh?loai=${loai}`);
+    await ghiOk("tm", { paid: true, paidMethod: "tien-mat" });   // tích lại sau khi bỏ tích: ảnh cũ đã rút, chưa có ảnh hiện tại
+    let r = await xem("tm");
+    expect(r.status).toBe(404);
+    expect(r.body).toMatchObject({ code: "khong-thay-anh", error: "Dòng này chưa có ảnh phiếu chi" });
+    r = await xem("ck");
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe("Dòng này chưa có ảnh ủy nhiệm chi");
+    r = await xem("tm", "vat");
+    expect(r.body.error, "HĐ VAT giữ câu cũ").toBe("Dòng này chưa có hóa đơn VAT");
+    await ghiOk("tm", { paidProof: ANH_THAT });
+    await ghiOk("ck", { paidProof: ANH_THAT });
+    r = await xem("tm");
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ loai: "chi", paidMethod: "tien-mat" });
+    r = await xem("ck");
+    expect(r.body).toMatchObject({ loai: "chi", paidMethod: "chuyen-khoan" });
+    await ghiOk("cu", { paidProof: ANH_THAT });
+    expect((await xem("cu")).body.paidMethod, "khoản cột NULL = chuyển khoản").toBe("chuyen-khoan");
   });
 });

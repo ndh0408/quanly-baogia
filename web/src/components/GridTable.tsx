@@ -3190,7 +3190,7 @@ function GridTableInner(props: GridTableProps) {
         </label>
       )}
       {xemCt && daChi?.nguon && (
-        <XemChungTu quoteId={daChi.nguon.quoteId} side={daChi.nguon.side} rid={xemCt.rid} loai={xemCt.loai} tenHang={xemCt.ten} onDong={dongXemCt} />
+        <XemChungTu quoteId={daChi.nguon.quoteId} side={daChi.nguon.side} rid={xemCt.rid} loai={xemCt.loai} tenHang={xemCt.ten} hinhThuc={daChi.get(xemCt.rid)?.paidMethod} onDong={dongXemCt} />
       )}
       {zoom && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Xem ảnh lớn" onClick={() => setZoom(null)}>
