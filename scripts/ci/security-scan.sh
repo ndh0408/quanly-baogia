@@ -238,8 +238,8 @@ if chay_buoc sast && [ "$NHANH" -eq 0 ]; then
   # Vẫn đáng gác, vì vùng mù cục bộ vẫn là vùng mù: luật không thể khớp thứ parser không dựng được
   # cây cú pháp. Ba file mã nguồn hiện có vùng mù, đều vì cú pháp TypeScript hiện đại mà parser của
   # semgrep 1.97 chưa hỗ trợ:
-  #   · src/app.ts:470        — chú thích kiểu trong tham số arrow function
-  #   · src/quoteUtils.ts:65  — toán tử `satisfies` (TS 4.9)
+  #   · src/app.ts:643        — chú thích kiểu trong tham số arrow function
+  #   · src/quoteUtils.ts:119 — toán tử `satisfies` (TS 4.9)
   #   · src/zodErrorMap.ts:14 — kiểu `import("zod").X`
   # KHÔNG viết lại mã ứng dụng cho vừa parser của công cụ quét — đó là để cái đuôi vẫy con chó.
   # Thay vào đó GHIM CON SỐ: file thứ tư xuất hiện là cổng đỏ, và người ta phải nhìn vào nó.

@@ -24,7 +24,11 @@
  * Bản vá thêm ĐƯỜNG digest (khi có `IMAGE_REF`) + cảnh báo rõ khi không có.
  * ============================================================================
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+// Bài này chạy deploy.sh THẬT bằng bash (execFileSync). Trên Windows dưới tải của verify đầy đủ một lượt mất
+// quá 20s (2026-10-07: đỏ hai lượt liền, mỗi lượt một ca khác nhau; chạy riêng xanh 3/3) — đỏ vì hết giờ chứ
+// không vì sai. Trần spawn 60s chặn script treo thật; trần bài 90s = 60s + dư cho dọn dẹp.
+vi.setConfig({ testTimeout: 90_000 });
 import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -86,7 +90,7 @@ function chayDeploy(env) {
       },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 20_000,
+      timeout: 60_000,
     });
   } catch (e) {
     code = e.status ?? 1;
