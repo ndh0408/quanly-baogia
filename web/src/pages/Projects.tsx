@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
 import { fmtMoney, fmtDate, tieuDeHienThi, sheetCode, soMa, statusLabel, dash, Stat, trangKhachTuChoi } from "../lib/format";
+import { laKhongXuat } from "../lib/hoaDonChia";
 
 // Port "Quản lý dự án" (renderProjects) — bê ĐẦY ĐỦ: báo giá ĐÃ CHỐT, mỗi sheet 1 dòng, bảng 23
 // cột theo dõi hóa đơn (Trạng thái: Hóa đơn→Thanh toán→Hoàn tất) + sửa-tại-ô (admin: Số HĐ/Ngày TT/PO/
@@ -20,6 +21,7 @@ type Row = {
   invStatus: string; poNumber: string | null; hnInvoiceNo: string | null; invoiceLink: string | null;
   docSentAt: string | null; docReturnedAt: string | null; hnStatus: string | null;
   invoiceDate: string | null; invoiceCompany: string | null;   // tham chiếu từ trang Hóa đơn
+  khongXuat: boolean;   // kế toán để "Không xuất" (trang Hóa đơn đầu ra) — không tính vào Chưa thanh toán
 };
 
 export function buildRows(quotes: ProjectQuote[]): Row[] {
@@ -39,6 +41,7 @@ export function buildRows(quotes: ProjectQuote[]): Row[] {
         hnInvoiceNo: sh.hnInvoiceNo || null, invoiceLink: sh.invoiceLink || null, docSentAt: sh.docSentAt || null,
         docReturnedAt: sh.docReturnedAt || null, hnStatus: q.hnStatus || null,
         invoiceDate: sh.invoiceDate || null, invoiceCompany: sh.invoiceCompany || null,
+        khongXuat: laKhongXuat(q, sh),
       });
     });
   }
@@ -80,6 +83,8 @@ export function ProjectsPage({ me }: { me: Me }) {
   const sumBaoGia = shown.reduce((s, r) => s + r.baoGia, 0);
   const sumVAT = shown.reduce((s, r) => s + r.thanhTienVAT, 0);
   const paid = shown.reduce((s, r) => s + (r.paidAt ? r.thanhTienVAT : 0), 0);
+  // Chưa thanh toán BỎ sheet "Không xuất" (không xuất hóa đơn thì không đòi tiền); sheet "Để sau" vẫn tính.
+  const chuaTT = shown.reduce((s, r) => s + (!r.paidAt && !r.khongXuat ? r.thanhTienVAT : 0), 0);
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => r.key === key ? { ...r, ...p } : r));
   const sign = async (row: Row, signed: boolean) => {
@@ -119,7 +124,7 @@ export function ProjectsPage({ me }: { me: Me }) {
             <Stat label="Tổng báo giá (trước VAT)" value={fmtMoney(sumBaoGia)} />
             <Stat label="Tổng thành tiền VAT" value={fmtMoney(sumVAT)} />
             <Stat label="Đã thanh toán" value={fmtMoney(paid)} tone="ok" />
-            <Stat label="Chưa thanh toán" value={fmtMoney(sumVAT - paid)} tone={sumVAT - paid > 0 ? "danger" : undefined} />
+            <Stat label="Chưa thanh toán" value={fmtMoney(chuaTT)} tone={chuaTT > 0 ? "danger" : undefined} title="Không tính sheet kế toán để Không xuất hóa đơn" />
           </div>
 
           {shown.length === 0 ? (
@@ -141,7 +146,7 @@ export function ProjectsPage({ me }: { me: Me }) {
                           onKeyDown={(e) => { if (e.key === "Enter") open(e); }}>
                         <td>{r.q.status === "converted" ? <span className={`status ${inv.c}`}>{inv.l}</span> : <span className={`status ${r.q.status}`}>{statusLabel(r.q.status)}</span>}</td>
                         <td title={r.q.title}><strong>{tieuDeHienThi(r.q)}</strong></td>
-                        <td title={r.hangMuc || undefined}>{r.hangMuc || dash}</td>
+                        <td title={r.hangMuc || undefined}>{r.hangMuc || dash}{r.khongXuat && <span className="muted"> · Không xuất HĐ</span>}</td>
                         <td className="num">{fmtMoney(r.baoGia)}</td>
                         <td className="num">{r.hcm ? fmtMoney(r.hcm) : dash}</td>
                         <td className="num">{r.hanoi ? fmtMoney(r.hanoi) : dash}</td>

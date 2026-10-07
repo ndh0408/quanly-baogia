@@ -19,6 +19,7 @@ import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
 import { codeLabel } from "../quoteCode.js";
+import { INVOICE_SHARED_FIELDS, daChiaHoaDon, khoaHoaDon } from "../invoiceSplit.js";
 import { can, canScoped, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
@@ -1490,6 +1491,7 @@ export async function listProjects(req: Request) {
           signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
           poNumber: true, hnInvoiceNo: true, invoiceLink: true, docSentAt: true, docReturnedAt: true,
           invoiceDate: true, paymentMethod: true, orderClosedAt: true, invoiceYear: true, invoiceCompany: true, invoiceDesc: true, invoiceNote: true,
+          invoiceGroup: true, invoiceHold: true,   // chia sheet thành hóa đơn (trang Hóa đơn đầu ra — src/invoiceSplit.ts)
           // Ý kiến khách theo TRANG (FE-09): trang Hoá đơn / Dự án / "Cần xử lý" phải loại trang khách
           // "Không duyệt" khỏi Số tiền, Chưa thu, Tổng — đúng như convertedTotal đã loại. Thiếu cột này
           // thì bộ lọc phía giao diện không có gì để lọc.
@@ -1583,6 +1585,9 @@ export async function listProjects(req: Request) {
           invoiceCompany: sh.invoiceCompany || null,
           invoiceDesc: sh.invoiceDesc || null,
           invoiceNote: sh.invoiceNote || null,
+          // Chia sheet thành hóa đơn: cả báo giá NULL hết = chưa chia (mỗi sheet một hóa đơn) — src/invoiceSplit.ts.
+          invoiceGroup: sh.invoiceGroup ?? null,
+          invoiceHold: sh.invoiceHold ?? null,
           // Trạng thái luồng hoá đơn: "Done" CHỈ khi có CẢ số HĐ + ngày TT; có số HĐ → "Thanh toán"; chưa → "Hoá đơn".
           invStatus: (sh.invoiceNo && sh.paidAt) ? "done" : (sh.invoiceNo ? "payment" : "invoice"),
         };
@@ -1730,11 +1735,34 @@ export async function updateSheetInvoice(req: Request) {
   setStr("paymentMethod"); setStr("invoiceCompany"); setStr("invoiceDesc"); setStr("invoiceNote");
   setDate("invoiceDate"); setDate("orderClosedAt");
   if (req.body.invoiceYear !== undefined) data.invoiceYear = req.body.invoiceYear ? Number(req.body.invoiceYear) : null;
-  const updated = await prisma.quoteSheet.update({
-    where: { id: sheet.id }, data,
-    select: { id: true, invoiceNo: true, paidAt: true },
+  // CHIA SHEET THÀNH HÓA ĐƠN (src/invoiceSplit.ts): sheet thuộc một hóa đơn gom nhiều sheet → trường hóa đơn ghi ĐỒNG LOẠT
+  // lên mọi sheet của hóa đơn đó (một hóa đơn = một số HĐ, một ngày HĐ, một lần thu tiền). Sheet Để sau / Không xuất chưa
+  // phải hóa đơn → không nhận trường hóa đơn (409); số HĐ Hà Nội (hnInvoiceNo) vẫn theo sheet.
+  // Khoá QuoteSheet ORDER BY id như mọi đường ghi khác rồi mới đọc phép chia — một lần chia lại chen giữa không làm
+  // trường hóa đơn rơi vào tập sheet cũ.
+  const { updated, dongLoat } = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${sheet.quoteId} ORDER BY id FOR UPDATE`;
+    const anhEm = await tx.quoteSheet.findMany({ where: { quoteId: sheet.quoteId }, select: { id: true, invoiceGroup: true, invoiceHold: true, custStatus: true } });
+    const chia = daChiaHoaDon(anhEm);
+    const ban = anhEm.find((x) => x.id === sheet.id);
+    const khoa = ban ? khoaHoaDon(ban, chia) : `s:${sheet.id}`;
+    const dataChung: Record<string, any> = {};
+    for (const f of INVOICE_SHARED_FIELDS) if (data[f] !== undefined) dataChung[f] = data[f];
+    if ((khoa === "later" || khoa === "skip") && Object.keys(dataChung).length) {
+      throw httpError(409, khoa === "skip"
+        ? "Sheet này đang để \"Không xuất\" — xếp vào một hóa đơn ở trang Hóa đơn đầu ra trước khi nhập hóa đơn"
+        : "Sheet này đang \"Để sau\" — xếp vào một hóa đơn ở trang Hóa đơn đầu ra trước khi nhập hóa đơn");
+    }
+    // Sheet khách KHÔNG duyệt nằm trong hóa đơn (sale đánh dấu sau khi kế toán chia) không nhận số HĐ: chép sang là nó
+    // hết "bị ẩn" (trangKhachTuChoi chỉ ẩn khi chưa có số HĐ) và tiền của nó nhảy vào hóa đơn ĐÃ xuất.
+    const cung = khoa.startsWith("g:")
+      ? anhEm.filter((x) => khoaHoaDon(x, chia) === khoa && x.id !== sheet.id && x.custStatus !== "rejected").map((x) => x.id)
+      : [];
+    if (cung.length && Object.keys(dataChung).length) await tx.quoteSheet.updateMany({ where: { id: { in: cung } }, data: dataChung });
+    const u = await tx.quoteSheet.update({ where: { id: sheet.id }, data, select: { id: true, invoiceNo: true, paidAt: true } });
+    return { updated: u, dongLoat: cung };
   });
-  await audit(req, "quote.invoice", { resource: "quote", resourceId: sheet.quoteId, after: { sheetId: sheet.id, ...data } });
+  await audit(req, "quote.invoice", { resource: "quote", resourceId: sheet.quoteId, after: { sheetId: sheet.id, ...data, ...(dongLoat.length ? { cungHoaDon: dongLoat } : {}) } });
   const invStatus = (updated.invoiceNo && updated.paidAt) ? "done" : (updated.invoiceNo ? "payment" : "invoice");
   return { id: updated.id, invoiceNo: updated.invoiceNo, paidAt: updated.paidAt, invStatus };
 }

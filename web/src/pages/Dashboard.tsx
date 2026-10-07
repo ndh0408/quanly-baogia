@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api, type Me, type OverviewResp, type RevenuePoint, type TopSaleRow, type ProjectQuote, type ProjectSheet } from "../lib/api";
 import { fmtMoney, fmtPct, sheetCode, soMa, statusLabel, errMsg, trangKhachTuChoi } from "../lib/format";
+import { laKhongXuat } from "../lib/hoaDonChia";
 import { useTrangAnToan } from "../lib/phienBan";
 
 // "Tổng quan" THÔNG MINH: chọn kỳ (7/30/90 ngày · quý · năm) → KPI có xu hướng so kỳ trước,
@@ -229,8 +230,10 @@ export function buildActionItems(projects: ProjectQuote[]): ActCat[] {
       const vatAmt = Math.round(baoGia * Number(p.vatPercent || 0) / 100);
       const amount = baoGia + vatAmt;
       const it: ActItem = { quoteId: p.id, code: sheetCode(p, soMa(sh, i), sheets.length) || "—", hangMuc: sh.name ?? null, customer, amount };
-      if (sh.invoiceNo && !sh.paidAt) B.push(it);                                   // đã xuất HĐ chờ thu tiền (AR)
-      if (sh.signedAt && !sh.invoiceNo) A.push(it);                                 // đã ký, chưa xuất hóa đơn
+      // Sheet "Không xuất" (kế toán, trang Hóa đơn đầu ra) không phải việc xuất HĐ / thu tiền; "Để sau" thì vẫn là.
+      const khongXuat = laKhongXuat(p, sh);
+      if (sh.invoiceNo && !sh.paidAt && !khongXuat) B.push(it);                     // đã xuất HĐ chờ thu tiền (AR)
+      if (sh.signedAt && !sh.invoiceNo && !khongXuat) A.push(it);                   // đã ký, chưa xuất hóa đơn
       if (sh.poNumber && (!sh.docSentAt || !sh.docReturnedAt)) C.push(it);          // có PO, chứng từ chưa hoàn tất
       if (p.hnStatus === "approved" && Number(sh.hanoi || 0) > 0 && !sh.hnInvoiceNo) D.push(it); // HN duyệt, thiếu số HĐ HN
     });

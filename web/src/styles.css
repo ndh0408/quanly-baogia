@@ -2780,6 +2780,40 @@ button.qn-text:hover {
   display: grid;
   gap: 12px;
 }
+/* Chia sheet thành hóa đơn (pages/Invoices.tsx + components/HopChiaHoaDon.tsx). */
+.inv-chia-nut {
+  margin-left: 6px;
+}
+.inv-chia-sheets {
+  font-size: 12px;
+}
+.inv-chia-hop .modal-body {
+  display: grid;
+  gap: 12px;
+}
+.inv-chia-bang select {
+  min-width: 130px;
+}
+.inv-chia-xem ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.inv-chia-nhom {
+  margin-top: 24px;
+}
+.inv-chia-nhom h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+.inv-chia-khong {
+  opacity: 0.6;
+}
+.inv-chia-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+}
 .inv-in-hop-dau {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

@@ -205,6 +205,9 @@ export type ProjectSheet = {
   // Ý kiến khách cho trang này (approved | rejected | null). Máy chủ cần trả kèm trong /quotes/projects —
   // thiếu thì các trang dưới coi như chưa có ý kiến (hành vi cũ). Xem trangKhachTuChoi ở lib/format.
   custStatus?: string | null;
+  // Chia sheet thành hóa đơn (trang Hóa đơn đầu ra): cả báo giá null hết = chưa chia (mỗi sheet một hóa đơn).
+  // invoiceGroup = số hóa đơn (1, 2…); invoiceHold = "later" (Để sau) | "skip" (Không xuất). Xem lib/hoaDonChia.
+  invoiceGroup?: number | null; invoiceHold?: string | null;
 };
 export type ProjectQuote = {
   shortTitle?: string | null;
@@ -678,6 +681,12 @@ export const api = {
     req<ChungTuNoiBo>(`/quotes/${quoteId}/khoan-chi/${side}/${encodeURIComponent(rid)}/anh?loai=${loai}`),
   updateSheetInvoice: (sheetId: number, field: string, val: string | null) =>
     req<unknown>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [field]: val }) }),
+  // Chia sheet thành hóa đơn (kế toán, invoice:edit): liệt kê ĐỦ sheet của báo giá; mọi phần tử {group:null, hold:null} = bỏ chia.
+  chiaHoaDon: (quoteId: number, sheets: { sheetId: number; group: number | null; hold: "later" | "skip" | null }[]) =>
+    req<{ sheets: { sheetId: number; group: number | null; hold: string | null }[] }>(`/quotes/${quoteId}/invoice-split`, { method: "PUT", body: JSON.stringify({ sheets }) }),
+  // Làm lại hóa đơn: gỡ số HĐ + ngày + link khỏi mọi sheet của hóa đơn chứa `sheetId` (giữ ngày thu tiền).
+  lamLaiHoaDon: (quoteId: number, sheetId: number) =>
+    req<{ sheetIds: number[]; invoiceNo: string[] }>(`/quotes/${quoteId}/invoice-redo`, { method: "POST", body: JSON.stringify({ sheetId }) }),
   signSheet: (sheetId: number, signed: boolean) =>
     req<unknown>(`/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) }),
   // (markExtraPay / getExtraProof / markHnPay / getHnProof ĐÃ GỠ 2026-10-06 cùng bốn route /pay · /proof theo báo giá:
