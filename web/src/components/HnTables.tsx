@@ -8,6 +8,7 @@ import { extraTableSum, removeTableFromList, loiXoaBangDaChi, type ExtraTable } 
 import { KhoiSheet } from "./KhoiSheet";
 import type { DaChiTheoRid } from "../lib/daChiHang";
 import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
+import { useGiuHangKhoa } from "../lib/giuHangKhoa";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
 //
@@ -28,6 +29,47 @@ import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
 // như hàng Chi phí HCM / Phí KH; ở đây chỉ hiện đã chi chưa / ngày / ai tích — xem ExtraTables.tsx.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
 
+// ── DUYỆT TỪNG HÀNG (2026-10-06) ─────────────────────────────────────────────────────────────────────
+// Trạng thái hàng do MÁY CHỦ sở hữu (src/hnDuyetHang.ts): "dang-lam" · "cho-duyet" · "da-duyet" · "tra-lai". Cột DUYỆT
+// hiện trạng thái và nút thao tác — mỗi nút gọi máy chủ NGAY (POST /:id/hn/submit|review), không đi qua nút Lưu.
+export type TrangThaiHangHn = "dang-lam" | "cho-duyet" | "da-duyet" | "tra-lai";
+export type ThaoTacHangHn = "gui" | "duyet" | "tra" | "bo-duyet";
+export const NHAN_TRANG_THAI_HN: Record<TrangThaiHangHn, string> = {
+  "dang-lam": "Đang làm", "cho-duyet": "Chờ duyệt", "da-duyet": "✓ Đã duyệt", "tra-lai": "↩ Bị trả",
+};
+type HangHn = { kind?: string; rid?: string | null; trangThaiDuyet?: string | null; lyDoTra?: string | null; approvedAt?: string | null };
+const CAU_TRUC = new Set(["section", "subsection", "info"]);
+export const trangThaiHn = (it: HangHn | null | undefined): TrangThaiHangHn => {
+  const v = it?.trangThaiDuyet;
+  return v === "cho-duyet" || v === "da-duyet" || v === "tra-lai" ? v : "dang-lam";
+};
+/**
+ * Hàng có bị KHOÁ trên màn này không — BẢN SAO luật máy chủ (reconcileTrangThaiHn): đã duyệt khoá với mọi người; đang
+ * chờ duyệt khoá với Account HN (`cheDo` "account") và với người không có quyền duyệt. Máy chủ vẫn là chốt cuối (409).
+ */
+export function hangHnBiKhoa(it: HangHn | null | undefined, cheDo: "chu" | "account", canApprove: boolean): boolean {
+  if (!it || CAU_TRUC.has(String(it.kind))) return false;
+  const tt = trangThaiHn(it);
+  return tt === "da-duyet" || (tt === "cho-duyet" && (cheDo === "account" || !canApprove));
+}
+/** Các hàng tiền (có rid — đã lưu) theo trạng thái — cho nút hàng loạt. */
+export function ridTheoTrangThai(tables: HnTable[], tt: TrangThaiHangHn[]): string[] {
+  return tables.flatMap((x) => (x.items || []) as HangHn[]).filter((it) => !CAU_TRUC.has(String(it.kind)) && it.rid && tt.includes(trangThaiHn(it))).map((it) => String(it.rid));
+}
+/** Bảng HN có thay đổi CHƯA LƯU trên màn này không (cờ gắn vào chính mảng — nạp / lưu lại là mảng mới, cờ tự mất).
+ *  Thao tác duyệt / gửi hàng chạy trên bản MÁY CHỦ: còn sửa dở thì phải Lưu trước, không là duyệt nhầm bản cũ. */
+type CoBan = { _hnBan?: boolean };
+export const hnCoThayDoi = (tables: unknown) => !!(tables as CoBan | null)?._hnBan;
+/** Gộp trạng thái duyệt từng hàng (theo rid) từ bản máy chủ vào bảng đang soạn — khi KHÔNG được thay cả bảng. */
+export function gopTrangThaiHn(dich: HnTable[], nguon: unknown) {
+  const theoRid = new Map<string, Record<string, unknown>>();
+  for (const x of Array.isArray(nguon) ? nguon as HnTable[] : []) for (const it of (x.items || []) as Record<string, unknown>[]) if (typeof it.rid === "string") theoRid.set(it.rid, it);
+  for (const x of dich) for (const it of (x.items || []) as Record<string, unknown>[]) {
+    const m = typeof it.rid === "string" ? theoRid.get(it.rid) : undefined;
+    if (m) for (const k of ["trangThaiDuyet", "approved", "approvedAt", "approvedBy", "lyDoTra"]) it[k] = m[k];
+  }
+}
+
 /** Mẫu cột của một bảng HN: `templateId` của bảng, thiếu thì mẫu đầu của công ty (không có thì mẫu đầu
  *  danh sách). MỘT luật cho lưới, tổng và đường Lưu (QuoteEditor / AccountHnView dọn `days` theo nó — L64). */
 export function mauBangHn(t: { templateId?: number }, templates: EditorTemplate[], companyId?: number): EditorTemplate | undefined {
@@ -36,7 +78,8 @@ export function mauBangHn(t: { templateId?: number }, templates: EditorTemplate[
   return templates.find((x) => x.id === (t.templateId || ds[0]?.id)) || ds[0];
 }
 
-export function HnTables({ tables, templates, companyId, editable, canApprove, onMarkDirty, moMacDinh = false, thanhChung, phuHieu, dieuKhien, daChi }: {
+export function HnTables({ tables, templates, companyId, editable, canApprove, onMarkDirty, moMacDinh = false, thanhChung, phuHieu, dieuKhien, daChi,
+  cheDo = "chu", moCotNoiBo = false, onHanhDong, dangXuLy = false, dongBo }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
   tables: HnTable[];
   templates: EditorTemplate[];
@@ -55,10 +98,31 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
   dieuKhien?: ReactNode;
   /** Trạng thái ĐÃ CHI từng hàng (phía "hn" của useDaChiBaoGia) — cột Thanh toán CHỈ XEM; tích ở trang Hóa đơn đầu vào. */
   daChi?: DaChiTheoRid | null;
+  /** "account" = màn Account HN (hàng đã gửi cũng khoá, nút "Gửi"); "chu" = trình soạn báo giá (nút Duyệt / Trả cho người
+   *  có quyền duyệt). */
+  cheDo?: "chu" | "account";
+  /** Hàng khoá vẫn mở NS · Chứng từ · Lưu kho (người quản lý phần HN — khớp máy chủ). */
+  moCotNoiBo?: boolean;
+  /** Thao tác trạng thái hàng (gọi máy chủ). Vắng = cột Duyệt chỉ hiện trạng thái. */
+  onHanhDong?: (loai: ThaoTacHangHn, rids: string[]) => void;
+  /** Đang gọi máy chủ — tắt các nút của cột Duyệt. */
+  dangXuLy?: boolean;
+  /** Đổi giá trị khi nơi gọi vừa GỘP trạng thái mới từ máy chủ vào `tables` (không thay mảng) — chụp lại các hàng khoá. */
+  dongBo?: unknown;
 }) {
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
-  const onChange = () => { onMarkDirty(); redraw(); };
+  // ── GIỮ HÀNG KHOÁ ─────────────────────────────────────────────────────────────────────────────────
+  // Dán nhiều ô / kéo điền / cắt / Ctrl+Z đè lên hàng khoá → hoàn lại ngay (lib/giuHangKhoa — dùng chung với Chi phí HCM).
+  const { phien: vKhoa, giu: giuHangKhoa } = useGiuHangKhoa({
+    bangs: tables, dongBo, moCotNoiBo,
+    khoa: (it) => hangHnBiKhoa(it as HangHn, cheDo, !!canApprove),
+    thongBao: "Hàng đã duyệt / đã gửi duyệt bị khoá — phần sửa vào hàng đó đã được hoàn lại.",
+  });
+  const danhDau = () => { (tables as unknown as CoBan)._hnBan = true; onMarkDirty(); };
+  const onChange = () => { giuHangKhoa(); danhDau(); redraw(); };   // giữ hàng khoá TRƯỚC khi đánh dấu / vẽ lại
+  const khoa = (it: HangHn) => hangHnBiKhoa(it, cheDo, !!canApprove);
+  const bangCoHangKhoa = (x: HnTable | null) => !!x && (x.items || []).some((it) => khoa(it as HangHn));
   const [active, setActive0] = useState(0);
   const [mo, setMo] = useState(moMacDinh);
   const setActive = (i: number) => { setActive0(i); redraw(); };
@@ -112,6 +176,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
     onChange();
   };
   const xoaBang = async (i: number) => {
+    if (bangCoHangKhoa(tables[i] ?? null)) { toast("Sheet có hàng đã duyệt / đã gửi duyệt — không xoá được. Bỏ duyệt (hoặc chờ trả lại) trước.", "error"); return; }
     // L61 (đợt 3): trả lời hộp treo sau khi editor / màn Account HN đã gỡ = coi như Hủy — không xoá bảng
     // của báo giá đã rời, không gọi mark() của màn đã gỡ (bật cờ `__editorDirty` DÙNG CHUNG trang mới).
     const r = await removeTableFromList(tables as ExtraTable[], i, ai, (tbl) => confirmModal(
@@ -124,6 +189,35 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
     if (!r.removed) return;
     setActive(r.active);
     onChange();
+  };
+
+  /** Ô cột DUYỆT của một hàng: trạng thái + nút (Account HN: Gửi; người có quyền duyệt: Duyệt / Bỏ duyệt / Trả). */
+  const oDuyet = (it: HangHn) => {
+    const tt = trangThaiHn(it);
+    const rid = typeof it.rid === "string" ? it.rid : null;
+    const lam = (loai: ThaoTacHangHn) => { if (rid && onHanhDong && !dangXuLy) onHanhDong(loai, [rid]); };
+    return (
+      <span className="hn-duyet" data-tt={tt}>
+        <span className={`hn-tt hn-tt-${tt}`} title={tt === "tra-lai" && it.lyDoTra ? `Lý do trả: ${it.lyDoTra}` : undefined}>
+          {NHAN_TRANG_THAI_HN[tt]}{tt === "da-duyet" && it.approvedAt ? ` ${M.fmtDate(it.approvedAt)}` : ""}
+        </span>
+        {tt === "tra-lai" && it.lyDoTra ? <span className="hn-ly-do muted"> — {it.lyDoTra}</span> : null}
+        {onHanhDong && !rid ? <span className="muted" title="Hàng mới — bấm Lưu trước rồi mới gửi / duyệt"> · chưa lưu</span> : null}
+        {onHanhDong && rid && cheDo === "account" && (tt === "dang-lam" || tt === "tra-lai") && (
+          <button type="button" className="btn btn-xs hn-nut-gui" disabled={dangXuLy} onClick={() => lam("gui")} title="Gửi hàng này cho chủ báo giá duyệt">Gửi</button>
+        )}
+        {onHanhDong && rid && cheDo === "chu" && canApprove && (
+          <>
+            <label className="ap-wrap"><input name="approved" type="checkbox" checked={tt === "da-duyet"} disabled={dangXuLy}
+              aria-label={tt === "da-duyet" ? "Bỏ duyệt hàng này" : "Duyệt hàng này"}
+              onChange={(e) => lam(e.target.checked ? "duyet" : "bo-duyet")} /> Duyệt</label>
+            {(tt === "cho-duyet" || tt === "da-duyet") && (
+              <button type="button" className="btn btn-xs hn-nut-tra" disabled={dangXuLy} onClick={() => lam("tra")} title="Trả hàng này lại cho Account HN sửa">↩ Trả</button>
+            )}
+          </>
+        )}
+      </span>
+    );
   };
 
   return (
@@ -168,8 +262,8 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
           <div className="extra-table-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
             {/* `key` theo bảng: input uncontrolled (defaultValue) chỉ đọc giá trị lúc MOUNT, nên đổi
                 tab mà không đổi key thì ô tên vẫn hiện tên của bảng trước. */}
-            <input name="tenSheet" key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${ai + 1}`}"`} aria-label="Tên sheet Hà Nội" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onMarkDirty(); }} />
-            {editable && (
+            <input name="tenSheet" key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${ai + 1}`}"`} aria-label="Tên sheet Hà Nội" disabled={!editable || bangCoHangKhoa(t)} title={bangCoHangKhoa(t) ? "Sheet có hàng đã duyệt — tên sheet đi theo khoản chi nên bị khoá" : undefined} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; danhDau(); }} />
+            {editable && !bangCoHangKhoa(t) && (
               <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu:
                 <select name="templateId" value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>
                   {sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -177,11 +271,14 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
               </label>
             )}
           </div>
-          <GridTable key={`hn-${ai}-${t.templateId}-${t._k}`} items={t.items} fxBar
+          <GridTable key={`hn-${ai}-${t.templateId}-${t._k}-${vKhoa}`} items={t.items} fxBar
             clfTheme={!!tplOf(t)?.code?.startsWith("clofull")}   // bảng phụ của báo giá Colorfull phải cùng màu với lưới chính và với tệp Excel
             usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
             editable={editable} internalNote={false} cotNoiBo
-            approveCol={false} canApprove={!!canApprove} payCol daChi={daChi}
+            approveCol canApprove={!!canApprove} payCol daChi={daChi}
+            khoaHang={(it) => khoa(it as HangHn)} moCotNoiBoKhiKhoa={moCotNoiBo}
+            oDuyet={(i) => oDuyet(t.items[i] as unknown as HangHn)}
+            duyetSig={`${cheDo}|${!!onHanhDong}|${dangXuLy}`}
             groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
             sheetTotalLine={false}
             dock={thanhChung ? thanhChung.dock : undefined}

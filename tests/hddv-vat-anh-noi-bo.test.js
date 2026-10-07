@@ -275,6 +275,11 @@ describe.runIf(dbAvailable)("HĐ VAT của khoản chi + xem chứng từ từ b
     await ghiOk("sheet", "xoa", { vatProof: ANH_THAT });
     const e = await khoan("sheet", "xoa");
     expect(e.version).toBeGreaterThan(e0.version ?? -1);
+    // Từ 2026-10-06 hàng HCM ĐÃ DUYỆT không ai xoá được (409 'hang-hcm-da-khoa') — người duyệt bỏ tích trước (mô phỏng ở CSDL).
+    for (const s of await prisma.quoteSheet.findMany({ where: { quoteId: q.id } })) {
+      if (!Array.isArray(s.extraTables)) continue;
+      await prisma.quoteSheet.update({ where: { id: s.id }, data: { extraTables: s.extraTables.map((t) => ({ ...t, items: (t.items || []).map((it) => (it.rid === "xoa" ? { ...it, approved: false } : it)) })) } });
+    }
     const qq = await prisma.quote.findFirst({ where: { id: q.id }, include: { sheets: { orderBy: [{ order: "asc" }, { id: "asc" }], include: { items: { orderBy: { order: "asc" } } } } } });
     const than = {
       baseUpdatedAt: qq.updatedAt.toISOString(),

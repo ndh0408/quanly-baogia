@@ -5,7 +5,7 @@ import { toast, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { extraTableSum } from "../components/ExtraTables";
-import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
+import { HnTables, mauBangHn, hnCoThayDoi, ridTheoTrangThai, type HnTable, type ThaoTacHangHn } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { coSauNhapExcel, tbNhapTuBatNhom } from "../lib/khoaThanhTienNhom";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap } from "../lib/localDraft";
@@ -26,7 +26,8 @@ import { useDaChiBaoGia } from "../lib/daChiHang";
 
 let _templates: EditorTemplate[] | null = null;
 type WinDirty = Window & { __editorDirty?: boolean };
-const STATUS: Record<string, string> = { assigned: "Đang làm", submitted: "Đã gửi — chờ quản lý duyệt", approved: "✓ Đã duyệt", rejected: "↩ Bị trả lại" };
+// Trạng thái CẢ PHẦN nay chỉ là TÓM TẮT các hàng (2026-10-06 — duyệt từng hàng, src/hnDuyetHang.ts).
+const STATUS: Record<string, string> = { assigned: "Đang làm", submitted: "Có hàng chờ quản lý duyệt", approved: "✓ Đã duyệt hết", rejected: "↩ Có hàng bị trả lại" };
 
 export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: number }) {
   const qRef = useRef<QuoteFull | null>(null);
@@ -93,6 +94,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   // app#15: bản sao của `saving` cho closure cũ (hàm onApply mà ImportExcelModal giữ khi chờ hộp xác nhận).
   const savingRef = useRef(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [dangXuLy, setDangXuLy] = useState(false);
 
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; } };
@@ -139,7 +141,8 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       // không đọc / hỏi / ghi / xoá bản nháp. Khoá null thì mark, ghiNhapNgay, save đều tự bỏ qua.
       const khoa = isPreviewMode() ? null : khoaBanNhap(`hn${quoteId}`, meId);
       const moc = String((q as { hnRev?: string }).hnRev ?? (q as { updatedAt?: string }).updatedAt ?? "");
-      const suaDuoc = !q.hnStatus || ["assigned", "rejected"].includes(String(q.hnStatus));
+      // Duyệt TỪNG HÀNG: phần HN luôn làm tiếp được (hàng đã gửi / đã duyệt khoá riêng) — bản nháp luôn khôi phục được.
+      const suaDuoc = true;
       let khoiPhuc = false;
       // X1: hỏi bản nháp THƯỜNG trước, bản giữ lại ':xungdot' sau (cùng thứ tự với QuoteEditor). Bản giữ
       // lại nay sống qua nhiều phiên (Hủy không xoá nó); hỏi nó trước rồi `else if` chặn bản nháp thường
@@ -192,7 +195,19 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   const q = qRef.current as QuoteFull & { hnStatus?: string; hnRejectNote?: string; companyName?: string; updatedAt?: string; hnRev?: string };
   const hnTables = q.hnTables as HnTable[];
   const hnStatus = q.hnStatus || "assigned";
-  const editable = !q.hnStatus || ["assigned", "rejected"].includes(q.hnStatus);
+  // Không còn khoá CẢ PHẦN: hàng đã gửi / đã duyệt khoá riêng trong lưới (HnTables cheDo "account") và ở máy chủ.
+  const editable = true;
+  const soChuaGui = ridTheoTrangThai(hnTables, ["dang-lam", "tra-lai"]).length;
+  const soChoDuyet = ridTheoTrangThai(hnTables, ["cho-duyet"]).length;
+  /** Gửi duyệt TỪNG HÀNG (nút "Gửi" trong cột Duyệt). Máy chủ gửi bản ĐÃ LƯU — còn sửa dở thì Lưu trước. */
+  const guiHang = async (loai: ThaoTacHangHn, rids: string[]) => {
+    if (loai !== "gui" || dangXuLy) return;
+    if (dirtyRef.current || hnCoThayDoi(hnTables)) { toast("Còn thay đổi chưa lưu — bấm 💾 Lưu trước rồi gửi hàng", "info"); return; }
+    setDangXuLy(true);
+    try { await api.submitHn(q.id, rids); if (!songRef.current) return; toast("Đã gửi duyệt hàng này", "success"); await load(); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi gửi duyệt", "error"); }
+    finally { setDangXuLy(false); }
+  };
 
   const tplList0 = templates.filter((x) => x.companyId === q.companyId);
   const tplList = tplList0.length ? tplList0 : templates;
@@ -324,7 +339,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   // Đợt 3 (họ L58/L61): hộp không tự đóng khi Back — xác nhận nó sau khi view đã gỡ từng Lưu + GỬI DUYỆT
   // báo giá CŨ (account không tự rút lại được) và hạ cờ bẩn DÙNG CHUNG của trang đang mở.
   const submit = async () => {
-    if (!(await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" }))) return;
+    if (!(await confirmModal("Gửi duyệt phần Hà Nội", "Lưu rồi gửi duyệt MỌI hàng chưa gửi (kể cả hàng bị trả lại). Hàng đã gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại hàng đó. Muốn gửi riêng từng hàng thì bấm \"Gửi\" ở cột Duyệt. Tiếp tục?", { confirmText: "Gửi duyệt" }))) return;
     if (!songRef.current) return;
     save(true);
   };
@@ -346,15 +361,17 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       )}
 
       <HnTables moMacDinh tables={hnTables} templates={templates} companyId={q.companyId}
-        editable={editable && !saving} canApprove={false} onMarkDirty={mark} daChi={daChi?.hn} />
+        editable={editable && !saving} canApprove={false} onMarkDirty={mark} daChi={daChi?.hn}
+        cheDo="account" onHanhDong={guiHang} dangXuLy={dangXuLy || saving} />
 
       <div className="ahn-grand-card"><span className="ahn-grand-label">Tổng tất cả {hnTables.length} sheet Hà Nội</span><span className="ahn-grand-val">{M.fmtMoney(tong)}</span></div>
 
       <div className="ahn-actions" style={{ marginTop: 14 }}>
         {editable ? <>
           <button className="btn btn-sm" onClick={() => save(false)} disabled={saving}>💾 Lưu</button>
-          <button className="btn btn-sm btn-primary" onClick={submit} disabled={saving}>✓ Gửi duyệt</button>
-        </> : <span className="muted">{hnStatus === "submitted" ? "Đã gửi, chờ quản lý duyệt — không sửa được lúc này." : hnStatus === "approved" ? "Phần Hà Nội đã được duyệt." : ""}</span>}
+          <button className="btn btn-sm btn-primary" onClick={submit} disabled={saving || dangXuLy} title="Lưu rồi gửi duyệt mọi hàng chưa gửi / bị trả lại">✓ Gửi duyệt{soChuaGui ? ` (${soChuaGui} hàng)` : ""}</button>
+          {soChoDuyet > 0 && <span className="muted"> · {soChoDuyet} hàng đang chờ quản lý duyệt (khoá tới khi duyệt / trả)</span>}
+        </> : null}
       </div>
 
       {importOpen && (

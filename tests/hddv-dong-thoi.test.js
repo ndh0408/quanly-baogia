@@ -148,7 +148,8 @@ describe.runIf(dbAvailable)("Lưu báo giá và kế toán ghi khoản chi song 
 
   // ── H1 ──────────────────────────────────────────────────────────────────────────────────────────────
   it("H1 màn soạn mở TRƯỚC lần tích, Lưu SAU lần tích → 200 không 409, khoản nguyên vẹn; bỏ đúng hàng đã chi → 400 chứ không 409", async () => {
-    const q0 = await taoBaoGia("h1", { trang: [[bang([hang("r1", "Thuê xe"), hang("r2", "Nước uống")])]] });
+    // r2 CHƯA duyệt: từ 2026-10-06 hàng HCM đã duyệt bị khoá với mọi người — bài này đo khoá lạc quan / khoản, không đo duyệt.
+    const q0 = await taoBaoGia("h1", { trang: [[bang([hang("r1", "Thuê xe"), hang("r2", "Nước uống", { approved: false, approvedAt: null, approvedBy: null })])]] });
     const q = await tai(q0.id);   // màn soạn nạp ở đây — mốc T0
     expect((await tich(ketoan, q.id, "sheet", "r1", { baseVersion: 0, paid: true, paidProof: ANH })).status).toBe(200);
     const e0 = await khoan(q.id, "sheet", "r1");
@@ -277,7 +278,8 @@ describe.runIf(dbAvailable)("Lưu báo giá và kế toán ghi khoản chi song 
   it("H5 account HN Lưu (KHÔNG baseUpdatedAt / baseHnRev) chen với kế toán TÍCH khoản HN → cả hai 200, khoản nguyên vẹn, không deadlock", async () => {
     // Phần HN đã duyệt → kế toán tích h1 → quản lý GIAO LẠI phần HN (không bị chặn) → account HN sửa bảng lần nữa, trong
     // lúc kế toán tích lại h1 ("xác nhận số tiền hiện tại" — hợp lệ với khoản ĐÃ chi kể cả khi phần HN không còn duyệt).
-    const q0 = await taoBaoGia("h5", { hnStatus: "approved", hnTables: [bangHn([hang("h1", "Xe HN"), hang("h2", "Khách sạn HN")])] });
+    // Duyệt từng hàng (2026-10-06): h1 đã duyệt (dữ liệu cũ — theo cả phần), h2 đã được bỏ duyệt nên account HN sửa được.
+    const q0 = await taoBaoGia("h5", { hnStatus: "approved", hnTables: [bangHn([hang("h1", "Xe HN"), hang("h2", "Khách sạn HN", { trangThaiDuyet: "dang-lam" })])] });
     expect((await tich(ketoan, q0.id, "hn", "h1", { baseVersion: 0, paid: true, paidProof: ANH })).status).toBe(200);
     expect((await admin.post(`/api/quotes/${q0.id}/hn/assign`).send({ accountId: hnU.id })).status).toBe(200);
     const e0 = await khoan(q0.id, "hn", "h1");
@@ -322,7 +324,8 @@ describe.runIf(dbAvailable)("Lưu báo giá và kế toán ghi khoản chi song 
   }, 60_000);
 
   it("H5 chủ báo giá Lưu bảng HN (KHÔNG baseUpdatedAt) đang đứng ở khoá QuoteSheet — kế toán tích HN không bị chặn; Lưu giữ hàng → 200, khoản nguyên vẹn", async () => {
-    const q0 = await taoBaoGia("h5b", { hnStatus: "approved", hnTables: [bangHn([hang("h1", "Xe HN"), hang("h2", "Vé máy bay")])] });
+    // h2 chưa duyệt (trạng thái riêng) — hàng đã duyệt bị khoá với mọi người từ 2026-10-06, bài này đo khoá / khoản.
+    const q0 = await taoBaoGia("h5b", { hnStatus: "approved", hnTables: [bangHn([hang("h1", "Xe HN"), hang("h2", "Vé máy bay", { trangThaiDuyet: "dang-lam" })])] });
     const q = await tai(q0.id);
     const than = { ...thanLuu(q, { moc: false }), hnTables: [bangHn([hang("h1", "Xe HN"), hang("h2", "Vé máy bay khứ hồi")])] };
     const kia = await moKhoa();

@@ -35,7 +35,8 @@ import {
   extraTableSum,
   bangNoiBoCoNgay,
   dsMauBangNoiBo,
-  phangThanhVien, vanTayHn } from "../quoteUtils.js";
+  phangThanhVien } from "../quoteUtils.js";
+import { reconcileTrangThaiHn, tomTatHn, loiKhoaHangNoiBoDaDuyet, type PhanHn } from "../hnDuyetHang.js";
 import { httpError } from "../httpError.js";
 import { sheetKhongDoi } from "../quoteSheetDiff.js";
 import { chuanHoaGhiChu, type MauGhiChu } from "../quoteListNote.js";
@@ -119,26 +120,9 @@ export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], is
           if (daDung.has(it.rid)) p = null;
           else {
             daDung.add(it.rid);
-            // NGƯỜI KHÔNG CÓ QUYỀN DUYỆT SỬA SỐ TIỀN CỦA HÀNG ĐÃ DUYỆT → TỪ CHỐI CẢ LẦN LƯU.
-            //
-            // Lỗ đo được: người có `quote:update:own` nhưng KHÔNG có `quote:internal:approve` mở
-            // báo giá đã có hàng "hcm"/"khach" ĐÃ DUYỆT (approved:true), sửa unitPrice/quantity
-            // của đúng rid đó rồi Lưu. Bản trước không so số tiền nên nhánh non-admin CHỈ kế thừa
-            // `approved`/`approvedAt`/`approvedBy` theo rid — số tiền đi theo payload của họ, dấu
-            // duyệt của người khác vẫn đứng nguyên trên số tiền họ vừa bịa ra. Cùng lỗ y hệt đã vá
-            // ở `reconcileExtraPayments` (xem chú thích ở đó) — CHỈ khác chữ "thanh toán" → "duyệt".
-            //
-            // Cùng lý do chọn NÉM LỖI thay vì âm thầm khôi phục/xoá dấu duyệt: hỏng TO ngay lúc lưu,
-            // không mất dữ liệu, không nuốt thay đổi. `p.tien === null` (hàng ghi trước khi
-            // sanitizeExtraTables chuẩn hoá số) thì KHÔNG có gì để so — thiếu dữ liệu thì MỞ.
-            if (!isAdmin && p.approved && p.tien !== null && p.tien !== soTienHang(it)) {
-              throw httpError(
-                400,
-                `Không sửa được số tiền của hàng đã duyệt: "${String(it.name || "").slice(0, 80) || "(không tên)"}". ` +
-                  `Hàng này đã được duyệt nên số lượng / đơn giá / số ngày phải giữ nguyên. ` +
-                  `Cần đổi thì nhờ người có quyền duyệt bỏ duyệt trước, rồi sửa và duyệt lại.`
-              );
-            }
+            // Sửa hàng ĐÃ DUYỆT (tiền hay nội dung) giờ bị chặn với MỌI người — kể cả người có quyền duyệt — bằng
+            // `loiKhoaHangNoiBoDaDuyet` (src/hnDuyetHang.ts, 409 'hang-hcm-da-khoa') trên bản CUỐI sẽ ghi, sau khi chốt
+            // đã chi báo trước. Chốt 400 cũ ở đây (chỉ người không có quyền duyệt, chỉ số tiền) đã được nó thay.
           }
         }
         if (!isAdmin) {   // non-admin: bỏ qua mọi thay đổi duyệt từ client → theo DB (mới = chưa duyệt)
@@ -320,7 +304,7 @@ export async function createQuote(req: Request) {
     tachRidTrung("hn", b.hnTables);
     const bocHn = [{ extraTables: b.hnTables }];
     reconcileExtraPayments(bocHn, [], {});
-    reconcileHnApprovals(bocHn, [], can(req.session, P.QUOTE_INTERNAL_APPROVE));
+    reconcileTrangThaiHn(bocHn[0].extraTables, [], null);   // báo giá mới: mọi hàng HN "đang làm", ai gửi gì cũng vậy
     hnTaoMoi = sanitizeHnTables(bocHn[0].extraTables);
   }
 
@@ -566,79 +550,13 @@ function carrySheetState(incoming: any[], existingSheets: any[]): (Record<string
   return sameShape ? list.map((_s: any, i: number) => existingSheets[i]) : list.map(() => undefined);
 }
 
-/**
- * Bảng "hanoi" ĐÃ GỬI DUYỆT / ĐÃ DUYỆT: lấy lại nguyên bản từ CSDL, BỎ QUA payload.
- *
- * `reconcileExtraApprovals` CỐ Ý không đụng "hanoi" (duyệt HN là luồng riêng ở MỨC BÁO GIÁ —
- * `hnStatus`), nên đường lưu chính không còn lớp nào canh phần này: `presentQuote` trả đủ bảng
- * "hanoi" cho người không-bị-lược-view, client round-trip lại, rồi `sanitizeExtraTables` ghi thẳng
- * quantity/unitPrice từ payload. Giá HN đã duyệt đổi được qua PUT /api/quotes/:id mà
- * hnStatus/hnReviewedAt không đổi và nhật ký `quote.update` chỉ ghi total+status → máy duyệt giá
- * Hà Nội thành vô hiệu.
- *
- * CHỈ chặn người KHÔNG có `quote:hn:manage` — người CÓ chính là người duyệt, họ sửa là hợp lệ (vai
- * trò mặc định admin/manager đều có; chạm tới nhánh chặn này là cấu hình quyền per-user). Và chỉ
- * khi phần HN đã chốt ("submitted"/"approved"); giai đoạn "assigned" chưa có gì để bảo vệ.
- *
- * Thay TẠI CHỖ để giữ nguyên THỨ TỰ bảng trên màn hình; bảng HN có trong CSDL mà payload bỏ sót
- * thì trả lại ở cuối — mất bảng cũng là mất dữ liệu. Mutate `sheets`, đối xứng với reconcileExtra*.
- *
- * Payload có NHIỀU bảng "hanoi" HƠN CSDL → 409, KHÔNG vứt im lặng. Hai ca có thật dẫn tới đây:
- * người dùng bấm "nhân bản trang" (client gửi trùng sheet id, `carrySheetState` trả undefined cho
- * bản thứ hai nên `db` rỗng) và người dùng THÊM một bảng HN mới khi phần HN đã chốt. Trước đây cả
- * hai đều nhận 200 + toast "Đã lưu" rồi tải lại thấy bảng biến mất — mất phần vừa gõ, không một lời
- * cảnh báo. Dữ liệu ĐANG CÓ trong CSDL không hề mất, nhưng im lặng là lựa chọn tệ nhất trong ba.
- * Chiều NGƯỢC LẠI (payload ÍT bảng hơn) KHÔNG chặn: client cũ không round-trip `extraTables` thì
- * `list` rỗng, và chặn nó sẽ làm mọi lần Lưu từ những client đó hỏng.
- */
-/**
- * Cờ DUYỆT của hàng bảng Hà Nội: ai KHÔNG có `quote:internal:approve` thì lấy lại theo `rid` từ CSDL.
- *
- * `reconcileExtraApprovals` CỐ Ý chỉ xử lý "hcm"/"khach" — duyệt Hà Nội là luồng riêng ở mức báo
- * giá (`hnStatus`), không phải theo hàng. Nhưng `sanitizeHnTables` vẫn ghi `approved*` xuống CSDL
- * nguyên trạng, nên không chặn ở đây thì người điền tự đóng dấu duyệt cho hàng của chính mình.
- * Hàng mới (chưa có `rid` trong CSDL) → chưa duyệt. Mutate tại chỗ, đối xứng với reconcileExtra*.
- *
- * Nhận cùng hình dạng `[{ extraTables }]` như hai hàm kia để hai đường gọi (saveHn của account Hà
- * Nội, và đường lưu của chủ báo giá) dùng chung đúng một luật.
- */
-export function reconcileHnApprovals(list: any[], listDb: any[], canApprove: boolean) {
-  if (canApprove) return;
-  const prior = new Map<string, { approved: boolean; approvedAt: any; approvedBy: any }>();
-  for (const s of listDb || []) {
-    for (const t of Array.isArray(s.extraTables) ? s.extraTables : []) {
-      for (const it of t?.items || []) {
-        if (it && it.rid && !prior.has(it.rid)) prior.set(it.rid, { approved: !!it.approved, approvedAt: it.approvedAt || null, approvedBy: it.approvedBy ?? null });
-      }
-    }
-  }
-  for (const s of list) {
-    for (const t of Array.isArray(s.extraTables) ? s.extraTables : []) {
-      for (const it of t?.items || []) {
-        if (!it) continue;
-        const p = it.rid ? prior.get(it.rid) : null;
-        it.approved = p ? p.approved : false;
-        it.approvedAt = p ? p.approvedAt : null;
-        it.approvedBy = p ? p.approvedBy : null;
-      }
-    }
-  }
-}
+// Bảng Hà Nội ĐÃ DUYỆT: từ 2026-10-06 khoá THEO HÀNG, không còn theo cả phần (chotHnTables / reconcileHnApprovals cũ
+// đã gỡ). Luật nằm ở src/hnDuyetHang.ts `reconcileTrangThaiHn`: trạng thái từng hàng lấy lại theo `rid` từ CSDL cho
+// MỌI người (payload không đổi được), hàng đã duyệt không sửa / xoá được (409 'hang-hn-da-khoa') kể cả với người có
+// quyền duyệt — bỏ duyệt trước. Hàng đang chờ duyệt khoá với người KHÔNG có quyền duyệt (đúng chốt "đã gửi" cũ).
 
-function chotHnTables(b: any, existing: any, canManage: boolean) {
-  if (b.hnTables === undefined) return;                       // client không gửi → không đụng
-  if (canManage) return;                                      // người duyệt phần HN thì được sửa
-  if (!["submitted", "approved"].includes(existing.hnStatus ?? "")) return;
-  // Giá HN đã gửi duyệt / đã duyệt: KHÔNG ai ghi đè qua đường lưu báo giá.
-  // GIỐNG thì im lặng bỏ qua (client round-trip nguyên vẹn, không có gì để báo), KHÁC thì 409 —
-  // tuyệt đối không vứt im lặng phần người ta vừa gõ.
-  const moiNhat = vanTayHn(b.hnTables);
-  const cu = vanTayHn(Array.isArray(existing.hnTables) ? existing.hnTables : []);
-  if (moiNhat !== cu) {
-    throw httpError(409, "Phần giá Hà Nội đã chốt nên không sửa được ở đây. Hãy chép lại phần vừa gõ, tải lại trang, rồi nhờ người phụ trách phần Hà Nội mở lại.");
-  }
-  delete b.hnTables;   // giống hệt CSDL → khỏi ghi lại
-}
+/** Phần Hà Nội đọc dưới khoá Quote ở đường Lưu (bảng + trạng thái cả phần để suy trạng thái hàng cũ). */
+type QuoteHnKhoa = PhanHn & { hnTables: unknown; hnAssigneeId?: number | null };
 
 // ───────── PHẠM VI CỦA "ACCOUNT PHỤ" (QuoteMember.scopes) ─────────
 // Chủ báo giá tick cho từng người: Báo giá chính · Chi phí HCM · Giá Hà Nội · Phí khách hàng.
@@ -779,6 +697,14 @@ async function ghiVungNoiBoDuocGiao(tx: TxClient, id: number, ptSheets: any[], c
   // KT-4: hàng ĐÃ CHI không được biến mất qua đường Lưu.
   const mat = hangDaChiBiMat("sheet", bangCuaSheets(sheetsDb), bangCuaSheets(toWrite), daChi);
   if (mat.length) throw loiHangDaChi(mat);
+  // Hàng HCM / Phí KH ĐÃ DUYỆT khoá với mọi người (409). Account phụ: NS · Chứng từ · Lưu kho chỉ mở khi có quyền duyệt.
+  const dsMau = await dsMauBangNoiBo();
+  const ctyId = (await tx.quote.findFirst({ where: { id }, select: { companyId: true } }))?.companyId ?? null;
+  const loiKhoa = loiKhoaHangNoiBoDaDuyet(bangCuaSheets(toWrite), bangCuaSheets(sheetsDb), {
+    moCotNoiBo: can(req.session, P.QUOTE_INTERNAL_APPROVE),
+    coNgayDb: (t) => bangNoiBoCoNgay(t, ctyId, dsMau),
+  });
+  if (loiKhoa) throw loiKhoa;
 
   for (let i = 0; i < sheetsDb.length; i++) {
     await tx.quoteSheet.update({ where: { id: sheetsDb[i].id }, data: { extraTables: toWrite[i].extraTables as any } });
@@ -816,10 +742,9 @@ export async function updateQuote(req: Request) {
   // Bảng Hà Nội nay là MỘT CỘT của báo giá, không nằm trong trang nào → không đi qua
   // `ghiVungNoiBoDuocGiao`/`reconcilePhamViTables` nữa mà xử lý thẳng ở đây.
   if (b.hnTables !== undefined && !phamVi.includes("hanoi")) delete (b as any).hnTables;
-  // Account PHỤ có quote:hn:manage (mọi manager đều có) KHÔNG được sửa thẳng giá HN đã duyệt
-  // (RBAC-07): reviewHn đã cấm phụ duyệt/trả phần HN, mà sửa thẳng số đã chốt còn nặng hơn.
-  // (chotHnTables chạy TRONG transaction, trên bản Quote đã khoá — xem `hnTablesDeGhi` bên dưới.)
-  const quanLyHn = can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing);
+  // Hàng HN đã duyệt khoá với MỌI người (kể cả account phụ có quote:hn:manage — RBAC-07): reconcileTrangThaiHn chạy
+  // TRONG transaction, trên bản Quote đã khoá — xem `hnTablesDeGhi` bên dưới. Mẫu cột (cột Số Ngày) để so tiền đúng luật.
+  const dsMauHn = b.hnTables !== undefined || b.sheets !== undefined ? await dsMauBangNoiBo() : [];
   let vungNoiBo: any[] | null = null;
   if (!duPhamVi && !phamVi.includes("main")) {
     // Không được giao "Báo giá chính": mọi field danh tính/khách/đầu trang bị GỠ khỏi payload —
@@ -893,9 +818,7 @@ export async function updateQuote(req: Request) {
   // CHẠY TRONG TRANSACTION, trên bản Quote ĐÃ KHOÁ (KT-5): bản trước reconcile trên `existing` đọc NGOÀI transaction,
   // nên một lần ghi HN chen giữa (account HN lưu, kế toán tích) bị lần Lưu này đè bằng cờ cũ. Và chốt "hàng đã chi
   // không được biến mất" (KT-4) phải đọc khoản kế toán SAU khi khoá Quote — kế toán ghi dưới Quote FOR SHARE.
-  const hnTablesDeGhi = (qTuoi: { hnStatus: string | null; hnTables: unknown }, khoan: Awaited<ReturnType<typeof docKhoanChiTrongTx>>) => {
-    if (b.hnTables === undefined) return;
-    chotHnTables(b, qTuoi, quanLyHn);                // HN đã chốt: giống CSDL → bỏ qua; khác → 409
+  const hnTablesDeGhi = (qTuoi: QuoteHnKhoa, khoan: Awaited<ReturnType<typeof docKhoanChiTrongTx>>) => {
     if (b.hnTables === undefined) return;
     const hnDb = Array.isArray(qTuoi.hnTables) ? qTuoi.hnTables : [];
     // rid trùng CÓ SẴN trong CSDL → ghép theo thứ tự trước reconcile; hàng đã trả (cũ) thiếu rid → từ chối (khoanChi.ts).
@@ -907,10 +830,22 @@ export async function updateQuote(req: Request) {
     const bocHn = [{ extraTables: b.hnTables }];
     const bocHnDb = [{ extraTables: hnDb }];
     reconcileExtraPayments(bocHn, bocHnDb, { daChi, mienChotTien: can(req.session, P.INVOICE_INPUT_PAY) });
-    reconcileHnApprovals(bocHn, bocHnDb, can(req.session, P.QUOTE_INTERNAL_APPROVE));
+    // Hàng ĐÃ CHI biến mất → 400 'hang-da-chi' (KT-4) — báo TRƯỚC chốt duyệt: chốt tiền của kế toán là lời giải thích
+    // đúng nhất cho người đang xoá hàng đã chi, dù hàng đó cũng đã duyệt.
     const mat = hangDaChiBiMat("hn", hnDb, bocHn[0].extraTables, daChi);
     if (mat.length) throw loiHangDaChi(mat);
+    // Trạng thái duyệt từng hàng: theo CSDL; hàng đã duyệt (và đang chờ, với người không có quyền duyệt) bị khoá → 409.
+    reconcileTrangThaiHn(bocHn[0].extraTables, hnDb, qTuoi, {
+      // Người duyệt phần HN = quote:hn:manage, không phải account phụ (giữ đúng quyền trước bản duyệt từng hàng).
+      khoaChoDuyet: !(can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing)),
+      moCotNoiBo: can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing),
+      coNgayDb: (t) => bangNoiBoCoNgay(t, existing.companyId, dsMauHn),
+      coNgayPl: (t) => bangNoiBoCoNgay(t, data.companyId ?? existing.companyId, dsMauHn),
+    });
     data.hnTables = sanitizeHnTables(bocHn[0].extraTables);
+    // `hnStatus` nay chỉ là TÓM TẮT của các hàng (mọi hàng vừa mang trạng thái riêng — xem src/hnDuyetHang.ts).
+    const coGiao = qTuoi.hnAssigneeId != null;
+    data.hnStatus = tomTatHn(data.hnTables, coGiao, coGiao ? "assigned" : null);
   };
   if (b.companyId !== undefined) data.companyId = b.companyId;
   let dongBoSo: { so: string; prefix: string } | null = null;
@@ -994,7 +929,7 @@ export async function updateQuote(req: Request) {
       // KT-5: khoá Quote NGAY SAU QuoteSheet (thứ tự mọi đường ghi vẫn là QuoteSheet → Quote) rồi mới đọc khoản kế
       // toán. Kế toán ghi khoản dưới Quote FOR SHARE — từ đây tới lúc commit không ai tích chen vào được, nên chốt
       // "hàng đã chi không được biến mất" bên dưới thấy bản TƯƠI. Đọc kèm bảng Hà Nội TƯƠI cho `hnTablesDeGhi`.
-      const [qKhoa] = await tx.$queryRaw<{ hnStatus: string | null; hnTables: unknown }[]>`SELECT "hnStatus", "hnTables" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
+      const [qKhoa] = await tx.$queryRaw<QuoteHnKhoa[]>`SELECT "hnStatus", "hnTables", "hnAssigneeId", "hnReviewedAt", "hnReviewerId", "hnRejectNote" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
       const khoan = await docKhoanChiTrongTx(tx, id);
       // VAT TƯƠI (MONEY-06): `vatPct` lấy từ `existing` đọc NGOÀI transaction. Một lần đổi RIÊNG VAT
       // chen giữa sẽ bị lần Lưu này ghi đè tổng bằng VAT cũ (Quote.vatPercent = 10 mà total tính 8%).
@@ -1079,8 +1014,16 @@ export async function updateQuote(req: Request) {
       // 400 (không 409): màn soạn giữ nguyên phần đang soạn và toast câu báo nêu tên hàng.
       const matSheet = hangDaChiBiMat("sheet", bangCuaSheets(sheetsTuoi), bangCuaSheets(b.sheets), daChiSheet);
       if (matSheet.length) throw loiHangDaChi(matSheet);
+      // Hàng Chi phí HCM / Phí KH ĐÃ DUYỆT khoá với MỌI người (409 'hang-hcm-da-khoa') — trên bản cuối (bảng ngoài phạm vi
+      // đã lấy lại từ CSDL). NS · Chứng từ · Lưu kho (theo dõi sau duyệt) vẫn mở cho chủ / người có quyền duyệt.
+      const loiKhoaSheet = loiKhoaHangNoiBoDaDuyet(bangCuaSheets(b.sheets), bangCuaSheets(sheetsTuoi), {
+        moCotNoiBo: !laAccountPhu(req.session, existing) || can(req.session, P.QUOTE_INTERNAL_APPROVE),
+        coNgayDb: (t) => bangNoiBoCoNgay(t, existing.companyId, dsMauHn),
+        coNgayPl: (t) => bangNoiBoCoNgay(t, data.companyId ?? existing.companyId, dsMauHn),
+      });
+      if (loiKhoaSheet) throw loiKhoaSheet;
       // Bảng Hà Nội (nếu payload có): chốt + reconcile trên bản Quote vừa khoá — TRƯỚC khi xoá trang.
-      hnTablesDeGhi(qKhoa ?? { hnStatus: null, hnTables: null }, khoan);
+      hnTablesDeGhi(qKhoa ?? { hnStatus: null, hnTables: null, hnAssigneeId: null }, khoan);
 
       const seqCu = Number((existing as any).sheetCodeSeq) || 0;
       // KÉO ĐỔI THỨ TỰ SHEET: mã sản xuất đi theo vị trí mới — nhưng CHỈ khi chưa mã nào của báo giá
@@ -1168,8 +1111,8 @@ export async function updateQuote(req: Request) {
       }
       if (b.hnTables !== undefined) {
         // KT-5: Quote FOR UPDATE (sau mọi khoá QuoteSheet phía trên) RỒI mới đọc bảng HN tươi + khoản kế toán.
-        const [qKhoa] = await tx.$queryRaw<{ hnStatus: string | null; hnTables: unknown }[]>`SELECT "hnStatus", "hnTables" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
-        hnTablesDeGhi(qKhoa ?? { hnStatus: null, hnTables: null }, await docKhoanChiTrongTx(tx, id));
+        const [qKhoa] = await tx.$queryRaw<QuoteHnKhoa[]>`SELECT "hnStatus", "hnTables", "hnAssigneeId", "hnReviewedAt", "hnReviewerId", "hnRejectNote" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
+        hnTablesDeGhi(qKhoa ?? { hnStatus: null, hnTables: null, hnAssigneeId: null }, await docKhoanChiTrongTx(tx, id));
       }
       await chotKhoaLacQuan(tx);
       if (dongBoSo) await syncQuoteCounter(dongBoSo.so, dongBoSo.prefix, tx as any);
@@ -1391,7 +1334,7 @@ function chonBaoGiaDauVao<T extends Prisma.QuoteSelect>(s: T): T { return s; }
 
 /**
  * HÓA ĐƠN ĐẦU VÀO — `GET /input-invoices`: mọi hàng bảng nội bộ ĐÃ DUYỆT (Chi phí HCM / Phí khách hàng theo
- * hàng, Báo giá Hà Nội theo `hnStatus = approved`), mỗi hàng là một khoản chi cần hoá đơn đầu vào. LUẬT chọn
+ * hàng, Báo giá Hà Nội theo hàng — hàng cũ suy từ `hnStatus = approved`, src/hnDuyetHang.ts), mỗi hàng là một khoản chi cần hoá đơn đầu vào. LUẬT chọn
  * hàng + tính tiền nằm ở `src/inputInvoices.ts` (thuần, có test); ở đây chỉ truy vấn.
  *
  * QUYỀN: `invoice:page` (kế toán, admin) — cùng cổng với trang Hoá đơn đầu ra. KHÔNG phạm vi theo người tạo:
@@ -1414,6 +1357,7 @@ export async function listInputInvoices(req: Request) {
       FROM "Quote" q
      WHERE q."deletedAt" IS NULL
        AND (q."hnStatus" = 'approved'
+            OR (jsonb_typeof(q."hnTables") = 'array' AND q."hnTables" @> '[{"items":[{"trangThaiDuyet":"da-duyet"}]}]'::jsonb)
             OR (jsonb_typeof(q."hnTables") = 'array' AND q."hnTables" @> '[{"items":[{"paid":true}]}]'::jsonb)
             OR EXISTS (SELECT 1 FROM "InputInvoiceEntry" e WHERE e."quoteId" = q.id)
             OR EXISTS (SELECT 1 FROM "QuoteSheet" s
@@ -2254,7 +2198,7 @@ export async function duplicateQuote(req: Request) {
   // cạnh "chưa thanh toán" cho cùng một hàng. Muốn "Bản mới" mang trạng thái sang thì mang CẢ HAI, ở đúng hàm
   // này (tests/vdb-noi-bo-ba-truong-luu-tai-lai.test.js chốt hai thứ đi cùng nhau, cho cả hai nút).
   const catTrangThai = (it: any) => {
-    const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, luuKho: _lk, ...con } = it || {};
+    const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, luuKho: _lk, trangThaiDuyet: _tt, lyDoTra: _ld, ...con } = it || {};
     return con;
   };
 

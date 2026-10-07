@@ -41,6 +41,7 @@ describe.runIf(dbAvailable)("reviewHn — hai lượt duyệt/trả đồng th�
   beforeAll(async () => {
     const { createApp } = await import("../src/app.js");
     app = createApp();
+    // 2026-10-06: Account HN được giao KHÔNG tự duyệt — phần HN ở đây không giao cho chính người duyệt.
     mgrU = await prisma.user.create({ data: { username: `${TAG}-mgr`, displayName: `${TAG} mgr`, role: "manager", passwordHash: await bcrypt.hash(PWD, 4) } });
     mgr = agentWithCsrf(app);
     expect((await mgr.post("/api/auth/login").send({ username: mgrU.username, password: PWD })).status).toBe(200);
@@ -59,7 +60,7 @@ describe.runIf(dbAvailable)("reviewHn — hai lượt duyệt/trả đồng th�
       quoteNumber: `${TAG}-${soHieu}`, title: `${TAG} bg`, searchText: TAG, toCompany: "Khách",
       companyId: coId, fromContact: "x", fromAddress: "x", city: "TP. Hồ Chí Minh",
       quoteDate: new Date(), createdById: mgrU.id, status: "draft", subtotal: 0, total: 0,
-      hnStatus: "submitted", hnAssigneeId: mgrU.id, hnSubmittedAt: new Date(),
+      hnStatus: "submitted", hnAssigneeId: null, hnSubmittedAt: new Date(),
     } });
     return q.id;
   };

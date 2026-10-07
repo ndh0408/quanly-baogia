@@ -6,7 +6,7 @@ import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables, loiXoaBangDaChi, soHangDaChiCuaTrang } from "../components/ExtraTables";
-import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
+import { HnTables, mauBangHn, hnCoThayDoi, gopTrangThaiHn, ridTheoTrangThai, type HnTable, type ThaoTacHangHn } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
 import { CustomerPicker } from "../components/CustomerPicker";
@@ -296,6 +296,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // app#11: vân tay phần NGOÀI Hà Nội của bản MÁY CHỦ gần nhất mà trang này đã nạp/lưu (xem vanTayMain).
   const vanTayMainRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
+  // Duyệt TỪNG HÀNG Hà Nội (2026-10-06): mốc "vừa gộp trạng thái hàng từ máy chủ" cho HnTables chụp lại hàng khoá, và cờ
+  // đang gọi máy chủ (tắt nút cột Duyệt).
+  const hnDongBoRef = useRef(0);
+  const [hnXuLy, setHnXuLy] = useState(false);
   // L61/L62: editor này CÒN GẮN không. Hộp hỏi (confirm/promptModal) là DOM tự dựng, không đóng khi
   // Back đổi hash; và PUT/POST vẫn bay sau khi Shell đã gỡ editor (đổi `key` theo route). Trả lời hộp
   // treo hay nhận phản hồi muộn mà không hỏi cờ này là chạy thao tác lên báo giá người dùng đã rời,
@@ -729,8 +733,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // Bảng Hà Nội cấp báo giá. Mutate TẠI CHỖ như mọi state khác của editor (qRef giữ object).
   if (!Array.isArray(q.hnTables)) q.hnTables = [];
   const hnTables = q.hnTables as HnTable[];
-  // Giá HN đã chốt: chỉ người duyệt phần HN mới sửa được (mirror chotHnTables ở server).
-  const hnKhoa = ["submitted", "approved"].includes(String(q.hnStatus || "")) && !hasPerm("quote:hn:manage");
+  // 2026-10-06: không còn khoá CẢ PHẦN HN — hàng đã duyệt (và hàng chờ duyệt, với người không có quyền duyệt) khoá
+  // RIÊNG trong lưới (HnTables `hangHnBiKhoa`, bản sao luật máy chủ reconcileTrangThaiHn).
+  // Người duyệt phần HN — GIỮ QUYỀN CŨ: quote:hn:manage và không phải account phụ (máy chủ: reviewHn).
+  const duyetHn = hasPerm("quote:hn:manage") && !laPhu;
   const coSuaGiDo = editable && phamVi.length > 0;
   const senderCo = companies.find((c) => c.id === q.companyId);
   if (senderCo?.address) q.fromAddress = senderCo.address;
@@ -870,7 +876,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       // trước đây làm ngay LÚC VẼ trong HnTables nên đổi mẫu qua lại là mất số Ngày. CHỈ khi phần HN sửa
       // được ở đây (đúng điều kiện bước dọn cũ): phần HN đã chốt thì máy chủ so NGUYÊN VĂN với CSDL
       // (chotHnTables) — dọn thêm là lệch, cả lần Lưu báo giá ăn 409.
-      const hnSuaDuoc = coScope("hanoi") && !hnKhoa;
+      const hnSuaDuoc = coScope("hanoi");
       payload.hnTables = hnTables.map((x) => {
         const coNgay = !hnSuaDuoc || !!mauBangHn(x, templates, q.companyId)?.layout?.hasDays;
         return {
@@ -1085,6 +1091,27 @@ Lý do (không bắt buộc):`,
        NGOẠI LỆ: bảng HN trên máy chủ khác bảng HN đang có ở đây (account vừa gửi giá sau lúc mở
        trang, hoặc chính mình đang sửa dở bảng HN) — khi đó KHÔNG đẩy mốc updatedAt, để khoá lạc
        quan vẫn chặn việc lượt Lưu kế tiếp đè bảng HN cũ lên phần account vừa gửi. */
+  /** Thao tác trạng thái MỘT hàng HN từ cột Duyệt (chỉ người có quyền duyệt): duyệt / bỏ duyệt / trả lại — gọi máy chủ
+   *  ngay rồi nạp lại trạng thái. Chạy trên bản ĐÃ LƯU, nên bảng HN còn sửa dở thì đòi Lưu trước. */
+  const hanhDongHn = async (loai: ThaoTacHangHn, rids: string[]) => {
+    const cur = qRef.current;
+    if (!cur || hnXuLy || loai === "gui") return;
+    if (hnCoThayDoi(cur.hnTables)) { toast("Bảng Hà Nội còn thay đổi chưa lưu — bấm Lưu trước rồi duyệt / trả", "info"); redraw(); return; }
+    let note: string | undefined;
+    if (loai === "tra") {
+      const n = await promptModal("Trả lại hàng Hà Nội", "Lý do trả lại (Account sẽ thấy):", { placeholder: "VD: thiếu giá vật tư…" });
+      if (n === null || !songRef.current) return;
+      note = n;
+    }
+    setHnXuLy(true);
+    try {
+      await api.hnReview(cur.id, loai === "duyet" ? "approve" : loai === "tra" ? "reject" : "unapprove", note, rids);
+      if (!songRef.current) return;
+      toast(loai === "duyet" ? "Đã duyệt hàng" : loai === "tra" ? "Đã trả lại hàng" : "Đã bỏ duyệt hàng — hàng mở lại để sửa", "success");
+      await napLaiSauHn();
+    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); redraw(); }
+    finally { if (songRef.current) setHnXuLy(false); }
+  };
   const napLaiSauHn = async () => {
     const cur = qRef.current as QuoteFull & { _activeSheet: number } | null;
     if (!cur) return;
@@ -1101,6 +1128,9 @@ Lý do (không bắt buộc):`,
       // đó không phải ai sửa bảng HN. Mọi trường khác (giá, công thức, rid, duyệt…) vẫn so đủ.
       const hangHn = (it: unknown) => { const r = boKhoaPhien(it); for (const k of TRUONG_KE_TOAN) delete r[k]; return r; };
       const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...boKhoaPhien(t), items: ((t as { items?: unknown[] }).items || []).map(hangHn) })));
+      // Duyệt từng hàng đổi TRẠNG THÁI hàng (không đổi nội dung, không bump updatedAt): gộp nó vào bảng đang soạn theo
+      // rid để cột Duyệt / khoá hàng đúng ngay — rồi mới so, nên chỉ phần NỘI DUNG khác mới chặn nhận mốc mới.
+      if (Array.isArray(cur.hnTables)) { gopTrangThaiHn(cur.hnTables as HnTable[], u.hnTables); hnDongBoRef.current++; }
       const giongHn = vanTayHn(cur.hnTables) === vanTayHn(u.hnTables);
       const rec = cur as Record<string, unknown>, moi = u as Record<string, unknown>;
       for (const k of ["hnStatus", "hnRejectNote", "hnAssigneeId", "hnSubmittedAt", "hnReviewedAt", "hnReviewerId", "members"]) if (k in moi) rec[k] = moi[k];
@@ -1529,7 +1559,7 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} daChi={daChi?.sheet} />
+        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} moCotNoiBo={!laPhu || hasPerm("quote:internal:approve")} onMarkDirty={mark} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} daChi={daChi?.sheet} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
@@ -1541,19 +1571,24 @@ Lý do (không bắt buộc):`,
             đi". Nay trạng thái nằm trên TIÊU ĐỀ (liếc thấy cả khi khối đang đóng), còn giao việc /
             duyệt / trả lại nằm trong THÂN (hành động thì mở ra mới làm). */}
         <HnTables tables={hnTables} templates={templates} companyId={q.companyId} daChi={daChi?.hn}
-          editable={coScope("hanoi") && !hnKhoa && !saving}
-          canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark}
+          editable={coScope("hanoi") && !saving}
+          canApprove={duyetHn} onMarkDirty={mark}
+          cheDo="chu" moCotNoiBo={hasPerm("quote:hn:manage") && !laPhu}
+          onHanhDong={!isNew && duyetHn ? hanhDongHn : undefined}
+          dangXuLy={hnXuLy || saving} dongBo={hnDongBoRef.current}
           thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }}
           /* Account vừa gửi mà khối đóng thì việc chờ duyệt nằm khuất — mở sẵn cho quản lý thấy. */
-          moMacDinh={q.hnStatus === "submitted" && hasPerm("quote:hn:manage")}
-          phuHieu={!isNew && hasPerm("quote:hn:manage") ? <HnTrangThai st={q.hnStatus} /> : undefined}
+          moMacDinh={q.hnStatus === "submitted" && (hasPerm("quote:hn:manage") || duyetHn)}
+          phuHieu={!isNew && (hasPerm("quote:hn:manage") || duyetHn) ? <HnTrangThai st={q.hnStatus} /> : undefined}
           dieuKhien={
             <>
-              {!isNew && hasPerm("quote:hn:manage") && (
+              {!isNew && (hasPerm("quote:hn:manage") || duyetHn) && (
                 <HnManagerPanel quoteId={q.id} hnStatus={q.hnStatus} hnRejectNote={(q as Record<string, unknown>).hnRejectNote as string | undefined}
-                  onReload={napLaiSauHn} />
+                  onReload={napLaiSauHn} giaoDuoc={hasPerm("quote:hn:manage")}
+                  duyetDuoc={duyetHn} soCho={ridTheoTrangThai(hnTables, ["cho-duyet"]).length}
+                  chanNeuChuaLuu={() => { if (!hnCoThayDoi(hnTables)) return false; toast("Bảng Hà Nội còn thay đổi chưa lưu — bấm Lưu trước rồi duyệt / trả", "info"); return true; }} />
               )}
-              {hnKhoa && <div className="khoi-sheet-note muted">Phần Hà Nội đã {q.hnStatus === "approved" ? "duyệt" : "gửi duyệt"} — chỉ người phụ trách phần Hà Nội mở lại được.</div>}
+              {ridTheoTrangThai(hnTables, ["da-duyet"]).length > 0 && <div className="khoi-sheet-note muted">Hàng Hà Nội ĐÃ DUYỆT bị khoá (không sửa / xoá được) — người có quyền duyệt bỏ tích Duyệt của hàng đó để mở lại.</div>}
             </>
           } />
 
@@ -1646,11 +1681,17 @@ function HnTrangThai({ st }: { st?: string | null }) {
 }
 
 // Port renderManagerHnPanel — manager/admin GIAO phần Hà Nội cho Account HN + DUYỆT/TRẢ LẠI khi gửi.
-function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId: number; hnStatus?: string | null; hnRejectNote?: string | null; onReload: () => void }) {
+// 2026-10-06: Duyệt / Trả ở đây là thao tác HÀNG LOẠT trên mọi hàng đang chờ (duyệt / trả riêng từng hàng ở cột Duyệt);
+// quyền như duyệt cả phần trước đây (quote:hn:manage, không phải account phụ). Giao việc vẫn là quote:hn:manage, và giao lại được bất cứ lúc nào
+// (hàng đã duyệt không bị mở khoá khi giao lại).
+function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload, giaoDuoc = true, duyetDuoc = false, soCho = 0, chanNeuChuaLuu }: {
+  quoteId: number; hnStatus?: string | null; hnRejectNote?: string | null; onReload: () => void;
+  giaoDuoc?: boolean; duyetDuoc?: boolean; soCho?: number; chanNeuChuaLuu?: () => boolean;
+}) {
   const [accounts, setAccounts] = useState<{ id: number; displayName?: string; username?: string }[]>([]);
   const [accId, setAccId] = useState("");
   const st = hnStatus || "";
-  const canAssign = !st || st === "rejected" || st === "approved";
+  const canAssign = giaoDuoc;
   useEffect(() => { if (canAssign) api.hnAccounts().then((r) => setAccounts(r.data || [])).catch(() => {}); }, [canAssign]);
   // L61: hộp lý do "Trả lại" không tự đóng khi Back — trả lời nó sau khi editor đã gỡ thì bỏ qua.
   const songRef = useRef(true);
@@ -1660,9 +1701,10 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
     try { await api.hnAssign(quoteId, Number(accId)); toast("Đã giao phần HN cho Account", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi giao", "error"); }
   };
   const review = async (decision: "approve" | "reject") => {
+    if (chanNeuChuaLuu?.()) return;
     let note: string | undefined;
     if (decision === "reject") { const n = await promptModal("Trả lại phần Hà Nội", "Lý do trả lại (Account sẽ thấy):", { placeholder: "VD: thiếu giá vật tư mục 3…" }); if (n === null || !songRef.current) return; note = n; }
-    try { await api.hnReview(quoteId, decision, note); toast(decision === "approve" ? "Đã duyệt phần HN" : "Đã trả lại phần HN", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
+    try { await api.hnReview(quoteId, decision, note); toast(decision === "approve" ? "Đã duyệt các hàng HN đang chờ" : "Đã trả lại các hàng HN đang chờ", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   return (
     /* KHÔNG còn badge "Phần Hà Nội (Account)" lẫn thẻ trạng thái ở đây: cả hai nay nằm trên tiêu đề
@@ -1675,7 +1717,7 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
           <button type="button" className="btn btn-sm" onClick={assign}>{st ? "Giao lại" : "Giao cho Account HN"}</button>
         </>
       )}
-      {st === "submitted" && <><button type="button" className="btn btn-sm btn-primary" onClick={() => review("approve")}>✓ Duyệt</button><button type="button" className="btn btn-sm" onClick={() => review("reject")}>↩ Trả lại</button></>}
+      {duyetDuoc && (st === "submitted" || soCho > 0) && <><button type="button" className="btn btn-sm btn-primary" title={`Duyệt mọi hàng đang chờ${soCho ? ` (${soCho} hàng)` : ""} — duyệt riêng từng hàng ở cột Duyệt`} onClick={() => review("approve")}>✓ Duyệt</button><button type="button" className="btn btn-sm" title={`Trả lại mọi hàng đang chờ${soCho ? ` (${soCho} hàng)` : ""}`} onClick={() => review("reject")}>↩ Trả lại</button>{soCho > 0 && <span className="muted" style={{ fontSize: 12 }}>{soCho} hàng chờ duyệt</span>}</>}
       {st === "rejected" && hnRejectNote && <span className="muted" style={{ fontSize: 12 }}>lý do trả: {hnRejectNote}</span>}
     </div>
   );

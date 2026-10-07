@@ -83,14 +83,14 @@ describe("ExtraTables (Chi phí HCM · Phí khách hàng) bật cột nội bộ
 });
 
 describe("HnTables (Báo giá Hà Nội) bật cột nội bộ thật", () => {
-  it("đủ ba cột (không có DUYỆT — bảng HN duyệt theo cả phần) + THANH TOÁN chỉ xem dù người mở có quote:internal:pay; tích / chọn ghi vào hàng và báo 'chưa lưu'", () => {
+  // 2026-10-06: bảng HN có cột DUYỆT từng hàng (trước đó duyệt theo cả phần nên không có cột).
+  it("đủ ba cột + DUYỆT từng hàng + THANH TOÁN chỉ xem dù người mở có quote:internal:pay; tích / chọn ghi vào hàng và báo 'chưa lưu'", () => {
     const t = [{ templateId: 1, name: "HN", groupSubtotal: false, items: [hang({ name: "Nhân công", ns: "Chị Lan", ...daChi })] }] as unknown as HnTable[];
     const danhDau = vi.fn();
     act(() => { goc.render(<HnTables {...quyenThanhToanCu} moMacDinh tables={t} templates={MAU} companyId={1} editable onMarkDirty={danhDau} />); });
     const td = sauGhiChu();
     expect(td.slice(0, 4)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO"]);
-    expect(td).not.toContain("DUYỆT");
-    expect(td.slice(0, 5)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO", "THANH TOÁN"]);
+    expect(td.slice(0, 6)).toEqual(["GHI CHÚ", "NS", "CHỨNG TỪ", "LƯU KHO", "DUYỆT", "THANH TOÁN"]);
     thanhToanChiXem();
     expect(oLuoi(0, "[data-f=\"ns\"]").value).toBe("Chị Lan");
     chon(oLuoi(0, "td.col-chung-tu select"), "TM");

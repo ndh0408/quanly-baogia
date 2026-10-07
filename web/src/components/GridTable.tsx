@@ -37,6 +37,16 @@ export type GridTableProps = {
   internalNote: boolean;
   approveCol?: boolean;
   canApprove?: boolean;
+  /** HÀNG BỊ KHOÁ (bảng Hà Nội — hàng đã duyệt / đã gửi, src/hnDuyetHang.ts): mọi ô của hàng tắt, không xoá được hàng, thanh
+   *  fx không ghi vào nó. Các đường sửa nhiều ô (dán, kéo điền, cắt, hoàn tác) do nơi gọi canh thêm (HnTables khôi phục
+   *  hàng khoá sau mỗi onChange) — máy chủ là chốt cuối (409 'hang-hn-da-khoa'). */
+  khoaHang?: (it: M.Item) => boolean;
+  /** Hàng khoá vẫn mở ba cột nội bộ NS · Chứng từ · Lưu kho (người quản lý phần HN — khớp máy chủ `moCotNoiBo`). */
+  moCotNoiBoKhiKhoa?: boolean;
+  /** Vẽ RIÊNG ô cột DUYỆT (bảng Hà Nội: trạng thái + nút gửi / duyệt / trả, gọi máy chủ ngay) thay cho ô tích mặc định. */
+  oDuyet?: (i: number) => React.ReactNode;
+  /** Chữ ký của những gì `oDuyet` / `khoaHang` phụ thuộc NGOÀI dữ liệu hàng (quyền, đang gửi…) — đổi là vẽ lại mọi dòng. */
+  duyetSig?: string;
   /** Cột THANH TOÁN của bảng nội bộ — CHỈ XEM (2026-10-06): "✓ Đã TT dd/mm/yyyy" + người tích, trạng thái hóa đơn VAT
    *  (components/OThanhToan.tsx); 📎 / 🧾 chỉ MỞ XEM chứng từ hiện tại (XemChungTu). Tích / đưa ảnh / HĐ VAT chỉ ở trang Hóa
    *  đơn đầu vào của kế toán; lưới không ghi gì vào hàng. */
@@ -255,6 +265,7 @@ let demCat = 0;
 const CAT_DA_XONG = new Set<string>();
 
 function GridTableInner(props: GridTableProps) {
+  const { khoaHang, moCotNoiBoKhiKhoa, oDuyet, duyetSig } = props;
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, daChi, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   const idLyDoKhoaNhom = useId();   // nối ô tích "Thành Tiền nhóm" với dòng giải thích khi bị khoá (nhiều lưới/trang → id riêng)
@@ -380,6 +391,10 @@ function GridTableInner(props: GridTableProps) {
   // nhận bản chụp CŨ: cắt Backdrop, đổi chứng từ của nó sang HĐNS rồi dán → HĐNS mất hẳn, không một lời báo
   // (soát vòng 2). Huỷ thì dán sau đó chỉ CHÉP (onPaste báo rõ), nguồn giữ đúng thứ vừa sửa.
   const ghiSua = () => { pushUndo(); cancelCut(); };
+  // Hàng KHOÁ (xem prop khoaHang) — sửa được ô thường / ô nội bộ của hàng i không.
+  const khoaI = (i: number) => !!khoaHang && !!items[i] && khoaHang(items[i]);
+  const suaO = (i: number) => editable && !khoaI(i);
+  const suaNoiBo = (i: number) => editable && (!khoaI(i) || !!moCotNoiBoKhiKhoa);
   /** Ô (i, f) đã có GÕ trong phiên này chưa — mốc undo của phiên chỉ đặt ở ký tự đầu (markEditUndo). */
   const daGoO = (i: number, f: string) => { const m = editUndoRef.current; return !!m && m.i === i && m.f === f; };
   // dongBo: thao tác vừa GHI ĐÈ model hàng loạt (dán khối / dựng lại) — lượt vẽ kế tiếp kéo ô đang giữ
@@ -792,7 +807,7 @@ function GridTableInner(props: GridTableProps) {
   // GÕ LÀ ĐÈ (Excel READY → ENTER): xoá nội dung cũ, mở khóa, KHÔNG preventDefault — trình duyệt
   // tự chèn ký tự sắp gõ (hoặc cụm IME tiếng Việt) vào ô rỗng. Mốc undo đặt TRƯỚC khi xoá.
   const typeToReplace = (el: HTMLInputElement | HTMLTextAreaElement | null, i: number, f: string) => {
-    if (!editable || !el) return;
+    if (!editable || !el || el.disabled) return;
     markEditUndo(i, f);
     enterEdit(el, {}, "enter");
     el.value = "";
@@ -922,12 +937,12 @@ function GridTableInner(props: GridTableProps) {
     if (document.activeElement === inEl) return;
     const it = items[row]; const fx = it?.formulas?.[field];
     inEl.value = fx ? fx : (!it ? "" : (field === "_amount" || field === "_stt") ? "" : NUMERIC.has(field) ? fmtField(row, field, it[field as keyof M.Item]) : ((it[field as keyof M.Item] as string) || ""));
-    inEl.readOnly = !editable || field === "_amount" || field === "_stt";
+    inEl.readOnly = !editable || field === "_amount" || field === "_stt" || khoaI(row);
   };
   const applyFxBar = (move: boolean) => {
     const inEl = fxInputRef.current; const sel = selRef.current; if (!inEl || !sel) return;
     const { row, field } = sel.anchor;
-    if (!editable || field === "_amount" || field === "_stt") return;
+    if (!editable || field === "_amount" || field === "_stt" || khoaI(row)) return;
     cancelCut();   // chốt ô qua thanh công thức cũng là sửa bảng — xem ghiSua
     commitCell(row, field, inEl.value, true); recomputeAll(); clearActiveRefs(); onChange();   // thanh fx không ghi live → chuỗi y nguyên = không sửa
     if (move) moveTo(row + 1, field, false);
@@ -1317,7 +1332,7 @@ function GridTableInner(props: GridTableProps) {
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
-  const removeRow = (i: number) => { pushUndo(); cancelCut(); xoa(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
+  const removeRow = (i: number) => { if (khoaI(i)) { toast("Hàng đã duyệt / đã gửi duyệt bị khoá — không xoá được", "error"); return; } pushUndo(); cancelCut(); xoa(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
@@ -2519,19 +2534,19 @@ function GridTableInner(props: GridTableProps) {
     // KEY CỐ ĐỊNH (chỉ _k+field): KHÔNG để công thức/giá-trị lật key gây REMOUNT (mất focus khi gõ đè).
     // Hiển thị (kết quả công thức / giá trị sau dán-undo) đồng bộ qua paintCells ở effect (như SPA).
     return (<>
-      <input autoComplete="off" name={f} key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
+      <input autoComplete="off" name={f} key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!suaO(i)}
         title="Số hoặc công thức Excel: =G3*E3, =SUM(H3:H8), 8% — bấm/kéo ô để chèn tham chiếu"
         data-xl="so" onInput={xuLyO} />
       {fx && <button type="button" className="fx-peek-badge" title={"Công thức: " + fx} data-fx-cot={f} data-xl="xem-fx" onClick={xuLyBam}>ƒ</button>}
     </>);
   };
   const txtInput = (i: number, f: string, ph?: string) => (
-    <input autoComplete="off" name={f} data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
+    <input autoComplete="off" name={f} data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!suaO(i)}
       data-xl="chu" onInput={xuLyO} />
   );
   const onTxtInput = (i: number, f: string, el: HTMLInputElement) => { editingRef.current = true; markEditUndo(i, f); fitCell(el); const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); };
   const taInput = (i: number, f: string, ph?: string) => (
-    <textarea autoComplete="off" name={f} data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
+    <textarea autoComplete="off" name={f} data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={f === "ns" ? !suaNoiBo(i) : !suaO(i)}
       ref={autoGrow} data-xl="ta" onInput={xuLyO} />
   );
   const onTaInput = (i: number, f: string, el: HTMLTextAreaElement) => { editingRef.current = true; markEditUndo(i, f); (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChangeSoft(); };
@@ -2746,11 +2761,11 @@ function GridTableInner(props: GridTableProps) {
   const extraCols = (internalNote ? 1 : 0) + (cotNoiBo ? 3 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   // Chữ ký dòng cho DongNho: cấu hình cột (đổi là vẽ lại MỌI dòng) + mọi trường dòng hiển thị.
-  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, !!daChi, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer].join("|");
+  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, !!daChi, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, duyetSig ?? "", !!moCotNoiBoKhiKhoa].join("|");
   const chuKy = (i: number, them: string) => {
     const it = items[i] as Record<string, unknown>;
     return [cauHinhSig, i, them, it.kind, it.label, it.name, it.detail, it.unit, it.quantity, it.quantityExact, it.days, it.unitPrice,
-      it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, payCol ? JSON.stringify(daChiCua(i)) : "",
+      it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, it.trangThaiDuyet, it.lyDoTra, khoaI(i), payCol ? JSON.stringify(daChiCua(i)) : "",
       JSON.stringify(it.formulas || null), JSON.stringify(it._fxWarn || null), JSON.stringify(it._fxLoi || null),
       ((it.images as string[] | undefined) || []).map((x) => x.length).join(",")].join("\u0001");
   };
@@ -2958,17 +2973,18 @@ function GridTableInner(props: GridTableProps) {
       {cotNoiBo && <>
         <td className="col-ns">{taInput(i, "ns")}</td>
         <td className="col-chung-tu">
-          <select name="chungTu" value={String((items[i] as Record<string, unknown>).chungTu || "")} disabled={!editable} data-xl="chung-tu" data-oc="chungTu" onChange={xuLyO} aria-label="Chứng từ">
+          <select name="chungTu" value={String((items[i] as Record<string, unknown>).chungTu || "")} disabled={!suaNoiBo(i)} data-xl="chung-tu" data-oc="chungTu" onChange={xuLyO} aria-label="Chứng từ">
             <option value="">—</option>
             {CHUNG_TU.map(([v, nhan]) => <option key={v} value={v}>{nhan}</option>)}
           </select>
         </td>
-        <td className="col-luu-kho"><input name="luuKho" type="checkbox" checked={!!(items[i] as Record<string, unknown>).luuKho} disabled={!editable} data-xl="luu-kho" data-oc="luuKho" onChange={xuLyO} aria-label="Lưu kho" /></td>
+        <td className="col-luu-kho"><input name="luuKho" type="checkbox" checked={!!(items[i] as Record<string, unknown>).luuKho} disabled={!suaNoiBo(i)} data-xl="luu-kho" data-oc="luuKho" onChange={xuLyO} aria-label="Lưu kho" /></td>
       </>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
-      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input name="approved" type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" data-oc="approved" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
+      {approveCol && oDuyet && <td className="col-approve">{oDuyet(i)}</td>}
+      {approveCol && !oDuyet && <td className="col-approve">{editable ? <label className="ap-wrap"><input name="approved" type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" data-oc="approved" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
       {payCol && <td className="col-pay">{oThanhToan(i)}</td>}
-      {editable && <td className="col-action"><button className="rm-row" title="Xóa hàng" data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
+      {editable && <td className="col-action">{khoaI(i) ? null : <button className="rm-row" title="Xóa hàng" data-xl="xoa-dong" onClick={xuLyBam}>✕</button>}</td>}
     </>
   );
 
@@ -3091,7 +3107,7 @@ function GridTableInner(props: GridTableProps) {
               return <DongNho key={it._k ?? i} sig={chuKy(i, `H|${span}|${stt}`)} ve={() => (
                 <tr data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
                   <td className="col-stt" rowSpan={span}>{stt}</td>
-                  <td className="col-hangmuc" rowSpan={span}><textarea autoComplete="off" name="name" data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} data-xl="ten-hang" onInput={xuLyO} /></td>
+                  <td className="col-hangmuc" rowSpan={span}><textarea autoComplete="off" name="name" data-f="name" rows={1} defaultValue={it.name || ""} disabled={!suaO(i)} ref={autoGrow} data-xl="ten-hang" onInput={xuLyO} /></td>
                   {dataCells(i)}
                 </tr>
               )} />;

@@ -246,7 +246,10 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id/members + phạm vi khi account
     // Bỏ vùng "main" khỏi phạm vi từng NỚI quyền: đường lưu riêng của account phụ
     // (ghiVungNoiBoDuocGiao) thiếu chốt reconcileHanoiTables mà nhánh có "main" vẫn gọi — nên
     // người CHỈ được giao bảng Hà Nội lại sửa được đúng phần giá đã chốt.
-    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "approved" } });
+    // Mô phỏng dữ liệu CŨ duyệt CẢ PHẦN (trước 2026-10-06): hàng chưa mang trạng thái duyệt riêng, hnStatus = approved
+    // → mọi hàng được coi là đã duyệt (src/hnDuyetHang.ts). Lần Lưu ở trên đã ghi trạng thái riêng "dang-lam" nên gỡ đi.
+    const hnCu = (await prisma.quote.findUnique({ where: { id: quoteId }, select: { hnTables: true } })).hnTables;
+    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "approved", hnTables: hnCu.map((t) => ({ ...t, items: t.items.map(({ trangThaiDuyet: _t, lyDoTra: _l, ...it }) => it) })) } });
     expect((await datPhamVi(await dangNhap(chuU), [{ userId: phuU.id, scopes: ["hanoi"] }])).status).toBe(200);
 
     const truoc = await docBaoGia();

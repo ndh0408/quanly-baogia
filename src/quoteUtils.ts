@@ -10,6 +10,7 @@ import { computeQuoteTotals, totalsToJson, D, qtyRound } from "./money.js";
 import { getConfig } from "./templateConfigs.js";
 import { thangNgayVN } from "./vnTime.js";
 import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
+import { phuTrangThaiHn } from "./hnDuyetHang.js";
 
 // Data-URL ảnh base64 hợp lệ TOÀN CHUỖI (không chỉ tiền tố). Dùng để lọc cột "Hình ảnh" khi lưu —
 // khớp validators.customerLogo/itemSchema.images. Kiểm tiền tố sẽ lọt markup thoát thuộc tính src="".
@@ -251,7 +252,7 @@ function presentQuoteForAccountHn(q: any) {
     // gian riêng của họ, phẳng, không dính gì tới trang của chủ.
     // stripExtraProofs: account HN không có quote:internal:pay/internal:view mà ảnh chứng từ
     // (base64) vẫn nằm được trên hàng — lộ ảnh uỷ nhiệm chi và phình payload mỗi lần mở.
-    hnTables: stripExtraProofs(Array.isArray(q.hnTables) ? q.hnTables : []),
+    hnTables: stripExtraProofs(phuTrangThaiHn(q.hnTables, q)),   // trạng thái duyệt HIỆU LỰC từng hàng (hàng cũ suy từ hnStatus)
     _accountHnView: true,
   };
 }
@@ -291,7 +292,7 @@ function presentQuoteForInternal(q: any) {
       tables: stripExtraProofs((Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t?.category !== "hanoi")),
     })),
     // Bảng Hà Nội nay ở CẤP BÁO GIÁ, không thuộc trang nào (migration 20260915140000).
-    hnTables: stripExtraProofs(Array.isArray(q.hnTables) ? q.hnTables : []),
+    hnTables: stripExtraProofs(phuTrangThaiHn(q.hnTables, q)),   // trạng thái duyệt HIỆU LỰC từng hàng (hàng cũ suy từ hnStatus)
     _internalView: true,
   };
 }
@@ -316,7 +317,7 @@ export function presentQuote(q: any, { hnOnly = false, internalOnly = false }: {
     customerCode: q.customer?.code ?? null,
     customerName: q.customer?.name ?? null,
     // Bảng Hà Nội: cấp báo giá, KHÔNG thuộc trang nào. Cắt ảnh chứng từ y như extraTables.
-    ...(q.hnTables !== undefined ? { hnTables: stripExtraProofs(Array.isArray(q.hnTables) ? q.hnTables : []) } : {}),
+    ...(q.hnTables !== undefined ? { hnTables: stripExtraProofs(phuTrangThaiHn(q.hnTables, q)) } : {}),
     // Hàng QuoteMember (khoá ghép quoteId+userId, KHÔNG có cột `id`) → dẹt về hình dạng client đã
     // dùng từ trước, cộng `scopes`. Bỏ bước này là `m.id` ở web/src thành undefined: account phụ
     // mất nút Lưu mà không một lỗi nào hiện ra.
@@ -480,6 +481,11 @@ export function sanitizeExtraTables(tables: any, { valid = ["hcm", "khach"], boC
       approved: !!it.approved,
       approvedAt: it.approvedAt || null,
       approvedBy: it.approvedBy != null ? it.approvedBy : null,
+      // DUYỆT TỪNG HÀNG của bảng Hà Nội (src/hnDuyetHang.ts) — reconcileTrangThaiHn đặt TRƯỚC sanitize từ CSDL, ở đây
+      // chỉ persist. Chỉ bảng HN (boCategory): bảng theo trang duyệt bằng `approved` như cũ. Vắng = hàng cũ, suy từ
+      // `Quote.hnStatus` lúc đọc — nên KHÔNG ghi mặc định nào ở đây.
+      ...(boCategory && ["dang-lam", "cho-duyet", "da-duyet", "tra-lai"].includes(it.trangThaiDuyet) ? { trangThaiDuyet: it.trangThaiDuyet } : {}),
+      ...(boCategory && it.trangThaiDuyet === "tra-lai" && typeof it.lyDoTra === "string" && it.lyDoTra.trim() ? { lyDoTra: it.lyDoTra.trim().slice(0, 500) } : {}),
       // Cờ THANH TOÁN cũ (ĐÓNG BĂNG từ 2026-10-06) — reconcileExtraPayments chép lại từ CSDL TRƯỚC sanitize; persist nguyên
       // trạng. "Đã chi" mới ở bảng InputInvoiceEntry (trang Hóa đơn đầu vào); quote-save không đổi được cờ cũ (chống giả).
       paid: !!it.paid,

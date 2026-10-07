@@ -7,6 +7,7 @@ import { confirmModal, toast } from "../lib/ui";
 import { KhoiSheet } from "./KhoiSheet";
 import type { DaChiTheoRid } from "../lib/daChiHang";
 import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
+import { useGiuHangKhoa } from "../lib/giuHangKhoa";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -130,8 +131,10 @@ export async function removeExtraTableAt(
 // Cột THANH TOÁN (2026-10-06): việc tích ĐÃ CHI + ảnh chứng từ ở trang Hóa đơn đầu vào của kế toán (InvoicesIn);
 // ở đây chỉ HIỆN đã chi chưa / ngày / ai tích (chủ repo: "cái thanh toán hiện đã thanh toán ở đây ngày như nào chứ")
 // — cột chỉ xem, không nút, không ghi gì vào hàng. Nguồn `daChi` (lib/daChiHang), thiếu thì cờ lớp phủ lúc nạp.
-export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, onMarkDirty, thanhChung, daChi }: {
+export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, moCotNoiBo = false, onMarkDirty, thanhChung, daChi }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
+  /** Hàng ĐÃ DUYỆT vẫn mở NS · Chứng từ · Lưu kho (chủ báo giá / người có quyền duyệt — khớp máy chủ). */
+  moCotNoiBo?: boolean;
   /**
    * PHẠM VI theo TỪNG LOẠI bảng — dành cho "account phụ" chỉ được giao một phần (vd chỉ bảng Hà
    * Nội). CỐ Ý chỉ trả lời "có được giao loại này không", KHÔNG nhân với `editable` — `suaDuoc`
@@ -150,7 +153,8 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   const trongPhamVi = (cat: string) => (editableCat ? editableCat(cat) : true);
   const suaDuoc = (cat: string) => editable && trongPhamVi(cat);
   const redraw = () => setTick((t) => t + 1);
-  const onChange = () => { onMarkDirty(); redraw(); };
+  // giuKhoa (khai dưới, sau `tables`) trả hàng ĐÃ DUYỆT về bản chụp nếu dán / kéo điền / Ctrl+Z đè lên nó.
+  const onChange = () => { giuKhoa.giu(); onMarkDirty(); redraw(); };
   /* Khối nào đang mở. Chưa đụng tới thì theo mặc định: ĐÓNG HẾT — trang soạn báo giá vốn đã dài,
      và tiêu đề đã nói đủ số sheet + số tiền nên đóng vẫn đọc được. Xem KhoiSheet.tsx. */
   const [mo, setMo] = useState<Record<string, boolean>>({});
@@ -160,6 +164,13 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
 
   if (!Array.isArray(sheet.extraTables)) sheet.extraTables = [];
   const tables = sheet.extraTables;
+  // KHOÁ HÀNG ĐÃ DUYỆT (2026-10-06, như bảng HN — cùng cơ chế lib/giuHangKhoa): hàng HCM / Phí KH đã duyệt lúc nạp bị
+  // hoàn lại ngay khi một đường sửa nhiều ô chạm vào nó; bỏ tích Duyệt (người có quyền) là thôi giữ.
+  const giuKhoa = useGiuHangKhoa({
+    bangs: tables, moCotNoiBo,
+    khoa: (it) => it.approved === true,
+    thongBao: "Hàng đã duyệt bị khoá — phần sửa vào hàng đó đã được hoàn lại. Bỏ tích Duyệt trước nếu cần sửa.",
+  });
   tables.forEach((x) => { if (x._k == null) x._k = nextK(); (x.items || []).forEach((it) => { if (it._k == null) it._k = nextK(); }); });
 
   const tplList0 = templates.filter((t) => t.companyId === companyId);
@@ -276,13 +287,17 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                         được công thức của ô đang chọn, không bấm-kéo ô khác để chèn tham chiếu qua
                         thanh, và không dùng được Alt+↓ gợi ý tên hạng mục. Cùng một thứ dữ liệu,
                         cùng một người nhập — không có lý do gì để ba lưới khác bộ công cụ. */}
-                    <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items} fxBar
+                    <GridTable key={`extra-${active}-${t.templateId}-${t._k}-${giuKhoa.phien}`} items={t.items} fxBar
                       clfTheme={!!tplOf(t)?.code?.startsWith("clofull")}   // bảng phụ của báo giá Colorfull phải cùng màu với lưới chính và với tệp Excel
                       dock={thanhChung ? thanhChung.dock : undefined}
                       anThanhThem={!!thanhChung && thanhChung.dangLam !== idLuoi(cat)}
                       onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}
                       usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false} cotNoiBo
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
+                      /* KHOÁ HÀNG ĐÃ DUYỆT (2026-10-06, như bảng HN): ô tắt, không xoá được — kể cả với người có quyền duyệt.
+                         Bỏ tích Duyệt là mở lại ngay; máy chủ chặn bản CSDL đã duyệt (409 'hang-hcm-da-khoa'). */
+                      khoaHang={(it) => it.approved === true && (t.category === "hcm" || t.category === "khach")}
+                      moCotNoiBoKhiKhoa={moCotNoiBo}
                       payCol={t.category === "hcm" || t.category === "khach"} daChi={daChi}
                       groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
                       sheetTotalLine={false} />

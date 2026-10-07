@@ -189,18 +189,20 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
     // Bảng HN THỪA trong payload trước đây bị VỨT IM LẶNG + 200: người dùng thêm/nhân bản một bảng
     // HN rồi bấm Lưu, thấy "Đã lưu", tải lại thì bảng biến mất. Không mất dữ liệu ĐANG CÓ trong
     // CSDL, nhưng mất phần vừa gõ — và im lặng là lựa chọn tệ nhất.
-    it("thêm bảng HN mới khi phần HN đã chốt → 409 nói rõ, KHÔNG vứt im lặng", async () => {
+    // HỢP ĐỒNG ĐỔI 2026-10-06 (duyệt TỪNG HÀNG): thêm bảng / hàng MỚI vào phần HN đã duyệt là hợp lệ — hàng mới "đang
+    // làm", chưa vào Hóa đơn đầu vào cho tới khi được duyệt; hàng đã duyệt đứng nguyên. Không còn gì bị vứt im lặng.
+    it("thêm bảng HN mới khi phần HN đã duyệt → 200: bảng mới LƯU ĐƯỢC (chưa duyệt), hàng đã duyệt nguyên vẹn", async () => {
       const { id, sheetId } = await dungBaoGiaHN("approved");
       const r = await emp.put(`/api/quotes/${id}`).send({
         sheets: [{ id: sheetId, templateId, name: "Trang 1", order: 1, items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }] }],
-        hnTables: [bangHN(5_000_000), { ...bangHN(1_234), name: "Giá HN (bảng vừa thêm)" }],
+        hnTables: [bangHN(5_000_000), { ...bangHN(1_234), name: "Giá HN (bảng vừa thêm)", items: [{ ...HANG_HN, rid: undefined, unitPrice: 1_234 }] }],
       });
-      expect(r.status, "bảng vừa thêm bị bỏ mà vẫn báo 200 = người dùng mất phần vừa gõ").toBe(409);
-      expect(r.body.error).toMatch(/Hà Nội/i);
-      // Bảng HN đã duyệt trong CSDL vẫn nguyên vẹn (409 ném ra trước mọi lệnh ghi).
+      expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
       const hn = await hnCuaBaoGia(id);
-      expect(hn).toHaveLength(1);
+      expect(hn).toHaveLength(2);
       expect(hn[0].items[0].unitPrice).toBe(5_000_000);
+      expect(hn[0].items[0].trangThaiDuyet, "hàng cũ đã duyệt cả phần → vật chất hoá thành đã duyệt").toBe("da-duyet");
+      expect(hn[1].items[0].trangThaiDuyet, "hàng mới chưa ai duyệt").toBe("dang-lam");
     });
 
     it("payload BỎ SÓT bảng HN (client cũ không round-trip extraTables) vẫn 200 và giữ nguyên bảng", async () => {
@@ -213,10 +215,16 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
       expect(hn, "payload không nhắc tới `hnTables` = KHÔNG ĐỤNG, không phải xoá").toHaveLength(1);
     });
 
-    it("người CÓ quote:hn:manage (admin/quản lý) vẫn sửa được giá HN đã duyệt", async () => {
+    // HỢP ĐỒNG ĐỔI 2026-10-06: hàng đã duyệt khoá với MỌI người, kể cả admin — bỏ duyệt hàng đó trước rồi mới sửa.
+    it("admin cũng KHÔNG sửa thẳng được hàng HN đã duyệt; BỎ DUYỆT hàng đó rồi mới sửa được", async () => {
       const { id, sheetId } = await dungBaoGiaHN("approved");
+      expect((await luuDeGiaHN(admin, id, sheetId, 3)).status).toBe(409);
+      expect((await hnCuaBaoGia(id))[0].items[0].unitPrice).toBe(5_000_000);
+      const rid = (await hnCuaBaoGia(id))[0].items[0].rid;
+      const bo = await admin.post(`/api/quotes/${id}/hn/review`).send({ decision: "unapprove", rids: [rid] });
+      expect(bo.status, JSON.stringify(bo.body).slice(0, 300)).toBe(200);
       expect((await luuDeGiaHN(admin, id, sheetId, 3)).status).toBe(200);
-      expect((await hnCuaBaoGia(id))[0].items[0].unitPrice, "người duyệt phần HN thì được quyền sửa").toBe(3);
+      expect((await hnCuaBaoGia(id))[0].items[0].unitPrice).toBe(3);
     });
   });
 
