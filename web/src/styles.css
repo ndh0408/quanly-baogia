@@ -4686,7 +4686,7 @@ button.qn-text:hover {
   align-items: center;
   justify-content: flex-end;
   gap: 7px;
-  cursor: help;
+  cursor: pointer;
 }
 .summary-formula-value.danger {
   color: var(--danger);
@@ -5535,6 +5535,34 @@ button.qn-text:hover {
 }
 [data-fx-shown] {
   color: var(--fx-cell) !important;
+}
+
+/* ── Xem công thức ô TỔNG (components/CongThucTong.tsx) — y như ô công thức của lưới ──
+   Ô góp vào tổng mang ĐÚNG lớp `cell-ref-active` + `--ref-color` của lưới (GridTable toORef). public/style.css chỉ
+   khai lớp đó cho `.excel-table`, nên khai lại y hệt hai luật đó (sáng + tối) cho khối tổng và bảng "Tổng báo giá".
+   `:not(#nhom-toi)` để thắng nền tfoot của `.summary-table` (kể cả `.clf-theme`) và luật tối có id. */
+:is(.sheet-total-box, .summary-table):not(#nhom-toi) td.cell-ref-active {
+  box-shadow: inset 0 0 0 2px var(--ref-color, #1769d6);
+  background: color-mix(in srgb, var(--ref-color, #1769d6) 12%, transparent);
+}
+:root[data-theme="dark"] :is(.sheet-total-box, .summary-table):not(#nhom-toi) td.cell-ref-active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ref-color, #1769d6) 45%, #bbf7d0);
+  background: color-mix(in srgb, var(--ref-color, #1769d6) 24%, transparent);
+}
+/* Chữ công thức hiện tại chỗ: cùng màu + phông với `[data-fx-shown]` của lưới; được xuống dòng (công thức Tổng sheet
+   của lưới dài có thể rất dài) và bôi chọn được để chép. */
+.o-tong-cong-thuc {
+  max-width: 52ch;
+  color: var(--fx-cell);
+  font:
+    600 11.5px/1.45 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+  user-select: text;
 }
 
 /* ── Chỗ lẻ ngoài vùng soạn (đo trên dev + rà mã) ── */

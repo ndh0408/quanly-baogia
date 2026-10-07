@@ -17,6 +17,8 @@ import { XemChungTu, type LoaiChungTu } from "./XemChungTu";
 import { doanBoCot } from "../lib/doanBoCot";
 import { coNhomNhanHeSo, khoaBatNhom, LY_DO_KHOA_NHOM, TB_TU_BAT_NHOM, TB_TU_TAT_NHOM } from "../lib/khoaThanhTienNhom";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
+import { soDoDiaChi } from "../lib/soDoDiaChi";
+import { congThucTongSheet } from "../lib/congThucTong";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -105,6 +107,10 @@ const tenHangMuc = (v: unknown) => String(v ?? "").normalize("NFC").replace(/\s+
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote", "ns"]);
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
+/** Tô / gỡ MỘT ô được công thức trỏ tới (tham chiếu thứ `ci` → màu REF_COLORS[ci]). Xuất ra để khối tổng của màn soạn
+ *  (CongThucTong) tô ô góp vào tổng bằng đúng lớp + màu này — không có kiểu tô thứ hai. */
+export function toORef(td: HTMLElement, ci: number) { td.classList.add("cell-ref-active"); td.style.setProperty("--ref-color", REF_COLORS[ci % REF_COLORS.length]); }
+export function goORef(td: HTMLElement) { td.classList.remove("cell-ref-active"); td.style.removeProperty("--ref-color"); }
 // Bấm vào những vùng này KHÔNG được coi là "rời lưới" → GIỮ vùng chọn.
 // .grid-add-bar (nút + Thêm hàng/nhóm/Nhóm con/Dòng thông tin/Chèn từ rạp) và modal chèn từ rạp đều
 // chèn NGAY DƯỚI hàng đang chọn; xoá selection ngay lúc pointerdown làm hàng mới rơi xuống cuối bảng.
@@ -487,18 +493,8 @@ function GridTableInner(props: GridTableProps) {
   };
 
   // ── A1 addressing + công thức ───────────────────────────────────────────────
-  const ADDR: { f: string; ro?: boolean; L: string }[] = [
-    { f: "_stt", ro: true, L: "" }, { f: "name", L: "" },
-    // Cột Chi Tiết dù ĐÃ ẨN vẫn giữ chỗ trong sơ đồ địa chỉ (keepDetailSlot) → công thức cũ
-    // "=F3*E3" của báo giá đã lưu vẫn trỏ đúng Đơn giá × Số lượng.
-    ...(keepDetailSlot ? [{ f: "detail", L: "" }] : []),
-    { f: "unit", L: "" }, { f: "quantity", L: "" },
-    ...(usesDays ? [{ f: "days", L: "" }] : []),
-    { f: "unitPrice", L: "" }, { f: "_amount", ro: true, L: "" }, { f: "notes", L: "" },
-    ...(internalNote ? [{ f: "internalNote", L: "" }] : []),
-    ...(cotNoiBo ? [{ f: "ns", L: "" }] : []),   // cột CUỐI của sơ đồ — không dịch chữ cột nào trước nó
-  ];
-  ADDR.forEach((c, i) => { c.L = M.groupLetter(i); });
+  // Sơ đồ chữ cái cột sống ở lib/soDoDiaChi — khối tổng của màn soạn (CongThucTong) viết công thức bằng CHÍNH sơ đồ này.
+  const ADDR = soDoDiaChi({ giuChiTiet: keepDetailSlot, usesDays, internalNote, cotNoiBo: !!cotNoiBo });
   const colByL: Record<string, { f: string }> = {}; ADDR.forEach((c) => { colByL[c.L] = c; });
   const idxOfL = (L: string) => ADDR.findIndex((c) => c.L === L);
   const letterOf = (f: string) => ADDR.find((c) => c.f === f)?.L || "";
@@ -973,7 +969,7 @@ function GridTableInner(props: GridTableProps) {
     const ca = idxOfL(a.L), cb = idxOfL(b.L);
     paintRect(rowIndexOf(tb), Math.min(a.row, b.row), Math.max(a.row, b.row), Math.min(ca, cb), Math.max(ca, cb), (c) => ADDR[c].f, "cell-ref-pick");
   };
-  const clearActiveRefs = () => tableRef.current?.querySelectorAll("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); (t as HTMLElement).style.removeProperty("--ref-color"); });
+  const clearActiveRefs = () => tableRef.current?.querySelectorAll<HTMLElement>("td.cell-ref-active").forEach(goORef);
   clearOutsideRef.current = () => { clearSel(); clearActiveRefs(); };
   // Cũng dựng chỉ mục hàng MỘT lần: hàm này chạy cùng nhịp với paintRefPick (mỗi mousemove khi
   // kéo chọn dải, và mỗi phím khi gõ công thức).
@@ -982,10 +978,7 @@ function GridTableInner(props: GridTableProps) {
     const rects = refRectsOfFormula(text, parseAddr, idxOfL);
     const tb = tableRef.current; if (!tb || !rects.length) return;
     const idx = rowIndexOf(tb);
-    rects.forEach((rc, ci) => paintRectWith(idx, rc.r0, rc.r1, rc.c0, rc.c1, (c) => ADDR[c].f, (td) => {
-      td.classList.add("cell-ref-active");
-      td.style.setProperty("--ref-color", REF_COLORS[ci % REF_COLORS.length]);
-    }));
+    rects.forEach((rc, ci) => paintRectWith(idx, rc.r0, rc.r1, rc.c0, rc.c1, (c) => ADDR[c].f, (td) => toORef(td, ci)));
   };
   const startPointDrag = (fxInput: HTMLInputElement | HTMLTextAreaElement, startInfo: Addr) => {
     const caret = fxInput.selectionStart ?? fxInput.value.length;
@@ -2841,15 +2834,11 @@ function GridTableInner(props: GridTableProps) {
     const rng = childAmountRange(i); if (!rng) return;
     toggleCellFormula(td, `${Lp}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})`);   // Đơn giá nhóm = Σ Thành Tiền mục con
   };
+  // CÙNG luật với khối tổng của màn soạn (lib/congThucTong): bản cũ liệt kê MỌI hàng nhóm + nhóm con nên mẫu đánh số
+  // nhóm con (nhóm cha dồn tổng nhóm con lên) đếm hai lần, và nhóm rỗng cũng bị tô.
   const revealSheetTotal = (td: HTMLElement) => {
-    const rows: number[] = [];
-    if (groupSubtotal) {
-      let inGroup = false;
-      for (let i = 0; i < items.length; i++) { const k = items[i].kind; if (k === "section" || k === "subsection") { rows.push(i); inGroup = true; } else if ((k === "item" || k === "sub") && !inGroup) rows.push(i); }
-    } else {
-      for (let i = 0; i < items.length; i++) { const k = items[i].kind; if (k === "item" || k === "sub") rows.push(i); }
-    }
-    if (rows.length) toggleCellFormula(td, "Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
+    const ct = congThucTongSheet(items, { groupSubtotal, usesDays, numberSubs, La, Lq });
+    if (ct.phanTu.length) toggleCellFormula(td, "Tổng", ct.congThuc);
   };
   // ── Cột "Hình ảnh": chèn NHIỀU ảnh/ô, tự NÉN nhỏ (canvas → JPEG ~0.82, cạnh tối đa 1400px) trước
   //    khi lưu để đỡ nặng DB; nền trắng để PNG trong suốt không bị đen. Tối đa 10 ảnh/ô. ──
@@ -2954,7 +2943,7 @@ function GridTableInner(props: GridTableProps) {
         // id, getElementById chỉ trả thanh đầu → thanh của bảng nội bộ giữ nguyên ô / công thức cũ (soát DevTools 2026-10-06).
         document.querySelectorAll<HTMLInputElement>("input.fx-input").forEach((inEl) => { if (inEl.readOnly) inEl.value = ""; });
         document.querySelectorAll<HTMLElement>(".fx-addr").forEach((addrEl) => { addrEl.textContent = "—"; });
-        document.querySelectorAll<HTMLElement>("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); t.style.removeProperty("--ref-color"); });
+        document.querySelectorAll<HTMLElement>("td.cell-ref-active").forEach(goORef);
       }
     };
     document.addEventListener("mousedown", onDown, true);
