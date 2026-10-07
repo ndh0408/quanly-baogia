@@ -9,6 +9,7 @@ import { ExtraTables, loiXoaBangDaChi, soHangDaChiCuaTrang } from "../components
 import { HnTables, mauBangHn, hnCoThayDoi, gopTrangThaiHn, ridTheoTrangThai, type HnTable, type ThaoTacHangHn } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
+import { OCongThuc, xemKhoiTong, xemBangTong } from "../components/CongThucTong";
 import { CustomerPicker } from "../components/CustomerPicker";
 import { HopChiaHoaDon } from "../components/HopChiaHoaDon";
 import { baoGiaChoHoaDon, type GanSheet } from "../lib/hoaDonChia";
@@ -200,14 +201,6 @@ export function ghepTrangXungDot(nhap: Sheet[], tuoi: Sheet[]): { sheets: Sheet[
     return { ...goc, ...soan } as Sheet;
   });
   return { sheets, khongGhep };
-}
-
-function SummaryFormula({ label, formula, value, prefix = "", danger = false }: { label: string; formula: string; value: number; prefix?: string; danger?: boolean }) {
-  const show = () => toast(`${label}: ${formula} = ${prefix}${M.fmtMoney(value)}`, "info");
-  return <span className={`summary-formula-value${danger ? " danger" : ""}`} onDoubleClick={show} title={`Bấm đúp hoặc bấm ƒ để xem: ${formula}`}>
-    <span>{prefix}{M.fmtMoney(value)}</span>
-    <button type="button" className="summary-fx-btn" onClick={show} aria-label={`Xem công thức ${label}`}>ƒ</button>
-  </span>;
 }
 
 let _companies: EditorCompany[] | null = null;
@@ -1283,6 +1276,10 @@ Lý do (không bắt buộc):`,
   const tt = M.quoteTotals(perSheet, q.vatPercent);
   const stt = perSheet[ai] ?? { gross: 0, discount: 0, net: 0 };   // khối tổng của sheet ĐANG MỞ
   const sheetVat = M.roundVnd(stt.net * (Number(q.vatPercent) || 0) / 100);
+  // Bấm số ở khối tổng / bảng Tổng báo giá → hiện công thức tham chiếu ô + tô ô góp vào (components/CongThucTong). Chỉ
+  // dựng closure ở đây; công thức chỉ được tính lúc bấm. Sơ đồ địa chỉ phải khớp đúng props của <GridTable> chính bên dưới.
+  const xemTong = xemKhoiTong({ items: activeSheet.items, groupSubtotal: !!activeSheet.groupSubtotal, usesDays, numberSubs, diaChi: { giuChiTiet: addrDetail, usesDays, internalNote: true }, tong: stt, vatPct: Number(q.vatPercent) || 0, vat: sheetVat });
+  const xemBang = xemBangTong({ cacSheet: sheets.map((s, i) => ({ ten: s.name || templates.find((x) => x.id === s.templateId)?.name || `Sheet ${i + 1}`, custStatus: s.custStatus, tong: perSheet[i] ?? { gross: 0, discount: 0, net: 0 } })), tt, vatPct: Number(q.vatPercent) || 0, sheetDangMo: ai });
 
   return (
     <div>
@@ -1468,6 +1465,8 @@ Lý do (không bắt buộc):`,
         {/* key theo DANH TÍNH sheet (`_k`), không theo chỉ số: xoá sheet đang mở hay một tab đứng trước
             nó mà giữ instance cũ là giữ luôn ngăn Ctrl+Z của sheet khác — `restore()` chép ảnh chụp
             đó đè lên items của sheet đang hiện (L53/L0). Đổi mẫu vẫn gắn lại như trước. */}
+        {/* `data-luoi-chinh`: khối tổng bên dưới tìm ô Thành tiền để tô khi bấm xem công thức Tổng sheet (CongThucTong). */}
+        <div data-luoi-chinh="">
         <GridTable key={`main-${activeSheet.templateId}-${activeSheet._k}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
           dock={oDock}
           anThanhThem={luoiDangLam.id !== "chinh"}
@@ -1478,6 +1477,7 @@ Lý do (không bắt buộc):`,
           showImages={!!activeSheet.showImages} onShowImages={(v) => { activeSheet.showImages = v; mark(); redraw(); }}
           sheetTotalLine={false}
           onChange={() => { mark(); redraw(); }} />
+        </div>
 
         {/* KHỐI TỔNG CỦA SHEET ĐANG MỞ — đúng những hàng in ra file Excel của chính sheet này:
             Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền.
@@ -1486,7 +1486,7 @@ Lý do (không bắt buộc):`,
           <tbody>
             <tr>
               <td>{stt.discount > 0 ? "Cộng" : "Tổng sheet"}</td>
-              <td><SummaryFormula label="Cộng" formula="=SUM(Thành Tiền các hàng)" value={stt.gross} /></td>
+              <td><OCongThuc nhan={stt.discount > 0 ? "Cộng" : "Tổng sheet"} ma="cong" giaTri={stt.gross} tinh={xemTong.cong} /></td>
             </tr>
             <tr>
               <td>
@@ -1520,14 +1520,14 @@ Lý do (không bắt buộc):`,
                   : null}
               </td>
               <td>{stt.discount > 0
-                ? <SummaryFormula label="Discount" formula="=Discount của sheet này" value={stt.discount} prefix="-" />
+                ? <OCongThuc nhan="Discount" ma="discount" giaTri={stt.discount} tienTo="-" tinh={xemTong.discount} />
                 : <span className="muted">—</span>}</td>
             </tr>
             {stt.discount > 0 && (
-              <tr><td>Tổng cộng</td><td><SummaryFormula label="Tổng cộng sheet" formula="=Cộng-Discount" value={stt.net} /></td></tr>
+              <tr><td>Tổng cộng</td><td><OCongThuc nhan="Tổng cộng sheet" ma="tong-cong" giaTri={stt.net} tinh={xemTong.tongCong} /></td></tr>
             )}
-            <tr><td>VAT ({Number(q.vatPercent) || 0}%)</td><td><SummaryFormula label="VAT sheet" formula={`=ROUND(${stt.discount > 0 ? "Tổng cộng" : "Tổng sheet"}*${Number(q.vatPercent) || 0}%;0)`} value={sheetVat} /></td></tr>
-            <tr><td><strong>Thành tiền</strong></td><td><SummaryFormula label="Thành tiền sheet" formula={`=${stt.discount > 0 ? "Tổng cộng" : "Tổng sheet"}+VAT`} value={stt.net + sheetVat} danger /></td></tr>
+            <tr><td>VAT ({Number(q.vatPercent) || 0}%)</td><td><OCongThuc nhan="VAT sheet" ma="vat" giaTri={sheetVat} tinh={xemTong.vat} /></td></tr>
+            <tr><td><strong>Thành tiền</strong></td><td><OCongThuc nhan="Thành tiền sheet" giaTri={stt.net + sheetVat} nguy tinh={xemTong.thanhTien} /></td></tr>
           </tbody>
         </table>
 
@@ -1567,18 +1567,18 @@ Lý do (không bắt buộc):`,
                   trong con số từng dòng rồi, đưa lại lên đây chỉ khiến người đọc tưởng trừ hai lần. */}
               <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col">Khách duyệt</th><th scope="col" style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
               <tbody>
-                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const st = perSheet[i] ?? { gross: 0, discount: 0, net: 0 }; const name = s.name || t?.name || `Sheet ${i + 1}`; return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{name}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}><SummaryFormula label={`Tổng sheet ${name}`} formula={st.discount > 0 ? `=TỔNG_SHEET("${name}")-Discount(${M.fmtMoney(st.discount)})` : `=TỔNG_SHEET("${name}")`} value={st.net} /></td></tr>; })}
+                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const st = perSheet[i] ?? { gross: 0, discount: 0, net: 0 }; const name = s.name || t?.name || `Sheet ${i + 1}`; return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{name}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}><OCongThuc nhan={`Tổng sheet ${name}`} ma={`bg-sheet-${i}`} giaTri={st.net} tinh={xemBang.sheet(i)} /></td></tr>; })}
               </tbody>
               <tfoot>
                 {/* Chỉ cộng các sheet KHÁCH ĐÃ DUYỆT — báo giá nhiều sheet hay chốt từng phần. */}
                 {sheets.some((s) => s.custStatus === "approved") && (
                   <tr><td colSpan={3}>Tổng phần khách đã duyệt</td><td style={{ textAlign: "right" }}>
-                    <SummaryFormula label="Tổng phần khách đã duyệt" formula="=SUM(Các sheet khách đã duyệt, đã trừ Discount)" value={sheets.reduce((acc, s, i) => (s.custStatus === "approved" ? acc + (perSheet[i]?.net ?? 0) : acc), 0)} />
+                    <OCongThuc nhan="Tổng phần khách đã duyệt" giaTri={sheets.reduce((acc, s, i) => (s.custStatus === "approved" ? acc + (perSheet[i]?.net ?? 0) : acc), 0)} tinh={xemBang.daDuyet} />
                   </td></tr>
                 )}
-                <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}><SummaryFormula label="Tổng cộng" formula="=SUM(Tổng từng sheet)" value={tt.subtotal} /></td></tr>
-                <tr><td colSpan={3}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}><SummaryFormula label="VAT" formula={`=ROUND(Tổng cộng*${Number(q.vatPercent) || 0}%;0)`} value={tt.vat} /></td></tr>
-                <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right" }}><SummaryFormula label="Thành tiền" formula="=Tổng cộng+VAT" value={tt.total} danger /></td></tr>
+                <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}><OCongThuc nhan="Tổng cộng" ma="bg-tong-cong" giaTri={tt.subtotal} tinh={xemBang.tongCong} /></td></tr>
+                <tr><td colSpan={3}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}><OCongThuc nhan="VAT" ma="bg-vat" giaTri={tt.vat} tinh={xemBang.vat} /></td></tr>
+                <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right" }}><OCongThuc nhan="Thành tiền" giaTri={tt.total} nguy tinh={xemBang.thanhTien} /></td></tr>
               </tfoot>
             </table>
           </div>
