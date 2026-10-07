@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 145 endpoint
+# Ma trận phân quyền — toàn bộ 147 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
