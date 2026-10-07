@@ -12,12 +12,441 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**661 commit**, từ 2026-05-29 tới 2026-09-23.
+**1072 commit**, từ 2026-05-29 tới 2026-10-07.
 
 ---
 
+## 2026-10-07
+
+- `19efd60` docs: 147 endpoint, 380 tệp test backend sau khi ráp duyệt HN/HCM từng hàng + chia hóa đơn đầu ra
+
+## 2026-10-06
+
+- `1e2417f` fix(bảng nội bộ): Chi phí HCM / Phí KH hoàn lại ngay khi dán / kéo điền / Ctrl+Z đè lên hàng đã duyệt — dùng chung cơ chế với bảng HN
+- `fc8a32d` docs(README): 376 tệp test backend sau khi gộp ne-chu-nhom-trung
+- `87a4dbc` fix(duyệt hàng): giữ quyền duyệt HN cũ (quote:hn:manage) + khoá hàng Chi phí HCM / Phí KH đã duyệt như HN
+- `35bff90` feat(hóa đơn đầu ra): "Làm lại HĐ" gỡ số HĐ để chia lại; Chưa thu bỏ sheet Không xuất, giữ Để sau
+- `8123e80` feat(Hà Nội): duyệt TỪNG HÀNG bảng Báo Giá Hà Nội — gửi / duyệt / trả / bỏ duyệt theo hàng, hàng đã duyệt khoá ở máy chủ, vào Hóa đơn đầu vào ngay
+- `6926f25` feat(hóa đơn đầu ra): kế toán chia sheet thành Hóa đơn 1, 2… / Để sau / Không xuất
+- `1b999c6` fix(nhập Excel): chữ nhóm trong file mà trùng nhau thì bỏ, app tự đánh lại A, B, C — thôi hiện hai nhóm "A"
+- `9580912` fix(mẫu báo giá): sheet / bảng MỚI chọn sẵn mẫu Không ngày (đúng thứ tự Không ngày → Banner → Có ngày)
+- `62785c2` ci(bundle web): nâng trần 850.000 → 900.000 byte có chủ ý — 859.313 sau đợt tính năng 2026-10-06; số bài vitest web 1938
+- `91ab411` fix(quyền): thu hẹp xem chứng từ từ bảng nội bộ — chỉ admin, chủ báo giá, người được giao vùng, kế toán
+- `5e467f2` docs: số liệu sau khi ráp HĐ VAT + tên ô nhập — 145 endpoint (/api/quotes 31), 375 tệp test backend, web 170 tệp / 1936 bài
+- `3e59f33` feat(hóa đơn đầu vào): hóa đơn VAT cho kế toán + xem chứng từ từ bảng nội bộ — "Đã TT · chưa VAT"
+- `54909e2` fix(ô nhập): khai autoComplete cho 57 ô Chrome nhận ra kiểu — thôi gợi ý điền email/SĐT của mình vào ô của khách
+- `3784f67` fix(test ô nhập): nạp mã nguồn bằng import.meta.glob ?raw thay vì node:fs — bản dựng image gãy ở tsc
+- `f831d29` docs: số liệu sau khi ráp cột Thanh toán chỉ xem — 144 endpoint (/api/quotes 30), 373 tệp test backend, web 167 tệp / 1923 bài
+- `83e87c6` feat(bảng nội bộ): cột THANH TOÁN chỉ xem ở màn soạn / Account HN / màn chỉ-xem nội bộ — đã chi, ngày, người tích; tích + ảnh vẫn ở Hóa đơn đầu vào
+- `5600a17` fix(ô nhập): mọi input/select/textarea có name — Chrome Issues thôi báo "form field should have an id or name"
+- `5ac5238` fix(quét bảo mật): chạy được trong git worktree — gitleaks lịch sử đang xanh GIẢ, semgrep treo hàng giờ
+- `71da38a` feat(mẫu báo giá): ô chọn mẫu xếp Không ngày → Banner → Có ngày (GN và Colorfull) — sắp ở mã, không đổi mẫu mặc định
+- `b651ac4` feat(lưới): Ctrl+V dán ảnh từ clipboard vào ô Hình ảnh — ảnh chụp màn hình / "Sao chép hình ảnh" đi đúng đường nén của nút ＋
+- `aec67b6` fix(soát DevTools sau deploy): Cloudflare thôi chèn beacon bị CSP chặn, có favicon, thanh fx thứ hai được dọn, ô lọc có name
+- `664631c` fix(quét bảo mật): bỏ toán tử `satisfies` ở mã khoản chi — semgrep 1.97 quét dở 5 tệp, quá ngưỡng ghim 3
+- `e4e23b6` fix(phụ thuộc): source-map-js 1.2.1 → 1.2.2 — GHSA-68fv-2mgg-jv7q (HIGH, DoS vòng sự kiện), npm audit đỏ
+- `e214ecf` fix(phụ thuộc): source-map-js 1.2.1 → 1.2.2 — GHSA-68fv-2mgg-jv7q (HIGH, DoS vòng sự kiện), cổng npm audit đỏ
+- `edf5ab9` style(css): prettier cho luật ô "Thành Tiền nhóm" bị khoá — cổng prettier của verify đỏ
+- `cb14f8c` feat(hóa đơn đầu vào): kế toán tích ĐÃ CHI + ảnh chứng từ, ghi Ngày HĐ + Ghi chú KT — bảng khoản chi riêng, gỡ khỏi màn soạn
+- `a1ee373` docs: số liệu sau khi ráp khoá Thành Tiền nhóm + Colorfull — 362 tệp test backend, web 146 tệp / 1616 bài
+- `e579b77` fix(nhập Excel): thẻ đối chiếu không gọi phần chênh do hệ số nhóm là "Khớp" dù nhỏ hơn ngưỡng; bảng HN đối chiếu bằng extraTableSum; "Chưa khớp" nêu tiền các hàng đọc được; chữ "file"; bẻ tên nhóm dài
+- `c12a051` fix(nhập Excel): Nối vào cuối — "sau nạp" là phần tổng sheet thật sự tăng thêm; hết "Khớp" khi hàng nối vào bị nhân ×N theo nhóm cuối
+- `2b2ce65` docs(lưới): gợi ý danh mục trên hàng nhóm CHỈ mở bằng Alt+↓ — bỏ câu sai "gõ tên rồi chọn"
+- `c44ae9a` docs: README 367 tệp test sau khi gộp tich-hop-2909 (thêm cf-clf-khoi-kinh-gui-gop-tu-stt)
+- `3433d45` fix(màn soạn): thanh nút đáy không còn đè nút ở laptop 720–768px — bốn lớp theo bề rộng, khoá bằng vitest + ui-smoke [U13b]
+- `afbd306` feat(báo giá): ghi chú danh sách 5 màu + bộ lọc đầy đủ, đổi khách ở màn soạn, Hóa đơn đầu ra / đầu vào — kèm soát giao diện nhiều cỡ màn hình
+- `4665b96` fix(xuất Excel Colorfull): bản có ngày tự xoá chữ mồi C3 — không trông vào vùng gộp B3:J3; bài chiều cao hàng 3 chặn cả phép đo RỘNG hơn vùng gộp
+- `157ea18` docs: luật ô "Hiện Thành Tiền nhóm" đủ các đường bật / không bật; truy vấn chỉ-đọc kiểm báo giá cũ tắt + nhóm SL > 1
+- `1f924f3` fix(lưới, nhập Excel): nhập Excel TỰ BẬT "Thành Tiền nhóm"; gợi ý danh mục tự bật; hoàn tác tự tắt có lời báo; ô khoá nhìn rõ
+
+## 2026-09-30
+
+- `2cb8937` fix(lưới): khoá "Thành Tiền nhóm" vòng 3 — cờ nằm trong mốc hoàn tác, điền/dán vùng và Esc không bật hộ báo giá cũ
+- `3f11533` fix(xuất Excel Colorfull): khối "Kính gửi" gộp liền từ cột STT — B3:I3 (bản có ngày B3:J3), hết ô B3 trống lẻ bên trái
+- `f6f3bb3` fix(lưới): khoá "Thành Tiền nhóm" vòng 2 — báo giá cũ không bị bật oan, công thức/Ctrl+Z bật lại có lời báo
+- `87ba425` fix(lưới): ô "Thành Tiền nhóm" tự bật rồi KHOÁ bật khi còn nhóm SL > 1 — hết đường bỏ tích làm tổng sai im lặng
+- `19eab96` test: nới trần 4 bài nặng CPU / nạp nguội đỏ oan ở verify đầy đủ — ct-lam-tron L27, xt-tien-dong vét, ht12 (spawn tsx), b2 (nạp app lần đầu)
+- `a9cd0f5` test(ops): ba tệp chạy script bash thật được nới trần 90s — hết đỏ oan vì hết giờ 20s dưới tải verify
+- `3a86a12` fix(phụ thuộc): nodemailer 9.1.1 → 10.0.12 — GHSA-v53p-9fqp-m79j (HIGH, DoS ở addressparser), trivy và npm audit đỏ
+- `0a37406` docs: số bài vitest web 1390 sau vòng dọn tồn
+- `1261750` test(check-line-refs): dữ liệu mẫu trong ops-cong-kiem ghép mảnh — hết tham chiếu tệp:dòng giả cho cổng soi
+- `b06db41` test(xuất Excel Colorfull): khoá hai chốt chữ ký còn lại của `imgDims` — PNG mang đuôi .jpeg, PNG có khối đầu không phải IHDR
+- `86dae44` docs(image): tham chiếu tệp:dòng trong Dockerfile/compose đổi sang TÊN — check-line-refs soi Dockerfile và tệp ở gốc repo
+- `5eb7a91` fix(lưới): sửa hàng nguồn sau Ctrl+X huỷ chế độ cắt; dán Hạng Mục + tiền từ ngoài đổi tên thì bỏ NS · CHỨNG TỪ · LƯU KHO
+- `c515f25` fix(bản mới): LƯU KHO cắt cả ở "Bản mới" cùng mã dự án — cùng luật với đã trả / duyệt, test chốt cả hai nút
+- `c4c8ac3` fix(explain-hot-paths): miễn trừ ĐẾM TỔNG nêu đúng bảng, đúng khuôn prisma.count — câu đếm trang groupBy thôi lọt
+
+## 2026-09-29
+
+- `f709e8f` fix(xuất Excel Colorfull): `anhMau: null` coi như không khai, và `imgDims` soát chữ ký tệp — khoá hai nhánh dự phòng của tiLeAnhGoc
+- `401766c` test(cạn pool): kết nối chiếm pool được chờ rộng, chiếm xong mới hạ 600ms — hết đỏ oan dưới tải verify
+- `98bc0ce` docs: số liệu sau khi ráp ba mảng — 361 tệp test backend, web 137 tệp / 1373 bài; tham chiếu GridTable theo TÊN
+- `8bdf2a3` fix(explain-hot-paths): chốt "được gọi thẳng" so ĐƯỜNG THẬT — gọi qua junction không còn thoát 0 im lặng
+- `5e8f783` perf(danh sách báo giá): đếm trang theo id của trang, không gộp toàn bảng QuoteSheet — explain-hot-paths dựng trang để thấy
+- `cc3a701` docs: sáu tham chiếu tệp:dòng còn trôi đổi sang TÊN — kèm bài neo tên thay thế có thật
+- `a410028` test(xuất Excel Colorfull): bài "mã in ĐÚNG MỘT lần" đếm chính mã chứ không đếm tiền tố — và chú thích logo theo đúng 6c06121
+- `8c3d7e8` fix(explain-hot-paths): phán quyết theo index, không theo thứ tự vật lý của bảng — hết đỏ/xanh thất thường
+- `30ca30d` fix(lưới): Home / End / PgUp / PgDn ở ô CHỨNG TỪ đi ô, không để trình duyệt đổi chứng từ
+- `fe78c12` fix(bảng nội bộ): Ctrl+D, Delete và dán lệch cột cũng theo luật "ba trường đi theo hạng mục"
+- `6c06121` fix(xuất Excel Colorfull): logo COLORFUL theo đúng tỉ lệ ảnh gốc — chính tệp mẫu đã bóp ngang 5,6%
+- `1583881` test(bảng nội bộ): phần Hà Nội đã chốt khoá cả NS · CHỨNG TỪ · LƯU KHO — đi HTTP thật trên CSDL
+- `bbfdf8b` test(bảng nội bộ): ExtraTables và HnTables thật sự bật ba cột NS · CHỨNG TỪ · LƯU KHO
+- `6007c12` fix(lưới): ô CHỨNG TỪ · LƯU KHO · DUYỆT vào điều hướng mũi tên, Ctrl+Z chạy ngay tại ô
+- `0c816b8` fix(image): ghi sàn libexpat >= 2.8.5-r0 ở stage runtime — lớp apk bị cache giữ CVE-2026-93990
+- `cdd07a3` docs: tham chiếu file:dòng đã trôi đổi sang TÊN hàm/hằng — check-line-refs xanh lại
+- `ecc4092` fix(nhập Excel): hộp xác nhận chế độ Thay đếm cả hàng sẽ mất NS · CHỨNG TỪ · LƯU KHO
+- `7675c86` fix(nhân bản): bản sao cắt LƯU KHO, giữ NS · CHỨNG TỪ của bảng nội bộ + test CSDL ba trường
+- `eb49502` fix(so sánh phiên bản): không báo đổi giả vì NS · LƯU KHO · CHỨNG TỪ của bảng nội bộ
+- `6db75d6` fix(bảng nội bộ): NS · CHỨNG TỪ · LƯU KHO đi theo hạng mục cả khi khối không chạm cột NS
+- `2b9e3da` fix(bảng nội bộ): màn kế toán hiện NS · CHỨNG TỪ · LƯU KHO (chỉ đọc)
+- `4c4bd07` fix(xuất Excel Colorfull): theo bản 582ce85 — và logo COLORFUL giữ đúng hình tệp mẫu khi bảng đổi bề rộng cột
+
+## 2026-09-25
+
+- `ed1b5b9` fix(bảng nội bộ): CHỨNG TỪ · LƯU KHO đi theo hạng mục khi chép / cắt nguyên hàng
+- `52b2fc8` test: siết INFRA-14 (chạy thật script VM) và bài bảng đối chiếu của NS · CHỨNG TỪ · LƯU KHO
+- `892e154` fix(bảng nội bộ): nhập Excel chế độ Thay không còn xoá lặng NS · CHỨNG TỪ · LƯU KHO
+- `7629d1f` test(INFRA-14): ssh giả đọc bundle như ssh thật — 2 bài test-on-dev hết đỏ sau khi đổi sang git bundle
+- `22af99d` fix(test): chạy bộ test dev trên đúng commit HEAD
+- `4e24308` feat(bảng nội bộ): thêm cột NS · CHỨNG TỪ (VAT/HĐNS/TM) · LƯU KHO cho Chi phí HCM, Phí khách hàng, Hà Nội
+- `c8a0056` test(xuất Excel Colorfull): siết lại theo soát chéo — hàng nhóm 3 dòng, hàng 3 đủ dòng mã; chú thích neo logo nói đúng mức
+- `68ca1eb` feat(xuất Excel Colorfull): học bốn chỗ theo GN — cột STT hẹp, mã báo giá, tên hạng mục có màu, (VNĐ)
+- `10ee268` test(excel): đối chiếu D1 và Agency Fee với cấu trúc báo giá thật
+- `2748b09` docs: cập nhật bài kiểm lưới và tham chiếu phím tắt
+- `6efd414` fix(excel): soát vòng công thức và giữ Số ngày khi đổi mẫu
+- `af17fe6` fix(xuất Excel): công thức tham chiếu ô tổng nhóm giữ công thức sống thay vì số chết (báo giá #49 D1/D2)
+- `771bd58` fix(vận hành + phiên): điều kiện lên production từ diễn tập 2026-09-25 — Alertmanager sau restart, 3 lỗi quanh chặn-khi-mất-phiên
+- `c537cbc` docs: số liệu web 134 tệp / 1318 bài
+- `7f1996f` fix(lưới): ô dính vòng qua tổng CHÍNH nhóm không được ghi tổng dở dang
+- `a543d2e` feat(phiên bản): số phiên bản 1.2.3 cho người dùng thay cho mã commit — quy tắc tăng số rõ ràng
+- `88bf54e` fix(phiên): mất phiên thì ngừng gọi máy chủ tại trình duyệt + không thử lại 401/403
+
+## 2026-09-24
+
+- `45c5aa1` fix(phiên bản): eslint no-useless-assignment ở luuRoiTai
+- `81efd9b` fix(phiên bản): câu hỏi của dải đi theo trạng thái thật — không có đường nào tải lại khi còn chưa lưu
+- `b9ca918` fix(phiên bản): soát vòng 3 — còn chưa lưu thì không có "Tải luôn" (iPhone/iPad không có hộp hỏi)
+- `10fa3d4` fix(phiên bản): soát vòng 2 — không bao giờ hạ chốt "Tải lại trang?", chỉ tự tải khi tab nằm nền ≥ 5 phút
+- `2c28cf2` fix(phiên bản): sửa 14 lỗi đợt soát "Có bản mới" — chỉ tự tải ở trang tự khai an toàn
+- `7923859` docs: README 352 file test sau khi gộp
+- `8c8627d` docs: số liệu web 128 tệp / 1227 bài sau hai bản sửa kiểm trên dev
+- `18a0cad` fix(xuất Excel): SL tham chiếu SL hàng khác (=E3) giữ công thức sống thay vì số chết
+- `e4432a9` feat(web): báo "Có bản mới" sau mỗi lần cập nhật — nút Tải bản mới, tự lên bản mới khi an toàn, phiên bản ở chân menu
+- `cf04dc1` fix(lưới): bấm qua ô công thức (rời ô / Enter / Esc) làm báo giá thành "chưa lưu"
+- `9dd30dc` docs: số liệu sau khi gộp — web 127 tệp / 1223 bài, backend 350 tệp test
+- `6735a29` fix(cổng bảo mật): [S1] miễn trừ mật khẩu GIẢ trong test theo giá trị; [S2] trivy bỏ qua .claude/
+- `a280596` feat(soạn báo giá): kéo đổi thứ tự sheet — số thứ tự và mã sản xuất (_01, _02…) đi theo vị trí mới
+- `41c98f3` fix(lưới): gõ số lẻ bằng "," hoặc "." — "9,5" từng ra "95,", "2.5" từng ra 25 (sai số lượng = sai tiền)
+- `22fab09` fix(cổng): 4 chỗ đỏ ở lượt verify đầu tiên trên master sau khi gộp — đều là cổng kiểm, không phải mã app
+- `95faaae` docs(gộp): số liệu sau soát toàn diện đợt 1–5 (web 125 tệp / 1206 bài) + tham chiếu theo tên thay số dòng đã trôi
+- `886db50` fix(nhập Excel): cảnh báo ô NGÀY THÁNG / ô LỖI ở Số Ngày và SL nhóm nói đúng 'tính như 1' — soát toàn diện đợt 5 d5-luoi 5
+- `58a796a` fix(nhập số): bội số '1.5tr' / '500k' / '2 triệu' được nhân, kèm cảnh báo 'đã hiểu … = …' — soát toàn diện đợt 5 d5-luoi 4
+- `c6dd413` fix(nhập số): khoảng số '10-12' / '500.000 – 700.000' không còn bị ghép thành một số lớn — soát toàn diện đợt 5 d5-luoi 3
+- `4a585ab` fix(lưới): dán chữ vào cột số ra 0 mà không báo ('ĐG1.500.000', 'Liên hệ', khoảng giá) — soát toàn diện đợt 5 d5-luoi 2
+- `868c119` fix(soạn): Lưu trả lời muộn không xoá bản nháp của lần mở mới cùng báo giá — soát toàn diện đợt 5 d5-soan 3
+- `d30c5d5` fix(báo giá): danh sách chỉ nạp mẫu bảng nội bộ cho nhánh hnOnly — soát toàn diện đợt 5 d5-soan 2
+- `898d3b5` fix(lưới): Ctrl+Enter rồi rời ô làm tròn model 1 số lẻ (1234,56 → 1234,6; SL 2,25 → 2,3) — soát toàn diện đợt 5 d5-luoi 1
+- `4956ccb` fix(soạn): khối JSDoc app#11 về lại ngay trên vanTayMain — soát toàn diện đợt 5 d5-soan 1
+- `db5d8cc` fix(lưới): addImages tìm lại hàng thiếu _k khớp nhầm hàng đầu tiên cũng thiếu khoá — soát toàn diện đợt 4 d4-luoi 4
+- `4e84e04` fix(lưới): Ctrl+Enter rồi F2 → Esc trả ô về nội dung trước khi chốt, Ctrl+Z không lấy lại được — soát toàn diện đợt 4 d4-luoi 3
+- `337cdc4` fix(nhập số): cảnh báo ô chữ ở SL hàng NHÓM / Số Ngày nói "đã để 0" trong khi app tính ×1 — soát toàn diện đợt 4 d4-nhap việc 1 (phản biện)
+- `aaa27a9` fix(nhập số): khoảng giá "1.500.000 - 2.000.000" / "1,2,3.4.5" ở Đơn Giá về 0 không cảnh báo — soát toàn diện đợt 4 d4-nhap việc 1 (phản biện)
+- `b1d9a86` fix(bảng nội bộ): Lưu không xoá số Ngày của bảng thiếu mẫu khi mẫu dự phòng có ngày — soát toàn diện đợt 4 d4-soan#5
+- `cce9ffe` fix(bản nháp): 409 lần hai không còn đè im lặng bản ':xungdot' người dùng đã chọn giữ — soát toàn diện đợt 4 d4-soan#4
+- `99ad3ce` fix(excel): chú thích excel-snapshot "khác ĐÚNG hai loại hàng" chỉ đúng cho riêng commit 1d — ghi đủ các hàng đổi của cả đợt — soát toàn diện đợt 4 d4-excel 3
+- `4585b02` fix(excel): hàng tiêu đề cột lấy danh sách vùng gộp một lần, không dựng lại model cả sheet mỗi ô — soát toàn diện đợt 4 d4-excel 2
+- `c2a51a7` fix(phần Hà Nội): Lưu xong sau khi đã rời màn Account HN không hạ cờ chưa lưu của trang đang mở — soát toàn diện đợt 4 d4-soan#3
+- `f1d53d4` fix(bảng nội bộ): máy chủ và trang chi phí nội bộ tính tổng bảng theo mẫu như màn soạn — soát toàn diện đợt 4 d4-soan#2
+- `2721ffb` fix(nhập số): âm kế toán kèm đơn vị "(1.500.000 đ/bộ)" / "(1.500 EUR)" / "(1.5tr)" đọc thành số DƯƠNG — soát toàn diện đợt 4 d4-nhap việc 2
+- `be35327` fix(lưới): thêm ảnh nén bất đồng bộ ghi theo chỉ số cũ — ảnh rơi sai hàng, mất ảnh, ghi vào lưới đã gỡ — soát toàn diện đợt 4 d4-luoi 2
+- `7f0e883` fix(excel): hệ số tiêu đề chừa đủ biên ở ngưỡng 2→3 dòng — cỡ 18 hết cắt dòng thứ ba — soát toàn diện đợt 4 d4-excel 1
+- `0837048` fix(lưới): Esc trên ô đỏ lỗi tính làm mất cờ, rời ô là đơn giá về 0 — soát toàn diện đợt 4 d4-luoi 1
+- `786f140` fix(nhập số): ô CHỮ ở cột số đọc ra 0 ("ĐG1.500.000", "SL12", "Liên hệ") không có cảnh báo dòng — soát toàn diện đợt 4 d4-nhap việc 1
+- `d89d8f9` fix(báo giá): duyệt/giao phần HN không còn gây 409 giả khi bảng HN có công thức lỗi — soát toàn diện đợt 4 d4-soan#1
+- `aaa1d7f` fix(lưới): dán khối trong app vào ô CHỮ của hàng NHÓM bị kéo về cột nguồn — soát toàn diện đợt 3 L13 (phản biện)
+- `631f381` fix(nhập số): SL "x2" / giá "VNĐ1.500.000" viết liền đọc 0 sau bản sửa L17 — soát toàn diện đợt 3 L17 (phản biện)
+- `68f8800` fix(lưới): ô đang gõ công thức dở nháy đỏ mỗi phím, chốt công thức hỏng mất lời báo GRID-03 — soát toàn diện đợt 3 L30 (phản biện)
+- `6f843d5` fix(nhập số): "(1.500.000 đồng)" kiểu kế toán đọc thành +1.500.000 — soát toàn diện đợt 3 việc 2 (phản biện)
+- `c25e8cf` fix(nhập Excel): hàng chèn dưới NHÓM CON bản Banner để trống STT vẫn nạp thành nhóm con — soát toàn diện đợt 3 L49 (phản biện)
+- `a32fbb9` fix(công thức): PRODUCT bỏ qua đối số rỗng như Excel — "=PRODUCT(F1;)" ra 58.000, không phải 0 — soát toàn diện đợt 3 7b (phản biện)
+- `c9fdeb6` fix(giao diện): chữ gợi ý chế độ sáng đạt 4.5:1 — ô công thức và hàng nhóm / nhóm con — soát toàn diện đợt 3 2d
+- `d1ab181` fix(giao diện): chỉ nạp trước chunk trình soạn theo hash cho người mở được trình soạn đầy đủ — soát toàn diện đợt 3 2b
+- `0dd216b` fix(giao diện): hộp Nhập Excel không còn tràn mép dưới trên màn hẹp thấp (điện thoại xoay ngang) — soát toàn diện đợt 3 2a
+- `9ff43cf` fix(giao diện): bài L76 chỉ đọc rule CẤP ĐẦU như chú thích nói, tách riêng rule trong @media — soát toàn diện đợt 3 2c
+- `f259967` fix(bảng nội bộ): đổi mẫu có ngày → không ngày → có ngày ở bảng nội bộ / Hà Nội không còn xoá số Ngày — soát toàn diện đợt 3 L64
+- `7b3ad2e` fix(soạn báo giá): lần mở đầu phiên gọi getQuote song song với meta công ty / mẫu — soát toàn diện đợt 3 L72
+- `1e01e6a` fix(excel): hàng tiêu đề cột Colorfull và hàng tiêu đề GN đủ cao cho chữ của chính tệp mẫu — soát toàn diện đợt 3 1d
+- `0b6a728` fix(nhập số): chữ số dính sau chữ cái ("m2", "3m5W") bị nhặt làm số — SL "12 m2" đọc 122 — soát toàn diện đợt 3 L17
+- `9d6208c` fix(lưới): hộp "Xóa nhiều hàng" còn treo sau khi rời trình soạn/nạp lại báo giá vẫn xoá hàng — soát toàn diện đợt 3 L61
+- `dec0878` fix(công thức): thập phân viết tắt ",5" trong hàm của công thức kiểu Việt ra null — soát toàn diện đợt 3 L30
+- `2dfa80f` fix(lưới): danh sách cỡ áo đủ cột (S 
+- `cfc98ba` fix(công thức): đối số rỗng "=MIN(F1;)" / "=ROUND(;2)" tính là 0 như Excel ở cả hai bộ tính — soát toàn diện đợt 3
+- `0571def` fix(lưới): dán lên ô SL của hàng NHÓM — khối ngoài cột đầu là chữ và khối trong app bắt đầu từ ĐVT lệch cột — soát toàn diện đợt 3 L13
+- `756f7fe` fix(excel): tiêu đề sát ngưỡng không còn bật xuống dòng khi Excel vẫn vừa một dòng — soát toàn diện đợt 3 1c
+- `383299f` fix(công thức): trần bung dải 20.000 ô tính CỘNG DỒN cho cả công thức như máy chủ — soát toàn diện đợt 3 L33
+- `a8d4278` fix(soạn báo giá): vân tay phần chính gồm cả nội dung bảng nội bộ — account phụ lưu bảng nội bộ chen vào không bị mốc thanh toán / duyệt HN nuốt — soát toàn diện đợt 3 X2
+- `308af66` fix(nhập Excel): bảng HN "Thay toàn bộ" đổi số tiền hàng ĐÃ TRẢ mà xem trước không báo lần Lưu sẽ bị từ chối — soát toàn diện đợt 3 L48
+- `3d4ae78` fix(lưới): Esc trên ô đỏ sau khi sửa về đúng công thức gốc — ô mang số hàng khác, mất mốc hoàn tác — soát toàn diện đợt 3 L8
+- `c9d879c` fix(nhập Excel): cảnh báo "Tiêu đề nhiều tầng" bật nhầm khi tiêu đề cột tiền chỉ gộp ngang trang trí — soát toàn diện đợt 3 L52
+- `02ef7d6` fix(soạn báo giá): hộp 'Xoá sheet nội bộ / Hà Nội' và 'Xóa nhiều hàng' còn treo sau khi rời trang không xoá bảng, không bật cờ của trang đang mở — soát toàn diện đợt 3 L61
+- `36fef19` fix(lưới): công thức đã lưu không tính được — ô không đỏ khi mở, bấm qua là số thành 0 — soát toàn diện đợt 3 L30
+- `77cb2c5` fix(nhập Excel): hàng chèn dưới NHÓM để trống STT (mẫu Banner) vẫn nạp thành nhóm — soát toàn diện đợt 3 L49
+- `f31fe14` fix(excel): ô chữ cỡ 12 của Colorfull tính 15,75pt mỗi dòng như Excel — soát toàn diện đợt 3 1b
+- `cbad86f` fix(account HN): hộp 'Gửi duyệt phần Hà Nội' còn treo sau khi rời trang không lưu và gửi duyệt báo giá cũ — soát toàn diện đợt 3 (soan.vanDeCuoi[1])
+- `e344f27` fix(lưới): công thức trỏ vào ô Số Ngày trống ra 0 — soát toàn diện đợt 3 L35
+- `da56fa2` fix(nhập Excel): ô chữ "10%" ở cột SL / Đơn Giá nạp thành 10 thay vì 0,1 — soát toàn diện đợt 3 L15
+- `5174b39` fix(account HN): Lưu phần Hà Nội không còn bật lại hai hộp hỏi bản ':xungdot' — soát toàn diện đợt 3 X1
+- `bf75a58` fix(nhập Excel): "(Tạm tính) 500.000 (chưa VAT)" bị đọc là số âm kế toán −500.000 — soát toàn diện đợt 3 L51b
+- `a2a71ae` fix(lưới): đổi sheet đo chiều cao mọi ô HAI lần — soát toàn diện đợt 3 L70
+- `797ba7e` fix(excel): chữ tiếng Việt dạng tổ hợp (NFD) không còn làm hàng cao gấp đôi — soát toàn diện đợt 3 1a
+- `be86375` fix(nhập Excel): bảng quy ước VN đọc SL chữ "0.5" / "1.5" thành 5 / 15 — soát toàn diện đợt 3 L51
+- `235374f` fix(lưới): khối trong app bắt đầu từ Hạng Mục dán lên ô SL của hàng NHÓM — tên rơi vào SL — soát toàn diện L13 (phản biện)
+- `689cfc4` fix(lưới): khối CHỈ gồm hàng nhóm chép từ file app xuất không còn được nhận là bản xuất — soát toàn diện L16 (phản biện)
+- `bb25844` style(lưới): trả dấu cách sau '=' ở dòng đếm nhóm khi dựng lại khối Excel — soát toàn diện L6 (phản biện)
+- `8930584` fix(lưới): rời ô đỏ #REF mà không sửa gì (mũi tên, Enter, Tab, bấm chuột) vẫn gỡ cờ, ô ăn số hàng khác — soát toàn diện L8 (phản biện)
+- `f595793` test(gộp): bài công thức đọc cờ đỏ theo cả `_fxWarn` lẫn `_fxLoi`
+- `c135ede` style(soạn báo giá): thêm dấu cách giữa `key` và `sheet` của ExtraTables — soát toàn diện L53
+- `e008b91` test(soạn báo giá): gác applyImport đi theo sheet đang mở khi nạp Excel xoá / sắp lại / thêm sheet — soát toàn diện L5
+- `adc2a48` fix(bản nháp): thoát Xem thử ngay trên trình soạn thì nạp lại với khoá bản nháp thật — soát toàn diện L63 (bổ sung)
+- `65c0801` fix(lưới): Ctrl+Z lần chèn/xoá hàng khi tiêu điểm ở hàng dưới — rời ô chốt tên hạng mục khác đè lên — soát toàn diện L6 (phát hiện thêm)
+- `374a0f2` fix(lưới): đang sửa ô chữ mà dán một ô chép trong app — ô nhận nguyên văn TSV kèm dấu ngoặc kép — soát toàn diện L24
+- `8b99f43` fix(soạn báo giá): hộp 'Rời khỏi mà chưa lưu?' của nút ← Quay lại còn treo sau khi rời không xoá bản nháp của báo giá khác — soát toàn diện L61 (bổ sung)
+- `127ff45` fix(lưới): đang gõ dở công thức trong ô số mà Ctrl+V — cả ô bị thay, công thức mất — soát toàn diện L23
+- `85c13e6` fix(soạn báo giá): báo giá cũ có quoteDate là mốc giờ đầy đủ không còn tự đâm 409 sau khi tích thanh toán — soát toàn diện X2 (bổ sung)
+- `36f2ff3` fix(lưới): danh sách tên 1–2 chữ cái (S/M/L/XL) dán vào Hạng Mục bị hiểu là báo giá app xuất — soát toàn diện L16
+- `b98716d` fix(lưới): dán phần trăm từ Excel ("10%") vào SL/Đơn giá thành 10 — Thành Tiền phình 100 lần — soát toàn diện L15
+- `769ad88` fix(account HN): còn giữ bản ':xungdot' vẫn hỏi khôi phục bản nháp thường mới hơn — soát toàn diện X1 (bổ sung)
+- `c7314ad` fix(lưới): cắt rồi dán ở sheet/bảng khác lặng lẽ thành CHÉP; token trùng giữa hai lưới xoá nhầm vùng cắt — soát toàn diện L20
+- `131a0c0` fix(lưới): chép/cắt hàng có SL chính xác (nhập Excel) làm đổi Thành Tiền — soát toàn diện L19
+- `de4c994` fix(lưới): dán khối bắt đầu ở DÒNG THÔNG TIN — SL/ĐG vừa dán bị ẩn, không vào tổng — soát toàn diện L18
+- `3dc810a` fix(nhập Excel): "Thay toàn bộ" bảng Hà Nội giữ rid + dấu duyệt / thanh toán của dòng khớp, báo hàng có trạng thái sẽ mất — soát toàn diện L48
+- `5c57235` fix(lưới): dán khối lên hàng NHÓM ép về cột Hạng Mục — số rơi vào cột chữ — soát toàn diện L13
+- `dd76de3` fix(lưới): dán khối Excel có cột Thành Tiền — TT vào Ghi Chú, Ghi Chú sang Ghi chú nội bộ — soát toàn diện L12
+- `086b9d1` test(công thức): chốt đối chiếu web === máy chủ + cú pháp Excel trên 6.000 công thức ngẫu nhiên — soát toàn diện L27–L37
+- `c6ecea7` fix(công thức): dải ô ở chỗ chỉ nhận một giá trị (=ABS(F1:F3), =SUM(F1:F3*2)) là lỗi như Excel — soát toàn diện (phát hiện thêm khi đối chiếu Excel sau L27–L37)
+- `c1cf0bb` fix(lưới): chép Hạng Mục → Ghi Chú sang báo giá khác mẫu ghép theo vị trí — Số Ngày rơi vào Đơn Giá — soát toàn diện L14
+- `5f8ce56` fix(nhập Excel): nhóm chính bản Banner nhãn số + ĐVT + SL + nhóm con không còn bị hạ thành hạng mục — soát toàn diện L49
+- `3a32aae` fix(lưới): chép/cắt CHỈ cột Hạng Mục của nhiều hàng làm thay/xoá ảnh hàng đích — soát toàn diện L22
+- `33463fb` fix(excel): cắt tên sheet 31 ký tự không chẻ đôi emoji — hết '�' trên tab — soát toàn diện L45
+- `8cdf67d` fix(lưới): cắt hàng có ảnh rồi dán mà ảnh không sang đích — ảnh mất hẳn — soát toàn diện L21
+- `4b5c474` fix(nhập Excel): dòng nhóm tệp ngoài viết =SUBTOTAL / =ROUND(SUM) / =+SUM / =(F5+F6) lại được nhận là nhóm — soát toàn diện L46
+- `11cf0a3` fix(lưới): dán khối từ lưới tắt ảnh gắn ảnh CŨ vào hàng đầu, xoá ảnh các hàng sau — soát toàn diện L11
+- `3e9c2a1` fix(công thức): chia cho 0 ở giữa biểu thức là lỗi, không ra 0 im lặng — soát toàn diện L36
+- `e9e7a15` fix(excel): tiêu đề dài xuống dòng và nới cao hàng — không còn cụt hai đầu — soát toàn diện L44
+- `cbac2af` fix(lưới): dán cột số chép qua hàng nhóm biến hạng mục đích thành NHÓM — soát toàn diện L10
+- `56063dc` fix(xuất Excel): ô Số Ngày trống được tham chiếu — bộ tự kiểm đọc 1 như ô ghi trong tệp — soát toàn diện L35
+- `f6d794c` fix(lưới): chép MỘT ô công thức rồi dán — tham chiếu không dịch, mọi ô đích trỏ về hàng nguồn — soát toàn diện L9
+- `7acc1af` fix(công thức): dải vượt số hàng (=SUM(F1:F50) trên bảng 4 hàng) không còn ra 0 im lặng — soát toàn diện L33
+- `7b831ce` fix(lưới): cắt–dán xoá nhầm hàng khác khi bảng đã đổi sau lúc cắt — soát toàn diện L7
+- `9db94a5` fix(excel): bật cột HÌNH ẢNH không còn vạch dày giữa bảng, tiêu đề HÌNH ẢNH cùng nét — soát toàn diện L42
+- `5097e58` fix(soạn báo giá): không lấy `_k` trong bản nháp làm danh tính sheet — soát toàn diện L53 (bổ sung)
+- `9cf2157` fix(công thức): CEILING/FLOOR tính theo bội số như Excel — =CEILING(1234567;1000) — soát toàn diện L32
+- `15a3a9e` fix(lưới): ô đang chọn kẹt số cũ sau dán/điền — rời ô ghi đè ngược, mất công thức vừa dán — soát toàn diện L6
+- `cefa8df` fix(soạn báo giá): tích thanh toán chỉ nhận mốc updatedAt mới khi không ai khác lưu chen vào — soát toàn diện X2
+- `ba78e0d` fix(excel): hàng con Colorfull ở hàng 17–18 gộp dọc cả ô Hạng Mục; nạp lại tệp cũ vẫn ra hàng con — soát toàn diện L47
+- `f160194` fix(công thức): thiếu toán tử giữa số và hàm (=2SUM(F2;F3)) là lỗi, không ghép chữ số — soát toàn diện L37
+- `97028a1` fix(nhập Excel): hộp "Nhập từ Excel" neo mép trên — không còn nhảy khi bảng xem trước hiện ra — soát toàn diện L76
+- `4991fdb` fix(soạn báo giá): đổi mẫu có ngày → không ngày → có ngày không còn xoá số Ngày — soát toàn diện L64
+- `a4cc743` fix(danh sách báo giá): F5 / Back về #/list?page=N giữ đúng trang; đổi bộ lọc về trang 1 bằng một request — soát toàn diện L75
+- `8d91aa8` fix(công thức): hàm có ngoặc thường trong đối số tính được — =ROUND(F1*(1+8%);0) — soát toàn diện L31
+- `f9b0593` fix(bản nháp): chế độ Xem thử quyền không đọc, ghi, xoá bản nháp thật của admin — soát toàn diện L63
+- `b918f1c` fix(excel): chiều cao hàng đo theo bề rộng thật của chữ — hết che dòng cuối — soát toàn diện L40
+- `6ff443e` perf(giao diện): máy bật giảm chuyển động không còn sinh hàng nghìn transition khi đổi sáng/tối — soát toàn diện L74
+- `7595e7b` fix(công thức): dấu phẩy mơ hồ không còn bị đoán im lặng, "F1,F2" trong hàm con có ";" là tách đối số — soát toàn diện L29, L30, L34
+- `6125678` fix(pwa): bỏ route Google Fonts của service worker — Be Vietnam Pro không còn mất từ lần mở thứ hai — soát toàn diện L73
+- `83e65da` fix(lưới): đoán bố cục khối dán không còn chọn bố cục đọc ĐVT ra số khi hoà điểm — soát toàn diện L17
+- `0ef54fd` fix(lưới): F2 rồi Esc không sửa gì vẫn đánh dấu báo giá "chưa lưu" — soát toàn diện L69 (trùng L71)
+- `2cd32ef` fix(nhập Excel): hàng tiêu đề gộp dọc 2 hàng không còn sinh dòng rác; cảnh báo tiêu đề 2 tầng — soát toàn diện L52
+- `d63cb35` perf(điều hướng): nạp trước chunk trình soạn — mở báo giá lần đầu không còn chờ khung xương ~300 ms — soát toàn diện L72 (phần Shell)
+- `5a3ee8f` fix(soạn báo giá): hộp hỏi treo và phản hồi Lưu muộn sau khi rời báo giá không chạy lên trang đang mở — soát toàn diện L61 L62
+- `9d80049` fix(nhập Excel): số dạng chữ đọc theo quy ước VN/US của cả bảng + số âm kế toán "(500.000)" — soát toàn diện L51
+- `f795de8` fix(lưới): Ctrl+Z/Ctrl+Y đổi sang ảnh khác cùng độ dài — dòng vẫn hiện ảnh cũ — soát toàn diện L4 (trùng L26)
+- `8b878a5` fix(lưới): vùng chọn nhiều ô hiện nền xanh trên cả hàng nhóm / nhóm con (hai chế độ, GN + Colorfull) — soát toàn diện L68
+- `d376432` fix(account HN): hộp hỏi treo sau khi rời báo giá không đụng bản nháp/cờ, Hủy ở 'Mở bản của tôi' không xoá bản giữ lại — soát toàn diện L58 X1
+- `231df2d` fix(lưới): ô Thành Tiền kẹt số đã huỷ khi Esc/Ctrl+Z ngay sau phím đầu — soát toàn diện L3
+- `229d2ae` fix(nhập Excel): nhận sheet "Tổng Báo Giá" theo cấu trúc, không chỉ theo chữ ô A1 — soát toàn diện L50
+- `8904b94` test(nhập Excel): đổi tiền tố hai tệp test L46/L49 xn- → ne- — soát toàn diện L46 L49
+- `b75219d` fix(công thức): khoảng trắng giữa hai chữ số là lỗi, tệp Excel không còn mang khoảng trắng — soát toàn diện L28
+- `570ed3f` fix(lưới): dán khối chữ nhiều dòng vào Ghi chú/Chi tiết trống — ô không cao lên — soát toàn diện L1
+- `6781313` fix(giao diện): chế độ tối — chữ gợi ý toàn app dùng --text-muted thay #757575 của trình duyệt — soát toàn diện L67
+- `5fa78e1` fix(nhập Excel): hàng chèn dưới hàng nhóm (mang màu nhóm) mà đủ hình dạng hạng mục nạp thành hạng mục — soát toàn diện L49
+- `8449d11` fix(soạn báo giá): khoá Discount, Hiện tổng, Ghi chú và nút ý kiến khách trong lúc Lưu — soát toàn diện L56
+- `0d0c9f1` fix(công thức): ROUND/ROUNDUP/ROUNDDOWN/INT làm tròn khớp Excel — soát toàn diện L27
+- `f5bc973` fix(giao diện): chế độ tối — chữ gợi ý trên hàng nhóm / nhóm con đạt ≥ 4.5:1 — soát toàn diện L66
+- `5d3e84d` fix(lưới): tích Duyệt rồi Ctrl+Z — ô vẫn hiện đã duyệt trong khi model bỏ duyệt — soát toàn diện L2
+- `0c552c2` fix(giao diện): chế độ tối — ô tìm/ô chọn vai trò trang Phân quyền và ô Ghi chú cuối báo giá theo tông app — soát toàn diện L65
+- `7fa485c` fix(soạn báo giá): xoá sheet rồi Ctrl+Z không còn chép hàng đè lên sheet khác, không nhảy tab, ô Discount theo đúng sheet — soát toàn diện L53 L0 L55 L5 L54
+- `7817fe6` test(ops): tệp ops-deploy chạy deploy.sh thật — trần 60s thay 20s (đỏ chập chờn khi cả bộ chạy song song)
+- `19fc784` fix(lưới): cờ đỏ tham chiếu hỏng bị recomputeAll gỡ ngay — soát toàn diện L8
+- `85e1d85` fix(nhập Excel): "Thay toàn bộ" không còn âm thầm xoá ảnh hạng mục của sheet — soát toàn diện L48
+- `40756d0` docs(gộp): số liệu web 72 tệp / 659 bài sau khi gộp g1–g8
+- `bec5594` fix(excel): ảnh nhiều tầng trong ô HÌNH ẢNH không còn đè nhau — soát toàn diện L39
+- `af72125` fix(nhập Excel): dòng phí =SUM(các dòng trên)*10% không còn bị nạp thành nhóm con 0đ — soát toàn diện L46
+- `b22fb41` fix(sao lưu): install-backup đọc BACKUP_DIR cho mốc cài mà không để tệp env lỗi làm hỏng lượt cài — soát chéo ops#2
+- `a7adccd` fix(quan sát): counter theo sự kiện có chuỗi 0 lúc khởi động, tài liệu HEARTBEAT_URL — soát chéo ops#9, ops#11
+- `0c8904e` fix(deploy): chốt migration huỷ không lọt vì SIGPIPE, [2c] hết báo lệch giả, [5d] cảnh báo QUANLY_ENV, kéo ảnh phụ thuộc trước migrate — soát chéo ops#6, ops#7, ops#8, ops#10
+- `96c8703` fix(bản nháp): soát chéo app#16 — lần đăng nhập đầu sau deploy không chuyển nháp khoá cũ của người trước
+- `c591531` fix(account HN): soát chéo app#12 app#15 app#17 — 409 không ghi được bản giữ lại, khoá Nhập Excel lúc Lưu, nghe editor:discard
+- `41008a2` fix(soạn báo giá): soát chéo app#10 app#11 app#12 app#13 app#14 app#15 — 409, bản giữ lại, duyệt HN, Quay lại, khoá lúc Lưu
+- `4d05c05` fix(sao lưu): backup-objects chốt đĩa theo cỡ phần sắp chép, không chỉ ≥500MB — soát chéo ops#4
+- `5e49ffb` fix(verify): không ghi dấu xanh khi có cổng bị bỏ qua hoặc HEAD đổi giữa lượt — soát chéo ops#3, ops#5
+- `9610778` fix(sao lưu): diễn tập khôi phục có TRUST_PROXY và tự đọc S3_* từ app — soát chéo ops#1, ops#2
+
 ## 2026-09-23
 
+- `95abe5a` fix(lưới): soát chéo grid#8 — SL "1.000"/"1,500" dán từ Excel/Sheets đọc theo giá trị gốc, còn mơ hồ thì cảnh báo
+- `7d5b221` fix(nhân sự): soát chéo files#1 + files#2 — hồ sơ PII hỏng không còn làm tổng lương thiếu âm thầm, ghi tại chỗ không 500 sau khi đã commit
+- `b0b7c0e` fix(lưới): soát chéo grid#9 — chép ô chữ trong lưới sang ô số không đọc bằng Number()
+- `cf0649b` fix(gdpr): soát chéo files#4 — bản xuất GDPR kẹp bản chụp nhật ký danh bạ/nhân sự/khách theo phạm vi đọc hiện tại
+- `3452dc5` fix(lưới): soát chéo grid#7 — quy ước số của khối dán chỉ áp cho ô khớp khuôn
+- `ebeee71` fix(xuất nền): soát chéo files#3 — getJob quá trần trả 503 job_state_timeout, không còn 404 làm client bỏ chờ
+- `dfafbdb` fix(realtime): soát chéo files#5 — báo giá đổi thì trang Nhân sự đang mở tự làm mới
+- `8d3c06a` fix(ngày): soát chéo excel#10 — màn soạn đọc quoteDate theo lịch VN như Excel/PDF
+- `699dad0` fix(ngày): soát chéo excel#9 — wizard Tạo báo giá điền sẵn ngày theo giờ VN
+- `38de894` fix(tiền): soát chéo money#6 + excel#11 — lưới web nhân tiền chính xác như PDF/Excel
+- `ae36ec7` fix(phân quyền): soát chéo rbac#12 — trang Phân quyền không gắn "Tùy chỉnh" cho tài khoản Quản trị
+- `1d3bd6e` fix(phân quyền): soát chéo rbac#10 — nút "Về theo vai trò" gửi permissions: null
+- `ca29d6a` fix(pdf): soát chéo money#3 — tắt bảng tổng vẫn in VAT/Thành tiền của từng sheet
+- `01b07dc` fix(soạn báo giá): hộp "Khôi phục?" còn treo sau khi rời báo giá không được đụng bản nháp
+- `3220cf1` fix(http): soát chéo http#12 — tắt máy êm khi keep-alive 95s dài hơn hạn tắt 70s
+- `25a7194` fix(dữ liệu): soát chéo money#5 — backfill subtotal tính lại luôn convertedTotal đã tính từ subtotal 0
+- `9efea46` fix(auth): soát chéo auth#7 — client Bearer gọi /change-password, /accept-invite không còn 500 sau khi đã ghi CSDL
+- `235f091` fix(tiền): soát chéo money#7 — markConverted đọc VAT SAU khoá QuoteSheet
+- `173f5dc` fix(dự án): soát chéo money#4 — tổng Hà Nội dồn vào trang đầu CÒN HIỆN, không vào trang bị ẩn
+- `27a1fe9` fix(tiền): soát chéo money#1 — không ẩn trang bị từ chối đã có hoá đơn, khoá ý kiến khách sau khi xuất HĐ
+- `6ae904c` fix(auth): soát chéo auth#6 — đặt mật khẩu lên tài khoản đang chờ không còn làm chết lời mời
+- `4e8c912` fix(lưới): ô nới rộng tính trước đệm dấu ƒ + đo lại một lần — chữ công thức không còn hụt ~3px
+- `8e55e21` docs: số liệu sau khi dựng lại trên 959bfc2 (web 65 tệp / 583 bài, backend 314 tệp) + tham chiếu keepDetailSlot theo tên
+- `9600e7f` perf(lưới): lưới dài hết ì — dòng có ghi nhớ + hàm xử lý cố định; ô nới liền ô; dán chữ nhiều dòng cao ngay
+- `41adad9` fix(giao diện): 25 chỗ sáng/tối còn sót — rà bằng 38 agent + phản biện, đo lại trên dev
+- `8334c63` fix(excel): cột HÌNH ẢNH nối dài dải đầu trang + theo nền ô Ghi Chú; chặn công thức sai số đối số
+- `952a0ea` docs: số liệu test web sau khi dựng lại trên nhánh ráp (63 tệp / 577 bài) + chú thích rowEdit
+- `cd9a9af` feat(lưới): bỏ nút '↳ thêm hàng con' — chủ repo: 'chức năng này không còn cần sử dụng'
+- `655d05d` fix(giao diện): chế độ tối cho vùng soạn báo giá — đọc được và dịu mắt; bảng Tổng báo giá Colorfull F4CFB0
+- `5f8ca18` fix(phân quyền): hai lỗ P2 soát chéo xác nhận — tải file xuất nền bỏ qua biLuocView; Mời hiểu [] là "theo vai trò"
+- `959bfc2` docs(gộp): số liệu web 63 tệp / 572 bài
+- `96a3a23` fix(gộp): P1 Danh bạ xoá mất bản mã PII khi sửa hàng không giải mã được + P2 migration CHECK convertedTotal
+- `d456b7f` chore(deploy): địa chỉ dev là https://dev.gianguyen.cloud — bỏ địa chỉ ts.net
+- `b054c22` chore(git): ép LF cho *.snap — lượt test không còn làm bẩn cây (chặn oan dấu xanh verify)
+- `285f33f` docs(gộp): 4 tham chiếu file:dòng trôi sau khi gộp → trỏ bằng tên hàm/dòng mã
+- `c6986e5` fix(gộp): mặc định SENTRY_TRACES_SAMPLE_RATE một con số + ngưỡng đo khoá bộ đếm bớt chập chờn
+- `1a2039a` fix(gộp): một khối #toast-host duy nhất (GAP1-04 × GAP1-05) + số liệu web 62 tệp / 570 bài
+- `fcee5cc` fix(gộp): phiên ẩn danh một con số (30 phút) + test HTTP-11 bật cờ JWT
+- `9da4018` fix(env): khai BACKUP_STATUS_FILE trong .env.example (b8-env-drift)
+- `9d810be` docs(van-hanh): DOC-04 DOC-07 DOC-09 DOC-10 DOC-12 DOC-13 DOC-14 DOC-15 INFRA-07 INFRA-08 GAP1-05 — tài liệu khớp mã và phép đo
+- `24715f7` revert: bỏ bản vá GRID-03 phía máy chủ (747d40a) — master đã có 3848ec2 cho đúng việc này
+- `739d599` fix(lưới): GRID-01 (tiếp) suy quy ước số VN/US từ CẢ khối dán ngoài — SL "1.500" cái không còn hụt 1000 lần
+- `472cea9` docs: README 267 tệp test backend
+- `747d40a` fix(công thức): quoteFormula hiểu "," sát tham chiếu ô là tách đối số — khớp GRID-03 của lưới web
+- `1255620` fix(dự án): FE-09 (máy chủ) /quotes/projects trả custStatus của từng trang
+- `3848ec2` fix(công thức): dấu phẩy tách đối số kiểu Excel tiếng Anh — =ROUND(E2*63000,-3)
+- `758b623` fix(lưới): Ctrl+Z sau dán nhiều dòng làm sập trang, bấm giữa chữ ô đang sửa, dán khác mẫu lệch cột
+- `7865073` feat(Colorfull): sheet Tổng Báo Giá dùng nền F4CFB0 (cùng màu hàng nhóm)
+- `0577661` docs: cập nhật số tệp test web (37 → 54) sau đợt vá audit frontend
+- `097c365` fix(phu-thuoc): DEP-05 DEP-08 DEP-10 DEP-11 DEP-12 GAP1-07 GAP1-08 INFRA-10 INFRA-11 DOC-11 — công cụ dev, cổng kiểm, ân hạn dừng, quét image
+- `6f3d05f` docs: cập nhật số liệu — 141 endpoint, 266 tệp test backend, 39 tệp test web
+- `191936d` fix(auth): AUTH-08 không bắt STARTTLS với máy bắt thư cục bộ (mailhog dev)
+- `a96fec1` fix(a11y): FE-17 nút hiện mật khẩu dùng được bằng bàn phím, toast dừng được khi có tiêu điểm, live region dựng sẵn
+- `b378e96` docs(pii): FILE-05 sửa chú thích sai — purgeSoftDeleted KHÔNG xoá cứng hồ sơ nhân sự/danh bạ
+- `b45aedf` fix(ngày): XLSX-11 ngày trên Excel/PDF và ngày mặc định tính theo lịch Việt Nam, không theo múi giờ tiến trình
+- `ef57eed` fix(quản trị): FE-15 "Xem thử quyền" nói rõ dữ liệu vẫn theo phạm vi admin + không vứt form đang sửa
+- `7b77598` fix(nhập Excel): XLSX-08 ô lỗi Excel (#N/A, #REF!) được cảnh báo đúng thay vì âm thầm thành 0
+- `1568278` perf(realtime): FE-18 sự kiện 'changed' chỉ làm tươi query liên quan, không làm tươi TẤT CẢ
+- `c913fdc` fix(excel): XLSX-07 hệ số nhóm lẻ → Tổng Cộng làm tròn như máy chủ (ROUND tổng sheet)
+- `af43aaa` fix(số báo giá): MONEY-09 nhân bản thử lại vì trùng projectVersion không đốt số báo giá
+- `1accbf3` fix(giao diện): FE-16 lỗi render của một trang không còn khoá cả phiên làm việc
+- `293b04b` fix(số báo giá): MONEY-08 đổi số báo giá chỉ đẩy bộ đếm khi lần Lưu thành công
+- `54e9524` fix(điều hướng): FE-14 hash lạ không còn rơi vào trang Nhân sự; chọn mã khách điền sẵn "Khách hàng (To)"
+- `5994a90` fix(tiền): XLSX-06 Excel/PDF/nhập Excel nhân Thành Tiền chính xác, khớp Decimal của máy chủ
+- `56fcf15` fix(báo giá): MONEY-07 (máy chủ) ngày báo giá mặc định theo lịch Việt Nam
+- `8efe46e` fix(bản nháp): FE-13 + GRID-16 ghi nháp ngay khi rời/ẩn trang; màn Account Hà Nội có bản nháp + lối thoát 409
+- `39b97d9` fix(báo giá): MONEY-06 lưu đồng thời không mất phiên bản lịch sử, tổng không tính theo VAT/hạng mục cũ
+- `b85d25a` fix(nhập Excel): XLSX-05 trần số ô 1.500.000 trong inspectXlsx; worker OOM trả 413 tiếng Việt
+- `aacd602` fix(quan-sat): GAP1-01 GAP1-02 GAP1-06 OBS-01 OBS-02 OBS-03 OBS-05 OBS-06 OBS-07 OBS-08 OBS-09 OBS-10 OBS-11 OBS-12 OBS-13 OBS-14 OBS-15 OBS-16 DOC-08 — cảnh báo/metric/log nói thật
+- `0f69969` fix(sao lưu): DB-13 verifyIntegrity --proof đối chiếu cả chứng từ của hồ sơ xoá mềm
+- `78b76fb` fix(http): HTTP-05 /api/quotes chặn người chưa có danh tính TRƯỚC khi giải nén + parse thân 16MB
+- `dfd18fd` fix(bản nháp): FE-12 hẹn giờ ghi nháp không huỷ khi đổi báo giá; "Rời, bỏ thay đổi" không xoá nháp
+- `18956b3` fix(dự án): DB-12 danh sách dự án/ô chọn dự án trả cờ truncated khi chạm trần
+- `1f5f853` fix(khách hàng): DB-11 MST rỗng/toàn khoảng trắng lưu là NULL
+- `4a15e5f` fix(gdpr): FILE-10 tự xoá tài khoản đòi mật khẩu + chặn admin cuối; FILE-11 xuất GDPR không lộ bản chụp khách qua nhật ký
+- `3ef393b` fix(tìm kiếm): DB-10 searchText tính từ bản tươi trong transaction có khoá hàng
+- `f366616` fix(khởi động): FE-11 lỗi mạng / 502 lúc mở app không còn giả làm màn đăng nhập
+- `6cc268a` fix(retention): DB-09 dọn thông báo đã đọc và refresh token hết hạn
+- `8049445` fix(pii): FILE-12 một hàng PII hỏng không làm sập cả danh sách nhân sự/danh bạ
+- `43bee1b` feat(soạn báo giá): GRID-17 Ctrl/⌘+S = Lưu (trình soạn báo giá và màn Account Hà Nội)
+- `b3c8f23` fix(hàng đợi): RT-12 xuất nền mặc định 1 job/worker + khoá object theo job; RT-13 log quá hạn không nói "đã bỏ việc"
+- `085875c` fix(lưới): ô nới rộng tính cả đệm phải — ký tự cuối công thức không còn bị che
+- `cca3f2e` fix(IME): GRID-12 thanh công thức và ô tìm rạp hiểu Enter chốt cụm chữ tiếng Việt là Enter chốt ô
+- `5419a46` fix(tìm kiếm): DB-08 Danh bạ nhân viên và ô chọn dự án Nhân sự tìm được không dấu
+- `b172850` fix(realtime): RT-10 ghi User chỉ chạm cột phiên/bảo mật không broadcast `changed`
+- `c24456f` fix(lưới): GRID-15 Ctrl+Enter / dán một giá trị ra vùng gồm cột STT ghi rác `_stt` vào model
+- `79adda9` fix(nhân sự): DB-07 sắp theo lương đúng khi đã mã hoá PII (cutover)
+- `a054cab` perf(lưới): GRID-10 fmtNumCell dùng lại bộ định dạng số thay vì dựng Intl mới mỗi lần
+- `2bdfe90` fix(lưới): copy/cắt/dán hàng khi bật cột Hình ảnh — ảnh đi theo hàng
+- `18298bd` fix(db): DB-06 purge xoá mềm tối thiểu 30 ngày, chốt FK Nhân sự/danh bạ, chạy trong một transaction
+- `7966ca2` fix(realtime): RT-09 nối lại SSE thì làm mới badge và bắn realtime:changed
+- `ddf3067` perf(lưới): GRID-09 mốc undo không còn chép lại ảnh base64 — 100 mốc từng tới 0,5–1,5 GB
+- `ac2d4e9` docs(webhook): RT-06 FEATURES.md liệt kê đúng hai sự kiện webhook thật sự được bắn
+- `8545f92` fix(dashboard): DB-05 biểu đồ doanh số theo ngày cùng phạm vi với KPI, gom theo ngày giờ VN
+- `fc4c59e` fix(webhook): RT-06 chỉ công bố sự kiện thật sự được bắn + mã giao nhận X-QLY-Delivery; RT-07 chặn thêm dải IPv6
+- `a9b752b` fix(db): DB-04 findUnique của model xoá mềm chạy TRONG transaction; mẫu đã xoá không hiện
+- `23fb55e` fix(soạn báo giá): GRID-08 xung đột 409 → "Tải lại bản mới" không còn mất trắng phần đang soạn
+- `9e151b8` fix(thông báo): RT-05 link tuyệt đối trong email/Telegram; RT-11 trần thời gian SMTP
+- `30ede31` fix(phân quyền): RBAC-10 bỏ ba ô quyền không có tác dụng khỏi ma trận + cổng tĩnh
+- `e465ca3` fix(soạn báo giá): GRID-07 gõ tiếp trong lúc đang Lưu bị mất im lặng
+- `ba634de` fix(sse): RT-04 xoá phiên/đăng xuất đóng luôn socket SSE; RT-08 PUBLISH 0 người nhận thì phát cục bộ
+- `3d0f4df` fix(phân quyền): RBAC-09 nạp quyền ghi đè vai trò fail-closed, chờ xong mới nhận request
+- `ed7e74f` fix(lưới): GRID-06 Ctrl+'-' / Ctrl+'=' (phím zoom của trình duyệt) xoá/chèn hàng ngay lập tức
+- `d3e88bb` fix(Hà Nội): RBAC-08 account HN bị gỡ khỏi thành viên thì hết lưu/gửi duyệt phần HN
+- `ed7a8a0` fix(config): HTTP-12 kiểm dạng TRUST_PROXY; tiến trình web production thiếu biến thì từ chối khởi động
+- `d3dd166` fix(lưới): GRID-05 dán nhiều dòng vào ô chữ ĐANG SỬA ghi đè Hạng Mục các hàng bên dưới
+- `e0a22fa` fix(Hà Nội): RBAC-07 account phụ không sửa thẳng giá HN đã duyệt qua PUT /:id
+- `f57e694` fix(công thức): GRID-03 dấu phẩy tách đối số cho số sai, công thức lỗi ra 0 im lặng
+- `ce5f109` fix(deploy): DOC-02 INFRA-02 INFRA-03 INFRA-04 INFRA-05 INFRA-09 INFRA-14 DEP-03 DEP-04 — rollback thật, cổng dấu xanh verify, kiểm sau deploy, Node 24 ghim digest
+- `b5a420c` fix(phiên): HTTP-09/10/11 cổng phiên chỉ dưới /api, phiên ẩn danh 30 phút, Bearer gọi login/csrf-token trả 400
+- `6fe8e04` fix(phân quyền): RBAC-06 view bị lược không xuất file, không nhân bản được
+- `60983bd` feat(lưới): ô nhập nới sang phải khi chữ dài hơn ô, như Excel
+- `0767acc` fix(lưới): GRID-02 đi tới cột STT không dời tiêu điểm — gõ tiếp đè lên ô CŨ (kể cả Đơn giá)
+- `5915913` fix(hộp thoại): FE-02 (tiếp) chỉ hộp thoại TRÊN CÙNG xử lý Esc/Enter
+- `1742d4f` fix(auth): AUTH-05..08 bốn lỗ P3 quanh token đặt lại, email, phiên ẩn danh, SMTP
+- `3bddb01` fix(server): HTTP-07 keep-alive 95s > proxy; HTTP-08 hạn tắt máy theo SHUTDOWN_TIMEOUT_MS (70s) + ân hạn nền tảng
+- `51c96a6` fix(tiền): MONEY-02 tổng lưu tính trên số đã làm tròn đúng thang cột CSDL
+- `c1b623c` fix(phân quyền): FE-08 trang Phân quyền cho thấy tài khoản "Tùy chỉnh" không chịu ma trận vai trò
+- `8017914` fix(http): HTTP-06 presence và /metrics bọc asyncHandler; errorHandler chuyển next(err) khi đã gửi header; 5xx không lộ code
+- `fabf9ed` fix(giao diện): GAP1-04 modal nằm dưới thanh đầu trang mobile — nút ✕ bị che, bấm xuyên được sidebar
+- `28ccf4e` fix(doanh thu): MONEY-01/RBAC-05 doanh thu chốt đi theo giá mới sau khi chốt
+- `890cdf8` fix(Colorfull): GAP1-03 tên nhóm + chữ STT hàng nhóm trên màn hình khớp màu tệp Excel
+- `a92d4be` feat(pii): FILE-04 công cụ xoá cột PII thô đã có bản mã khớp + đếm thô còn sót; FILE-14 backfill CAS
+- `35362e3` fix(kế toán): FE-09 (phần web) trang khách không duyệt của báo giá đã chốt không vào Hóa đơn / công nợ
+- `c6b7a56` feat(Colorfull): đổi bảng màu theo tệp mẫu người dùng chỉnh lại (2026-09-23)
+- `cf29dff` fix(hoá đơn): FE-07 ô trang Hóa đơn mở được bằng bàn phím (Enter / F2), không chỉ nhấp đúp
+- `5a9fef3` fix(db): DB-01 công cụ sửa subtotal sheet cũ còn 0 — chế độ khô, chỉ đụng sheet cần sửa
+- `a622f3f` fix(giao diện): FE-06 tương phản WCAG AA cho nút/chữ trạng thái + ba biến màu chưa từng định nghĩa
+- `c49e16b` fix(nhân sự): FILE-07 sắp theo Lương trên giá trị đã giải mã khi bật mã hoá PII
+- `f533c19` fix(nhân sự): RBAC-03 mã dự án ghi vào hồ sơ phải thuộc phạm vi người ghi
+- `99c9164` fix(excel): XLSX-04 thụt lề nhóm con / nghiêng dòng info không lan sang hàng nhân bản
+- `fcfc44e` fix(phiên): FE-05 đồng bộ đăng nhập/đăng xuất giữa các tab + đăng xuất lỗi mạng không giả vờ đã thoát
+- `6cdd715` fix(danh bạ): RBAC-04 (phần nhật ký) employee.update ghi trước/sau của trường đổi
+- `a205fa0` fix(bản nháp): FE-04 bản nháp cục bộ gắn theo người dùng — máy dùng chung không lộ phần chưa lưu
+- `f5a60ba` fix(backup): INFRA-01 DOC-01 DEP-01 DEP-02 — off-host không còn im lặng, rclone crypt, ảnh MinIO từ quay.io, ba cổng CI chạy được trên Windows
+- `12767a9` fix(phân quyền): RBAC-01 bỏ tích hết quyền là tước hết quyền, không về mặc định vai trò
+- `8324141` fix(pdf): XLSX-01/02/03 PDF khớp Excel — chữ nhóm A/B/C, Thành Tiền mục không nhân hệ số, tôn trọng showTotals
+- `6d417dd` fix(báo giá): MONEY-05/RBAC-02 nhân bản cắt trạng thái duyệt/thanh toán của bảng nội bộ
+- `27c3a10` fix(xuất nền): RT-02/FILE-08 tải file qua app thay URL đã ký kho nội bộ; RT-03 Redis chậm không bỏ chờ
+- `48f365b` fix(db): DB-02 hai mẫu Colorfull tới production bằng migration dữ liệu
+- `8c41956` fix(MFA): FE-03 mỗi sự kiện realtime của bất kỳ ai tạo lại secret/QR giữa lúc đang bật MFA
+- `17af379` fix(hộp thoại): FE-02 Enter ở "Hủy" vẫn xác nhận + Esc trong form bẩn mở lại hộp vô hạn
+- `4d99c93` fix(auth): AUTH-04/DEP-06 bề mặt Bearer JWT mặc định TẮT bằng cờ JWT_API_ENABLED
+- `d8f3532` fix(soạn báo giá): FE-01 chốt / không chốt / giao-duyệt HN khi còn thay đổi chưa lưu
+- `b377e1d` docs(env): HTTP-04 .env.example ghi đúng mặc định SAVE_BUDGET_ROWS/RETAIN_EXPORT_DAYS
+- `207c84f` fix(rate limit): RT-01 Redis "ready" mà lệnh lỗi thì rơi về bộ đếm bộ nhớ, không 500 mọi /api
+- `661ce92` fix(http): HTTP-01/02/03 chỉ parse thân dưới /api, CSP img-src thêm blob:, Referrer-Policy same-origin
+- `01a37f8` fix(lưới): GRID-04 tham chiếu vòng giữa các ô + GRID-14 chuỗi công thức dài không hội tụ
+- `4af48a7` fix(chứng từ): FILE-01/02/03 không xoá ảnh chứng từ theo thao tác hồ sơ, ghi CSDL trước
+- `301f75a` fix(auth): AUTH-03 đổi mật khẩu có trần thử mật khẩu cũ theo tài khoản
+- `ecf3487` fix(auth): AUTH-02 khoá tạm do gõ sai không còn đá văng phiên đang mở
+- `4924a1f` fix(auth): AUTH-01 tài khoản bị khoá không còn tự mở lại qua "Quên mật khẩu"
+- `a223c08` fix(lưới): GRID-01/MONEY-04 dán SL 3 chữ số lẻ bị nhân 1000 + GRID-13 số âm kế toán
 - `c450a46` fix(Colorfull): màu CHỮ hàng nhóm trên màn hình soạn khớp lại với tệp Excel
 
 ## 2026-09-22
