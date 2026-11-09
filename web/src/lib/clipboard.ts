@@ -341,6 +341,15 @@ export function soMoHoNghin(s: string): boolean {
   return /^[1-9]\d{0,2}[.,]\d{3}$/.test(loiSo(s));
 }
 
+/** SL làm tròn 1 số lẻ ĐÚNG như app tính Thành Tiền (qtyRound, shared/quote-math.ts): SL khác 0 mà tròn ra 0
+ *  (0 < |SL| < 0,05) → ±0,1 (chủ repo 2026-11-09, báo giá #101: SL dương nhỏ hơn 0,05 làm tròn thành 0 làm mất
+ *  tiền hạng mục). BẢN SAO — tệp này là port thuần không import; sửa luật thì sửa CẢ. */
+function slLamTron1(n: number) {
+  let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
+  if (t === 0 && n !== 0) t = 0.1;
+  return n < 0 ? -t : t;
+}
+
 // ── KHỐI NGOÀI CÓ CỘT THÀNH TIỀN? (soát toàn diện L12) ────────────────────────────────────────
 // Lưới và file Excel xuất ra đều hiện Thành Tiền GIỮA Đơn Giá và Ghi Chú, nhưng cột này không nhập
 // được nên không nằm trong danh sách cột dán. Người dùng bôi Hạng Mục → Ghi Chú trên file báo giá rồi
@@ -363,7 +372,7 @@ export function khopCotThanhTien(matrix: string[][], roles: string[], qu: QuyUoc
     if (!laSo(q) || !laSo(p) || (d && !laSo(d))) continue;
     const sl = soDo(q), gia = soTien(p), ngay = d ? soDo(d) || 1 : 1;
     // Thành Tiền của app nhân SL đã làm tròn 1 số lẻ (qtyRound) — nhận cả hai cách tính.
-    const sl1 = Math.round(sl * 10) / 10;
+    const sl1 = slLamTron1(sl);
     const lech = Math.max(2, Math.abs(tt) * 0.005);
     if (Math.abs(sl * ngay * gia - tt) <= lech || Math.abs(sl1 * ngay * gia - tt) <= lech) khop++;
   }
@@ -410,7 +419,7 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
         if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
         else it[role] = (role === "quantity" || role === "days") ? soDo(v) : soTien(v);   // SL/Ngày = số đo → thập phân (khi không suy được quy ước)
         // SL phần trăm cần hơn 1 số lẻ ("12,5%" → 0,125) → cờ SL chính xác, như lưới (L15).
-        if (role === "quantity" && laPhanTram(v)) { const a = Math.abs(Number(it[role]) || 0); if (Math.round(a * 10 + 1e-6) / 10 !== Math.round(a * 1e4 + 1e-8) / 1e4) it.quantityExact = true; }
+        if (role === "quantity" && laPhanTram(v)) { const a = Math.abs(Number(it[role]) || 0); if (slLamTron1(a) !== Math.round(a * 1e4 + 1e-8) / 1e4) it.quantityExact = true; }
       } else if (role === "detail" || role === "notes" || role === "name" || role === "label" || role === "internalNote") it[role] = v;
       else it[role] = v.trim();
     });
@@ -627,7 +636,7 @@ export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][],
       const price = f === "unitPrice" ? fxVal : valOf("unitPrice", k);
       const days = dayI >= 0 ? (f === "days" ? fxVal : (valOf("days", k) || 1)) : 1;
       if (!isFinite(amt) || amt === 0 || !isFinite(qty) || !isFinite(price)) { if (apply) markWarn(k, f); continue; }
-      const qR = (() => { const t = Math.round(Math.abs(qty) * 10 + 1e-6) / 10; return qty < 0 ? -t : t; })();   // SL làm tròn 1 số như app
+      const qR = slLamTron1(qty);   // SL làm tròn 1 số như app
       const predicted = Math.round(qR * (isFinite(days) ? days : 1) * price);
       if (Math.abs(predicted - amt) > Math.max(2, Math.abs(amt) * 0.005)) { if (apply) markWarn(k, f); continue; }
       okCount++;

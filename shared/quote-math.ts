@@ -26,9 +26,17 @@ export const roundVnd = (n: number) => Math.round(Number(n) || 0);
 
 // LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). +1e-6 khử nhiễu float để 5,65→5,7
 // khớp Decimal ROUND_HALF_UP(1) của server. 1 nguồn cho hiển thị Số Lượng lẫn tính Thành Tiền.
+// SL KHÁC 0 mà làm tròn ra 0 (0 < |SL| < 0,05) thì thành ±0,1 (chủ repo 2026-11-09): báo giá #101 gõ
+// "=0.3*0.15" vào Số Lượng, lưu đúng 0,045 nhưng làm tròn còn 0 → Thành Tiền trống, mất tiền hạng mục.
+// SL = 0 vẫn là 0; số lưu trong CSDL giữ nguyên số thô — chỉ bước làm tròn này đổi.
+// BẢN SAO (không import chéo được — xem chú thích nhanLamTronDong): src/money.ts (qtyRound + slTinhTien
+// Decimal), src/excel.ts, src/pdf.ts, src/excelImport.ts, src/quoteFormula.ts (qtyRound1 + SL bọc trong
+// tệp Excel), web/src/lib/clipboard.ts (hai chỗ). Sửa luật thì sửa CẢ; tests/sl-nho-lam-tron.test.js chạy
+// mọi bản trên cùng bảng giá trị.
 export function qtyRound(x: number) {
   const n = Number(x) || 0;
-  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
+  let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
+  if (t === 0 && n !== 0) t = 0.1;
   return n < 0 ? -t : t;
 }
 /** DB lưu tối đa 4 số lẻ. Dùng cho dòng Excel ngoài có Thành Tiền tính theo số gốc. */

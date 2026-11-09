@@ -10,9 +10,12 @@ import { ngayThangNamVN } from "./vnTime.js";
 // Toán tiền GIỐNG HỆT lưới web + file Excel (shared/quote-math.ts, src/excel.ts). Khai cục bộ chứ
 // KHÔNG import shared/: runtime chạy tsx trên src/ nên "../shared/quote-math.js" không resolve được
 // trong container (excel.ts/excelImport.ts cũng khai cục bộ vì lý do này).
+// qtyRound: SL khác 0 mà làm tròn 1 số lẻ ra 0 (0 < |SL| < 0,05) → ±0,1 (chủ repo 2026-11-09, báo giá #101: SL
+// dương nhỏ hơn 0,05 làm tròn thành 0 làm mất tiền hạng mục). BẢN SAO của shared/quote-math.ts — sửa thì sửa CẢ.
 function qtyRound(x: unknown) {
   const n = Number(x) || 0;
-  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
+  let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
+  if (t === 0 && n !== 0) t = 0.1;
   return n < 0 ? -t : t;
 }
 function qtyExact(x: unknown) {

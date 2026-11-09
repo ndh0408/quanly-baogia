@@ -214,9 +214,10 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean, showDetail?: boolea
   if (norm(a.name) !== norm(b.name)) push("name", a.name || "", b.name || "");
   if (norm(a.unit) !== norm(b.unit)) push("unit", a.unit || "", b.unit || "");
   // So theo con số HIỂN THỊ, nếu không bảng đối chiếu đẻ ra dòng "Số lượng: 7,4 → 7,4" (thực là
-  // 7.4213 vs 7.4313) — người dùng nhìn tưởng app hỏng.
-  const qa = a.quantityExact || b.quantityExact ? Number(a.quantity) || 0 : Math.round(((Number(a.quantity) || 0) + Number.EPSILON) * 10) / 10;
-  const qb = a.quantityExact || b.quantityExact ? Number(b.quantity) || 0 : Math.round(((Number(b.quantity) || 0) + Number.EPSILON) * 10) / 10;
+  // 7.4213 vs 7.4313) — người dùng nhìn tưởng app hỏng. Làm tròn bằng CHÍNH M.qtyRound (số ô hiện + số nhân tiền):
+  // bản tự viết cũ cho 0 → 0,045 là "không đổi" trong khi Thành Tiền đổi từ 0 sang 0,1 × giá (chủ repo 2026-11-09).
+  const qa = a.quantityExact || b.quantityExact ? Number(a.quantity) || 0 : M.qtyRound(Number(a.quantity) || 0);
+  const qb = a.quantityExact || b.quantityExact ? Number(b.quantity) || 0 : M.qtyRound(Number(b.quantity) || 0);
   if (!numEq(qa, qb)) push("quantity", qa, qb);
   if (!!a.quantityExact !== !!b.quantityExact) push("quantityExact", !!a.quantityExact, !!b.quantityExact);
   if (!numEq(a.unitPrice, b.unitPrice)) push("unitPrice", Number(a.unitPrice) || 0, Number(b.unitPrice) || 0);

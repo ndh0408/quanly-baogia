@@ -489,6 +489,40 @@ export function unwrapRound(formula: string, digits: number): string {
   return depth === 0 ? m[1].trim() : s;
 }
 
+// ===== Ô SỐ LƯỢNG THƯỜNG (không quantityExact) trong tệp Excel =====
+// App làm tròn SL 1 số lẻ (qtyRound), nhưng SL KHÁC 0 mà làm tròn ra 0 (0 < |SL| < 0,05) thì thành ±0,1 (chủ repo
+// 2026-11-09, báo giá #101: "=0.3*0.15" lưu 0,045, làm tròn thành 0 → mất tiền hạng mục). Ô SL có công thức được
+// excel.ts bọc ROUND(…,1); riêng ca SL nhỏ mà chỉ bọc ROUND thì Excel (fullCalcOnLoad) tính ra 0 và Thành Tiền
+// = ROUND(SL×ĐG) = 0, trong khi app/PDF ra 0,1 × giá. Ca đó bọc thêm MAX(…,0.1) / MIN(…,-0.1) — hàm Excel lẫn bộ
+// tính lưới đều có — và unwrapSoLuong bóc lại khi nhập tệp, nên công thức người dùng gõ đi khứ hồi nguyên vẹn.
+// Các ca khác giữ đúng ROUND(…,1) như cũ (tệp của mọi báo giá khác không đổi một ký tự).
+/** SL thô khác 0 mà làm tròn 1 số lẻ ra 0 — ca qtyRound đẩy lên ±0,1. Cùng ngưỡng (+1e-6) với qtyRound. */
+const laSlNho = (n: number) => n !== 0 && Math.round(Math.abs(n) * 10 + 1e-6) === 0;
+/** Công thức Excel của ô SL thường: `fx` là công thức đã dịch, `soTho` là SL thô app lưu. */
+export function bocSoLuongExcel(fx: string, soTho: number): string {
+  const r = `ROUND(${fx},1)`;
+  if (!laSlNho(soTho)) return r;
+  return soTho > 0 ? `MAX(${r},0.1)` : `MIN(${r},-0.1)`;
+}
+/** Số Excel tính ra cho ô SL bọc bằng bocSoLuongExcel khi phần công thức bên trong ra `v`. */
+function soLuongExcelTinh(v: number, soTho: number): number {
+  const r = lamTronExcel(v, 1, "tron");
+  if (!laSlNho(soTho)) return r;
+  return soTho > 0 ? Math.max(r, 0.1) : Math.min(r, -0.1);
+}
+/** Bóc lớp bocSoLuongExcel bọc quanh công thức SL: ROUND(fx,1), MAX(ROUND(fx,1),0.1), MIN(ROUND(fx,1),-0.1).
+ *  Không đúng khuôn → như unwrapRound(…, 1) (tệp ngoài / tệp app xuất trước 2026-11-09). */
+export function unwrapSoLuong(formula: string): string {
+  const s = String(formula).trim().replace(/^=/, "");
+  const m = /^(MAX|MIN)\s*\(([\s\S]*),\s*(-?)\s*0?\.1\s*\)$/i.exec(s);
+  if (m && (m[1].toUpperCase() === "MAX") === (m[3] === "")) {
+    const trong = m[2].trim();
+    const boc = unwrapRound(trong, 1);
+    if (boc !== trong) return boc;   // trong ngoặc đúng MỘT ROUND(…,1) cân ngoặc
+  }
+  return unwrapRound(s, 1);
+}
+
 function mapRef(ctx: FormulaContext, colLetters: string, rowDigits: string) {
   const field = ctx.colToField[colLetters.toUpperCase()];
   if (!field || !ctx.allowedRef.has(field)) return null;   // ref chữ/_stt/cột không có → bỏ
@@ -581,7 +615,9 @@ export function buildFormulaContext(
   // Giá trị 1 ô theo HỆ TOẠ ĐỘ EDITOR (để tự kiểm) — mô phỏng cellNumByAddr ở frontend.
   // Thành Tiền PHẢI khớp lineAmount của web: SL làm tròn 1 số (qtyRound) rồi × giá, tròn VNĐ —
   // nếu tính raw sẽ lệch với web + Excel (ô SL trong Excel đã ROUND(...,1)).
-  const qtyRound1 = (x: unknown) => { const n = Number(x) || 0; const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; return n < 0 ? -t : t; };
+  // BẢN SAO của qtyRound (shared/quote-math.ts) — kể cả luật SL khác 0 mà làm tròn ra 0 thì thành ±0,1 (chủ repo
+  // 2026-11-09, báo giá #101: SL dương nhỏ hơn 0,05 làm tròn thành 0 làm mất tiền hạng mục). Sửa thì sửa CẢ.
+  const qtyRound1 = (x: unknown) => { const n = Number(x) || 0; const t = laSlNho(n) ? 0.1 : Math.round(Math.abs(n) * 10 + 1e-6) / 10; return n < 0 ? -t : t; };
   const qtyExact4 = (x: unknown) => { const n = Number(x) || 0; const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000; return n < 0 ? -t : t; };
   const amountOf = (it: EditorItem | undefined) => {
     if (!it || it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
@@ -880,7 +916,7 @@ export function buildFormulaContext(
       if (troNhom && self) {
         const cot = fieldToColIndex[self.field];
         if (cot == null) return null;
-        const soExcel = self.field === "quantity" && !self.item.quantityExact ? lamTronExcel(check, 1, "tron") : check;   // excel.ts bọc ROUND(…,1) cho SL thường
+        const soExcel = self.field === "quantity" && !self.item.quantityExact ? soLuongExcelTinh(check, Number(self.item.quantity) || 0) : check;   // excel.ts bọc SL thường bằng bocSoLuongExcel
         const soWeb = editorCellNum(colLetter(cot) + (selfRow + 1));
         if (!(Math.abs(soExcel - soWeb) <= 1e-9 + 1e-12 * Math.max(Math.abs(soExcel), Math.abs(soWeb)))) return null;
       }

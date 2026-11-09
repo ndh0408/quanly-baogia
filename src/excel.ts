@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getConfig } from "./templateConfigs.js";
 import { stitchXlsxBuffers } from "./xlsxStitcher.js";
-import { buildFormulaContext } from "./quoteFormula.js";
+import { buildFormulaContext, bocSoLuongExcel } from "./quoteFormula.js";
 import { nhanLamTronDong } from "./tienDong.js";
 import { ngayThangNamVN } from "./vnTime.js";
 
@@ -13,9 +13,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 
 // LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). Khớp util.js (web) + money.js (ROUND_HALF_UP).
+// SL khác 0 mà làm tròn ra 0 (0 < |SL| < 0,05) → ±0,1 (chủ repo 2026-11-09, báo giá #101: SL dương nhỏ hơn 0,05
+// làm tròn thành 0 làm mất tiền hạng mục). BẢN SAO của qtyRound ở shared/quote-math.ts — sửa thì sửa CẢ; ô SL
+// có công thức thì luật này phải nằm cả trong công thức Excel (bocSoLuongExcel, src/quoteFormula.ts).
 function qtyRound(x: any) {
   const n = Number(x) || 0;
-  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số
+  let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số
+  if (t === 0 && n !== 0) t = 0.1;
   return n < 0 ? -t : t;
 }
 function qtyExact(x: any) {
@@ -1310,7 +1314,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
             ?? (it.quantityExact ? null : fctx.cellFormula(rawQ, qT, { item: it, field: "quantity" })))
           : null;
         const qCell = ws.getCell(`${cols.quantity}${r}`);
-        if (fxQ) qCell.value = { formula: it.quantityExact ? fxQ : `ROUND(${fxQ},1)`, result: qT };
+        // SL thường: ROUND(…,1), riêng SL nhỏ khác 0 bọc thêm MAX/MIN ±0,1 để Excel cũng ra qT (xem bocSoLuongExcel).
+        if (fxQ) qCell.value = { formula: it.quantityExact ? fxQ : bocSoLuongExcel(fxQ, rawQty), result: qT };
         else qCell.value = qT;
         // Định dạng hiển thị: số chẵn → "0" (không lẻ); có lẻ → "0.0" (đúng 1 số). PHẢI gán qua
         // bản sao style (giống paintCell) — gán cell.numFmt trực tiếp KHÔNG "ăn" trên hàng được

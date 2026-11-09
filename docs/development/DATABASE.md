@@ -269,10 +269,13 @@ nên phải tìm bằng SQL. Câu (1) liệt kê đúng những nhóm đó để
 
 | Dòng nhóm | `qtyForAmount` (= số đang hiện) | Nhóm nhân thật (> 1) khi |
 |---|---|---|
-| `quantityExact = false` | `qtyRound`: làm tròn nửa-lên **1 số lẻ** | SL ≥ **1,05** (1,04 hiện "1" → ×1; 1,05 hiện "1,1" → ×1,1) |
+| `quantityExact = false` | `qtyRound`: làm tròn nửa-lên **1 số lẻ**; SL khác 0 mà tròn ra 0 (0 < \|SL\| < 0,05) → ±0,1 | SL ≥ **1,05** (1,04 hiện "1" → ×1; 1,05 hiện "1,1" → ×1,1) |
 | `quantityExact = true` | `qtyExact`: làm tròn nửa-lên **4 số lẻ** | SL ≥ 1,00005 — cột `Decimal(18,4)` nên là SL **> 1** (1,0001 đã nhân thật) |
 
 `src/money.ts` làm tròn y như vậy (Decimal `ROUND_HALF_UP`, 4 hoặc 1 số lẻ theo `quantityExact`).
+Luật "SL nhỏ khác 0 → ±0,1" (chủ repo 2026-11-09, báo giá #101: `=0.3*0.15` lưu 0,045 mà Thành Tiền
+trống) KHÔNG chép vào các câu SQL dưới: chúng chỉ lọc `slHien > 1`, mà SL dưới 0,05 thì hiện 0 hay
+0,1 cũng không bao giờ > 1. Câu SQL nào cần đúng SỐ hiện / số nhân tiền thì phải thêm nhánh đó.
 Mỗi câu dưới tính cột `slHien` bằng CHÍNH công thức đó rồi lọc `slHien > 1`. Đừng làm tròn 1 số
 lẻ cho MỌI dòng: dòng `quantityExact` có SL từ 1,0001 đến 1,0499 làm tròn 1 số lẻ ra "1", nhưng
 vẫn nhân thật — sẽ bị bỏ sót.

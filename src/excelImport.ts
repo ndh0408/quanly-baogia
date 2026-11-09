@@ -19,7 +19,7 @@
 
 import ExcelJS from "exceljs";
 import { TEMPLATE_CONFIGS } from "./templateConfigs.js";
-import { excelFormulaToEditor, unwrapRound, evalEditorFormula } from "./quoteFormula.js";
+import { excelFormulaToEditor, unwrapSoLuong, evalEditorFormula } from "./quoteFormula.js";
 import { nhanLamTronDong } from "./tienDong.js";
 
 // ===== Kiểu dữ liệu trả về =====
@@ -363,8 +363,10 @@ function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   return Number(str) || 0;
 }
 
-/** Làm tròn Số Lượng 1 chữ số — KHỚP qtyRound ở excel.ts / money (để đối chiếu Thành Tiền). */
-function qtyRound(n: number) { const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; return n < 0 ? -t : t; }
+/** Làm tròn Số Lượng 1 chữ số — KHỚP qtyRound ở excel.ts / money (để đối chiếu Thành Tiền). SL khác 0 mà làm tròn
+ *  ra 0 (0 < |SL| < 0,05) → ±0,1 (chủ repo 2026-11-09, báo giá #101: SL dương nhỏ hơn 0,05 làm tròn thành 0 làm mất
+ *  tiền hạng mục). BẢN SAO của shared/quote-math.ts — sửa thì sửa CẢ. */
+function qtyRound(n: number) { let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; if (t === 0 && n !== 0) t = 0.1; return n < 0 ? -t : t; }
 function qtyExact(n: number) { const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000; return n < 0 ? -t : t; }
 const qtyForAmount = (it: Pick<ImportedItem, "quantity" | "quantityExact">) => it.quantityExact ? qtyExact(it.quantity) : qtyRound(it.quantity);
 
@@ -892,9 +894,10 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       // Công thức ra LỖI: đã có cảnh báo "đang LỖI … đã để 0" ở vòng quét; câu "đã giữ con số" dưới
       // đây sẽ sai (con số là 0) — XLSX-08.
       if (errOf(cell)) continue;
-      // Bóc lớp ROUND(...,1) mà CHÍNH app bọc quanh công thức Số Lượng lúc xuất.
+      // Bóc lớp ROUND(...,1) mà CHÍNH app bọc quanh công thức Số Lượng lúc xuất — SL nhỏ khác 0 là
+      // MAX/MIN(ROUND(...,1),±0.1) (bocSoLuongExcel, chủ repo 2026-11-09).
       const rawBody = expandGroupRefs(raw.replace(/^=/, ""));
-      const src = f.round1 ? unwrapRound(rawBody, 1) : rawBody;
+      const src = f.round1 ? unwrapSoLuong(rawBody) : rawBody;
       const appQtyRoundWrapper = f.round1 && src !== rawBody;
       const canon = excelFormulaToEditor(src, refCtx);
       const label = FIELD_VN[f.field] || f.field;

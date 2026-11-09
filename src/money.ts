@@ -12,11 +12,25 @@ export function D(v: Prisma.Decimal.Value | null | undefined) {
   return new Decimal(v);
 }
 
-/** LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). Cho code dùng number (quoteUtils/excel). */
+/** LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). Cho code dùng number (quoteUtils/excel).
+ *  SL khác 0 mà làm tròn ra 0 (0 < |SL| < 0,05) → ±0,1 (chủ repo 2026-11-09, báo giá #101: SL dương nhỏ hơn
+ *  0,05 làm tròn thành 0 làm mất tiền hạng mục). BẢN SAO của qtyRound ở shared/quote-math.ts (danh sách mọi
+ *  bản ở đó) — sửa luật thì sửa CẢ, kể cả slTinhTien ngay dưới. */
 export function qtyRound(x: unknown) {
   const n = Number(x) || 0;
-  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số, khớp ROUND_HALF_UP
+  let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số, khớp ROUND_HALF_UP
+  if (t === 0 && n !== 0) t = 0.1;
   return n < 0 ? -t : t;
+}
+
+/** SL dùng tính tiền — bản Decimal của qtyForAmount (shared/quote-math.ts): dòng quantityExact 4 số lẻ; còn lại
+ *  1 số lẻ ROUND_HALF_UP, và SL khác 0 không bao giờ thành 0 (→ ±0,1, cùng luật qtyRound ngay trên). BẢN SAO —
+ *  sửa luật thì sửa CẢ. */
+function slTinhTien(q: Prisma.Decimal.Value | null | undefined, exact: boolean | null | undefined) {
+  const d = D(q);
+  if (exact) return d.toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+  const r = d.toDecimalPlaces(1, Decimal.ROUND_HALF_UP);
+  return r.isZero() && !d.isZero() ? new Decimal(d.isNegative() ? "-0.1" : "0.1") : r;
 }
 
 /**
@@ -63,14 +77,14 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
       if (it.kind === "section" || it.kind === "subsection") {   // nhóm/nhóm con: header — đặt mult, không tự cộng. Item con vẫn vào tổng cộng.
         // Hệ số nhóm lấy SL ĐÃ làm tròn đúng như lưới hiển thị (cùng phép làm tròn với qty dòng
         // thường ngay dưới) — trước đây nhân số thô nên tổng lệch con số người dùng nhìn thấy.
-        const gq = Number(D(it.quantity).toDecimalPlaces(it.quantityExact ? 4 : 1, Decimal.ROUND_HALF_UP));
+        const gq = Number(slTinhTien(it.quantity, it.quantityExact));
         mult = sh.groupSubtotal ? Math.max(1, gq || 1) : 1;
         return acc;
       }
       if (it.kind === "info") return acc;   // dòng thông tin: không tính tiền (khớp với Excel + client)
       // Báo giá cũ mặc định 1 số lẻ. Dòng import Excel ngoài có quantityExact giữ tối đa 4 số
       // khi file chứng minh Thành Tiền đang tính theo số gốc.
-      const qty = D(it.quantity).toDecimalPlaces(it.quantityExact ? 4 : 1, Decimal.ROUND_HALF_UP);
+      const qty = slTinhTien(it.quantity, it.quantityExact);
       const price = D(it.unitPrice);
       const days = it.days != null ? D(it.days) : null;
       // Thành Tiền 1 dòng làm tròn số nguyên (khớp hiển thị + Excel) RỒI mới nhân hệ số nhóm

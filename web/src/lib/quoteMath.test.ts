@@ -7,6 +7,16 @@ describe("qtyRound — LÀM TRÒN Số Lượng về 1 chữ số thập phân",
   it("làm tròn 1 số (7,378→7,4 · 6,42→6,4 · 5,65→5,7)", () => { expect(qtyRound(7.378)).toBeCloseTo(7.4); expect(qtyRound(6.42)).toBeCloseTo(6.4); expect(qtyRound(5.65)).toBeCloseTo(5.7); });
   it("giữ dấu âm", () => { expect(qtyRound(-7.378)).toBeCloseTo(-7.4); });
   it("0 / rác → 0", () => { expect(qtyRound(0)).toBe(0); expect(qtyRound(NaN)).toBe(0); });
+  // Chủ repo 2026-11-09 (báo giá #101: "=0.3*0.15" lưu 0,045 mà Thành Tiền trống): SL khác 0 mà làm tròn ra 0 → ±0,1.
+  it("SL khác 0 nhỏ hơn 0,05 → ±0,1 (không còn thành 0); ranh giới và số khác giữ nguyên", () => {
+    for (const [vao, ra] of [[0.045, 0.1], [0.01, 0.1], [0.0499, 0.1], [-0.03, -0.1], [0.05, 0.1], [0.72, 0.7], [0.96, 1], [7.378, 7.4]] as const) {
+      expect(qtyRound(vao), `qtyRound(${vao})`).toBe(ra);
+    }
+    expect(qtyExact(0.045), "dòng quantityExact không đổi luật").toBe(0.045);
+    expect(fmtNumCell(0.045)).toBe("0,1");
+    expect(lineAmount({ kind: "item", quantity: 0.045, unitPrice: 2_200_000 }, false)).toBe(220_000);
+    expect(lineAmount({ kind: "item", quantity: 0.045, quantityExact: true, unitPrice: 2_200_000 }, false)).toBe(99_000);
+  });
 });
 
 describe("lineAmount — Thành Tiền 1 dòng", () => {
