@@ -12,12 +12,17 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1090 commit**, từ 2026-05-29 tới 2026-10-07.
+**1092 commit**, từ 2026-05-29 tới 2026-11-09.
 
 ---
 
+## 2026-11-09
+
+- `1b9a74b` fix(số lượng): SL khác 0 nhỏ hơn 0,05 làm tròn thành 0,1 — thôi mất tiền hạng mục (báo giá #101)
+
 ## 2026-10-07
 
+- `9d10840` docs(CHANGELOG): sinh lại
 - `ea4c275` docs: 182 tệp test web (thêm Invoices.chungTuTich)
 - `d342e40` docs(CHANGELOG): sinh lại
 - `7b6fbd4` test(xz-tran-o): nới trần giờ 90s — dưới tải verify đầy đủ đọc xlsx nhiều cột quá 20s (đỏ hai lượt, chạy riêng xanh)
