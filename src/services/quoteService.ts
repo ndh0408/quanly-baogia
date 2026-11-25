@@ -882,7 +882,7 @@ export async function updateQuote(req: Request) {
 
   let updated;
   if (Array.isArray(b.sheets)) {
-    // Tiền KHÔNG phụ thuộc extraTables (computeQuoteTotals chỉ đọc `sh.items` — src/money.ts:54),
+    // Tiền KHÔNG phụ thuộc extraTables (computeQuoteTotals chỉ đọc `sh.items` — src/money.ts:81),
     // nên tính tổng ở NGOÀI transaction là an toàn và giữ transaction ngắn nhất có thể.
     let vatPct = data.vatPercent ?? existing.vatPercent;
     // ── TAB CŨ KHÔNG ĐƯỢC XOÁ DISCOUNT ────────────────────────────────────────────────────────

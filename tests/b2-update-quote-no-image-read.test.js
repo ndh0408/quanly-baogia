@@ -63,8 +63,8 @@ const ANH = `data:image/png;base64,${randomBytes(300_000).toString("base64")}`;
  * Nó gác đúng hai chiều của bản vá:
  *   · KHÔNG được kéo cột nặng ở bản đọc đầu (`images`, `extraTables`) — đó là lỗ đang vá;
  *   · PHẢI còn đủ mọi cột mà nhánh "payload không có sheets" cần để TÍNH LẠI TIỀN
- *     (`computeQuoteTotals` ở src/money.ts:52-76 đọc groupSubtotal/id + kind/quantity/
- *     quantityExact/unitPrice/days; `assertTotalsStorable` ở src/money.ts:110-118 đọc `name`).
+ *     (`computeQuoteTotals` ở src/money.ts:75-126 đọc groupSubtotal/id + kind/quantity/
+ *     quantityExact/unitPrice/days; `assertTotalsStorable` ở src/money.ts:146-178 đọc `name`).
  * Thiếu vế thứ hai thì một lượt "tối ưu" sau này cắt thêm cột là TIỀN SAI mà không ai thấy.
  */
 describe("QUOTE_UPDATE_STATE_SELECT — hình dạng bản đọc đầu của updateQuote", () => {
