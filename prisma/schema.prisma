@@ -513,7 +513,13 @@ model Quote {
   quoteNumber    String      @unique
   projectCode    String? // mã dự án theo nhân viên (FE_A26_001…); KHÔNG chứa hậu tố sheet
   // (_01/_02 dựng lúc hiển thị từ QuoteSheet.codeNo — xem src/quoteCode.ts)
+  // Từ 2026-11-25 CHỈ cấp lúc KHÁCH CHỐT (src/maDuAn.ts) — báo giá chưa chốt mang null, hiển thị "NHÁP <số BG>".
   projectVersion Int         @default(1) // bản gửi khách v1/v2/v3 (cùng projectCode, mỗi bản 1 quoteNumber riêng)
+  // GỐC DỰ ÁN của một "Bản mới" (phiên bản) — id báo giá ĐẦU TIÊN của dự án; null = chính nó là gốc.
+  // Bản nháp phiên bản mới KHÔNG mang mã nên "cùng dự án" không còn suy được qua projectCode — lưu ở đây;
+  // chốt thì lấy lại mã của dự án + số phiên bản kế tiếp. KHÔNG FK: gốc bị xoá cứng thì các phiên bản vẫn
+  // nhóm được với nhau theo cùng số này.
+  projectRootId  Int?
   // MỐC NƯỚC mã sản xuất đã cấp cho các sheet của báo giá này (xem migration
   // 20260908060000). QuoteSheet bị XOÁ CỨNG mỗi lượt lưu, nên `max(codeNo còn lại)+1` sẽ CẤP LẠI
   // mã của sheet vừa xoá — mã đó có thể đã in lên hoá đơn. Cột này chỉ TĂNG, không bao giờ lùi.
@@ -607,6 +613,7 @@ model Quote {
   // tạo hai _v2 song song. projectCode null → Postgres coi NULL là khác nhau (quote không
   // có mã không bị ảnh hưởng). Version tính gồm cả bản xóa-mềm nên không tái dùng số.
   @@unique([projectCode, projectVersion])
+  @@index([projectRootId])
   @@index([status, createdAt(sort: Desc)])
   @@index([companyId, status])
   @@index([customerId])

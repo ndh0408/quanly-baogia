@@ -18,6 +18,12 @@ const QUOTES = [
   { projectCode: null, projectVersion: 3, quoteNumber: "GN26011" },
   { projectCode: "FD_A27_001", projectVersion: 1, quoteNumber: "GN27001" },    // sang năm mới
   { projectCode: "", projectVersion: 1, quoteNumber: "" },                     // rỗng hết
+  // Từ 2026-11-25 nhãn phụ thuộc TRẠNG THÁI (mã chỉ cấp lúc chốt): chưa chốt + không mã → "NHÁP <số BG>".
+  { projectCode: null, projectVersion: 1, quoteNumber: "GN26045", status: "draft" },
+  { projectCode: null, projectVersion: 2, quoteNumber: "GN26046", status: "lost" },
+  { projectCode: null, projectVersion: 1, quoteNumber: "", status: "draft" },
+  { projectCode: null, projectVersion: 1, quoteNumber: "GN26047", status: "converted" },
+  { projectCode: "FP_A26_003", projectVersion: 2, quoteNumber: "GN26048", status: "draft" },   // dữ liệu cũ chưa dọn
 ];
 const SHEETS = [null, undefined, {}, { codeNo: null }, { codeNo: 0 }, { codeNo: 1 }, { codeNo: 2 }, { codeNo: 9 }, { codeNo: 10 }, { codeNo: 123 }];
 

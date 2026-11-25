@@ -191,7 +191,8 @@ describe.runIf(dbAvailable)("Bảng nội bộ: NS · CHỨNG TỪ · LƯU KHO �
     for (const [nut, than] of [["Nhân bản", {}], ["Bản mới", { sameProject: true }]]) {
       const r = await chu.post(`/api/quotes/${nguon.id}/duplicate`).send(than);
       expect(r.status, `${nut}: ${JSON.stringify(r.body).slice(0, 300)}`).toBe(201);
-      if (than.sameProject) expect([r.body.projectCode, r.body.projectVersion], "Bản mới phải CÙNG mã dự án, v2").toEqual([nguon.projectCode ?? nguon.quoteNumber, 2]);
+      // Từ 2026-11-25 "Bản mới" là bản NHÁP không mã, nhớ gốc dự án (mã + _v2 cấp lúc khách chốt — src/maDuAn.ts).
+      if (than.sameProject) expect([r.body.projectCode, (await prisma.quote.findUnique({ where: { id: r.body.id } })).projectRootId], "Bản mới phải nhớ gốc dự án").toEqual([null, nguon.id]);
       const moi = await prisma.quote.findUnique({ where: { id: r.body.id }, include: { sheets: true } });
       const hcm = moi.sheets[0].extraTables[0].items[0], hn = moi.hnTables[0].items[0];
       expect(trangThai(hcm), `${nut}: hàng HCM mang trạng thái của dự án cũ`).toEqual({ paid: false, paidProof: null, approved: false, luuKho: false });

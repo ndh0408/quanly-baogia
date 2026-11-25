@@ -128,7 +128,8 @@ export async function renderQuotePdf(quote: any) {
     doc.font("body").fontSize(10);
     // Mã dự án là thứ khách đối chiếu; số GN đi kèm vì nó mới là khoá tra cứu nội bộ.
     const maBaoGia = codeLabel(quote) || quote.quoteNumber || "";
-    const soGN = quote.quoteNumber && quote.quoteNumber !== maBaoGia ? ` · ${quote.quoteNumber}` : "";
+    // Báo giá chưa chốt đã mang số BG trong nhãn ("NHÁP GN26045") — không in số đó lần thứ hai.
+    const soGN = quote.quoteNumber && !maBaoGia.includes(quote.quoteNumber) ? ` · ${quote.quoteNumber}` : "";
     doc.text(`Số: ${maBaoGia}${soGN}`, { continued: true });
     // Theo lịch VN, không theo múi giờ tiến trình/ICU (XLSX-11) — cùng quy tắc với vnDateText của Excel.
     const nd = ngayThangNamVN(quote.quoteDate);

@@ -158,9 +158,9 @@ export function QuoteListPage({ me }: { me: Me }) {
     if (busy.current) return; busy.current = true;
     try {
       if (a === "dup") { const nq = await api.duplicateQuote(qr.id); toast("Đã nhân bản. Bạn đang sửa bản mới.", "success"); open(nq.id); }
-      else if (a === "revise") { const nq = await api.duplicateQuote(qr.id, true); toast(`Đã tạo bản mới cùng mã dự án (${codeLabel(nq)}).`, "success"); open(nq.id); }
+      else if (a === "revise") { const nq = await api.duplicateQuote(qr.id, true); toast(`Đã tạo bản mới của dự án ${codeLabel(qr)} (${codeLabel(nq)}) — khách chốt thì lấy lại mã dự án, thêm _v kế tiếp.`, "success"); open(nq.id); }
       else if (a === "del") {
-        if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${qr.projectCode || qr.quoteNumber}? Hành động không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
+        if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${codeLabel(qr)}? Hành động không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
         await api.deleteQuote(qr.id); toast("Đã xóa", "success"); reload();
       }
     } catch (ex) { toast(errMsg(ex, "Lỗi"), "error"); }
@@ -257,7 +257,7 @@ export function QuoteListPage({ me }: { me: Me }) {
                   {/* Account phụ: cả hai đường đều tạo báo giá MỚI đứng tên người bấm và mang mã
                       dự án của họ — server 403 (duplicateQuote), nên ẩn thay vì để bấm rồi báo lỗi. */}
                   {!laPhu(r) && <button className="qa-btn" title="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>}
-                  {!laPhu(r) && <button className="qa-btn" title="Bản mới cùng mã dự án" onClick={(e) => act("revise", r, e)}><span className="qa-ico">➕</span><span className="qa-label">Bản mới</span></button>}
+                  {!laPhu(r) && <button className="qa-btn" title="Bản mới cùng dự án — khách chốt thì lấy lại mã dự án, thêm _v kế tiếp" onClick={(e) => act("revise", r, e)}><span className="qa-ico">➕</span><span className="qa-label">Bản mới</span></button>}
                   {canDelete(r) && <button className="qa-btn qa-danger" title="Xóa" onClick={(e) => act("del", r, e)}><span className="qa-ico">🗑</span><span className="qa-label">Xóa</span></button>}
                 </div>
               )}
@@ -367,7 +367,7 @@ function RowMenu({ r, act, canDelete, canDuplicate }: { r: QuoteRow; act: (a: st
         <div ref={menuRef} className="qa-menu" role="menu" style={{ top: pos.top, right: pos.right }}
              onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
           {canDuplicate && <button role="menuitem" onClick={run("dup")}>📋 Nhân bản</button>}
-          {canDuplicate && <button role="menuitem" onClick={run("revise")}>➕ Bản mới cùng mã dự án</button>}
+          {canDuplicate && <button role="menuitem" onClick={run("revise")}>➕ Bản mới cùng dự án</button>}
           {canDelete && <button role="menuitem" className="qa-menu-danger" onClick={run("del")}>🗑 Xóa</button>}
         </div>, document.body)}
     </>

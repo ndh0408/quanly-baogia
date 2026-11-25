@@ -37,6 +37,10 @@ export async function nextQuoteNumber(prefix = "GN", db = prisma) {
  * `nextQuoteNumber` ở trên — nên đầu mỗi năm nó tự bắt đầu lại từ 001 mà không cần ai làm gì.
  * (Quy ước cũ khoá theo (prefix-có-sẵn-năm, year=0); migration 20260907120000 dựng lại bộ đếm
  * theo khoá mới TỪ CHÍNH các mã đã cấp, xem SQL ở đó.)
+ *
+ * Từ 2026-11-25 CHỈ được gọi lúc KHÁCH CHỐT (src/maDuAn.ts `capMaDuAnKhiChot`), không còn lúc tạo báo giá. Mã đụng một
+ * mã đã tồn tại mà bộ đếm không biết (dữ liệu cũ) được bỏ qua NGAY TRONG transaction chốt — nên `syncProjectCodeCounter`
+ * (đẩy bộ đếm ra ngoài transaction cho vòng thử lại của createQuote/duplicateQuote) đã gỡ cùng hai vòng thử lại đó.
  */
 export async function nextProjectCode(prefix: string, db = prisma) {
   const year = namVN();   // NĂM THEO GIỜ VN (xem src/vnTime.ts)
@@ -72,30 +76,6 @@ export async function syncQuoteCounter(quoteNumber: string, prefix = "GN", db = 
   const m = khuon.exec(String(quoteNumber ?? ""));
   if (!m) return;
   const n = Number(m[1]);
-  if (!Number.isSafeInteger(n) || n <= 0) return;
-  await db.$executeRaw`
-    INSERT INTO "QuoteCounter" ("prefix", "year", "value") VALUES (${prefix}, ${year}, ${n})
-    ON CONFLICT ("prefix", "year") DO UPDATE SET "value" = GREATEST("QuoteCounter"."value", EXCLUDED."value")`;
-}
-
-/**
- * Đẩy bộ đếm MÃ DỰ ÁN lên ít nhất số của một mã ĐÃ TỒN TẠI — bản đối xứng của `syncQuoteCounter`.
- *
- * VÌ SAO CẦN: vòng thử lại P2002 ở createQuote/duplicateQuote chạy lại NGUYÊN transaction, mà
- * transaction hỏng cuốn theo cả lần tăng bộ đếm (chủ ý "không đốt số" của nextProjectCode). Nên
- * nếu không ghi nhận số vừa bị chiếm ra NGOÀI transaction thì lượt sau sinh LẠI ĐÚNG mã đó — bốn
- * lượt cùng một mã rồi 409. Đây là ca CÓ THẬT với mọi mã không do bộ đếm cấp: dữ liệu chuyển từ
- * hệ cũ, hoặc bộ đếm bị dựng lại (migration 20260907120000).
- *
- * GREATEST chứ không gán đè: mã THẤP hơn bộ đếm không được kéo bộ đếm lùi — lùi là cấp lại mã đã dùng.
- */
-export async function syncProjectCodeCounter(projectCode: string, prefix: string, db = prisma) {
-  if (!prefix) return;
-  const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const m = new RegExp(`^${esc}(\\d{2})_(\\d{1,9})$`).exec(String(projectCode ?? ""));
-  if (!m) return;
-  const year = 2000 + Number(m[1]);
-  const n = Number(m[2]);
   if (!Number.isSafeInteger(n) || n <= 0) return;
   await db.$executeRaw`
     INSERT INTO "QuoteCounter" ("prefix", "year", "value") VALUES (${prefix}, ${year}, ${n})

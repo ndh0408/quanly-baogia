@@ -348,7 +348,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     <div className="account-hn-view ahn-card">
       <div className="ahn-head">
         <div className="ahn-head-titles"><h1 className="ahn-title">Phần Giá Hà Nội</h1>
-          <div className="muted ahn-sub">{q.projectCode || q.quoteNumber || ""}{q.title ? " · " + q.title : ""}{q.companyName ? " · " + q.companyName : ""}</div></div>
+          <div className="muted ahn-sub">{M.codeLabel(q)}{q.title ? " · " + q.title : ""}{q.companyName ? " · " + q.companyName : ""}</div></div>
         <span className={`ahn-status ahn-${hnStatus}`}>{STATUS[hnStatus] || "Đang làm"}</span>
       </div>
       {q.hnStatus === "rejected" && q.hnRejectNote && <div className="ahn-reject">↩ <strong>Quản lý trả lại:</strong> {q.hnRejectNote}</div>}

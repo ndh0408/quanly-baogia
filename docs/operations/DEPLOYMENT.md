@@ -372,6 +372,12 @@ rid → `--ghi` → `--kiem` phải thoát 0), và chạy lại `--ghi` + `--kie
 đọc, bảng xử lý từng loại dòng lệch, những gì app cũ không thấy trong lúc lùi):
 [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md), mục "Khoản chi kế toán".
 
+**Riêng `20261125090000_quote_project_root`** (mã dự án cấp lúc KHÁCH CHỐT): thuần thêm cột `Quote.projectRootId` +
+index → lùi ảnh là đủ, không DROP. App cũ chạy trên schema mới vẫn đúng, nhưng trong lúc lùi: báo giá tạo bằng app cũ
+lại mang mã ngay lúc tạo, còn báo giá chốt bằng app cũ KHÔNG được cấp mã (app mới chỉ cấp cho báo giá chưa có mã lúc
+chốt — chốt rồi thì không chốt lại được). Dữ liệu cũ (mã cấp lúc tạo) dọn bằng công cụ chạy tay SAU deploy, khi chủ repo
+đã duyệt bảng `--kiem`: [DON_MA_DU_AN.md](DON_MA_DU_AN.md) — backup trước, `--kiem` → duyệt → `--ap-dung`, cách lùi.
+
 ## Biến môi trường BẮT BUỘC ở production
 
 Thiếu là tiến trình **thoát ngay** (`src/config.ts`):

@@ -50,7 +50,7 @@ export const shortTitle = (t: string) => {
 /* Mã dự án hiển thị + mã theo từng sheet — RE-EXPORT từ nguồn dùng chung, KHÔNG chép lại.
    Bản chép tay ở đây trước kia là bản sao thứ hai của cùng một quy tắc; hai bản trôi khỏi nhau
    là hai trang hiện hai mã khác nhau cho cùng một sheet. */
-export { codeLabel, sheetCode, soMa } from "./quoteMath";
+export { codeLabel, sheetCode, soMa, laNhap, NHAN_NHAP } from "./quoteMath";
 
 export const fmtDateTime = (v?: string | null) => {
   if (!v) return "";
