@@ -12,12 +12,18 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1092 commit**, từ 2026-05-29 tới 2026-11-09.
+**1095 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
+## 2026-11-25
+
+- `59af8e1` test(mã dự án): bài chốt song song đòi thêm 'chưa có mã trước khi chốt' — đỏ trên 7a6ce18
+- `207b3cc` feat(mã dự án): chỉ cấp mã lúc KHÁCH CHỐT — báo giá chưa chốt hiện "NHÁP <số BG>", "Bản mới" nhớ gốc dự án, công cụ dọn mã cũ
+
 ## 2026-11-09
 
+- `7a6ce18` docs(CHANGELOG): sinh lại
 - `1b9a74b` fix(số lượng): SL khác 0 nhỏ hơn 0,05 làm tròn thành 0,1 — thôi mất tiền hạng mục (báo giá #101)
 
 ## 2026-10-07
