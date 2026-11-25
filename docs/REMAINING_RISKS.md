@@ -541,14 +541,16 @@ thuộc PHASE 4 ở mục trên. Hai việc này đi cùng nhau.
 
 ## Ghim phụ thuộc bằng `overrides` (2026-08-27)
 
-`package.json` có ba mục `overrides`. Chúng KHÔNG có chỗ ghi chú (npm từ chối khoá `"//"` bên
+`package.json` có nhiều mục `overrides` (bảng dưới). Chúng KHÔNG có chỗ ghi chú (npm từ chối khoá `"//"` bên
 trong `overrides` — đã thử, lỗi `Override without name`), nên lý do nằm ở đây.
 
 | Gói | Ghim | Vì sao |
 |---|---|---|
-| `deepmerge-ts` | `^8.0.2` | `@prisma/config@7.9.1` ghim **chính xác** `7.1.5`, dính GHSA-ggr8-5vv4-36mx (stack exhaustion khi merge đồ thị object đệ quy, mức **high**). Không có bản prisma 7.x nào thoát. |
+| ~~`deepmerge-ts`~~ | ~~`^8.0.2`~~ | **ĐÃ GỠ 2026-11-25**: `@prisma/config@7.10.1` tự ghim `deepmerge-ts@8.0.2` (đã thoát GHSA-ggr8-5vv4-36mx) nên bản ghi đè thành rác — đúng điều kiện "Khi nào gỡ" bên dưới; xoá cùng `tests/x2-override-deepmerge.test.js`. Phần lịch sử bên dưới giữ để hiểu cách ghi đè hỏng im lặng. |
 | `@opentelemetry/core` | `^2.8.0` | (có từ trước đợt này) |
 | `uuid` | `^11.1.1` | (có từ trước đợt này) |
+| `effect` | `^3.22.5` | `@prisma/config@7.10.x` ghim **chính xác** `3.20.0`; mọi bản `<= 3.22.0` dính ReDoS trong `Schema.TemplateLiteral` (mức **high**, công bố 11/2026). `npm audit fix --force` tụt prisma về 6.12. Đo 2026-11-25 sau khi ghim: `prisma validate` · `generate` · `migrate deploy` · `migrate status` chạy trọn, `npm audit` 0 lỗ. Gác bởi `tests/x2-override-effect.test.js` — gỡ khi prisma tự ghim `effect >= 3.22.1`. |
+| `fast-uri` | `^3.1.9` | các bản `3.0.0 – 3.1.8` dính URI scheme spoofing / path equivalence (mức moderate, 11/2026). |
 
 ### Vì sao không `npm audit fix --force`
 
@@ -578,7 +580,7 @@ không đọc `overrides` trong `package.json`. Xoá dòng override mà chưa `n
 thoát 0, toàn bộ cổng xanh. Người xoá nó tin là an toàn; lần `npm ci` kế tiếp (máy khác, hoặc
 trong Dockerfile) mới cài lại 7.1.5 dính lỗ hổng — lúc đó không ai đang nhìn.
 
-Thứ **thật sự** canh là `tests/x2-override-deepmerge.test.js`. Nó đọc `package.json` và bản ghim
+Thứ **thật sự** canh là `tests/x2-override-effect.test.js` (trước đây `tests/x2-override-deepmerge.test.js`, đã gỡ 2026-11-25). Nó đọc `package.json` và bản ghim
 thật của `@prisma/config` trong `node_modules`, rồi bắt hai bên nhất quán theo cả hai chiều:
 
 - gỡ override khi prisma còn ghim 7.x → **đỏ**;
