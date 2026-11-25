@@ -12,12 +12,18 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1092 commit**, từ 2026-05-29 tới 2026-11-09.
+**1095 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
+## 2026-11-25
+
+- `1cc9b50` docs(tính năng): bảng mẫu Excel thêm bốn mẫu CINETOUR (cột Số ca)
+- `f6fb316` feat(mẫu báo giá): bốn mẫu CINETOUR có cột SỐ CA cho Gia Nguyễn và Colorfull (không ngày / có ngày)
+
 ## 2026-11-09
 
+- `7a6ce18` docs(CHANGELOG): sinh lại
 - `1b9a74b` fix(số lượng): SL khác 0 nhỏ hơn 0,05 làm tròn thành 0,1 — thôi mất tiền hạng mục (báo giá #101)
 
 ## 2026-10-07
