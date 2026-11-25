@@ -12,12 +12,14 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1096 commit**, từ 2026-05-29 tới 2026-11-25.
+**1098 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
 ## 2026-11-25
 
+- `2a3bec8` fix(phụ thuộc): vá mọi lỗ hổng npm audit mới (11/2026) — gốc + web về 0
+- `16175a1` docs(CHANGELOG): sinh lại
 - `39d964c` chore(deploy): production = gianguyengroupp.com.vn, dev = dev.gianguyengroupp.com.vn
 - `03157bd` docs(CHANGELOG): sinh lại
 - `a336513` fix(hệ số nhóm): nhóm SL nhỏ hơn 1 nhân thật (0,5 → ×0,5) — báo giá #108 "Cổng Aeon BT" thôi tính ×1
