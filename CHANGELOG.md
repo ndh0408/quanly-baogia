@@ -12,12 +12,14 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1098 commit**, từ 2026-05-29 tới 2026-11-25.
+**1100 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
 ## 2026-11-25
 
+- `9832d14` fix(image): sàn musl >= 1.2.6-r3 và zlib >= 1.3.2-r1 (CVE-2026-107891, CVE-2026-85091 — HIGH, trivy [D3] đỏ)
+- `38efe43` docs(CHANGELOG): sinh lại
 - `2a3bec8` fix(phụ thuộc): vá mọi lỗ hổng npm audit mới (11/2026) — gốc + web về 0
 - `16175a1` docs(CHANGELOG): sinh lại
 - `39d964c` chore(deploy): production = gianguyengroupp.com.vn, dev = dev.gianguyengroupp.com.vn
