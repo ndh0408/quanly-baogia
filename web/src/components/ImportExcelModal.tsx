@@ -60,7 +60,7 @@ export function ImportExcelModal({
   /** Chế độ THAY của màn gọi có GIỮ cờ "Thành Tiền nhóm" của sheet đích không (bảng Hà Nội: giữ — AccountHnView không gán
    *  cờ lúc Thay) hay lấy cờ theo FILE (trình soạn báo giá: gán theo file, không làm mất cờ BẬT của sheet đang bật). Quyết
    *  định cờ SAU KHI nạp — `coSauNhapExcel` — mà tổng dự kiến và cảnh báo trong hộp phải tính đúng theo cờ đó. Sheet MỚI
-   *  luôn lấy cờ theo file, chế độ Nối luôn giữ cờ sheet đích; cả ba đều tự BẬT khi bảng kết quả còn nhóm SL > 1. */
+   *  luôn lấy cờ theo file, chế độ Nối luôn giữ cờ sheet đích; cả ba đều tự BẬT khi bảng kết quả còn nhóm SL ≠ 1. */
   thayGiuCoNhomCuaDich?: boolean;
   /** Tổng các bảng của màn gọi KHÔNG BAO GIỜ nhân Số Lượng nhóm, dù cờ "Thành Tiền nhóm" bật (bảng Hà Nội: tổng là
    *  `extraTableSum`, chỉ cộng hạng mục — cờ ở đó chỉ quyết định ô Thành Tiền của dòng nhóm hiện số đã nhân hay để trống).
@@ -143,7 +143,7 @@ export function ImportExcelModal({
     const daChiMat = giu?.daChiMat ?? [];
     const tongBang = tongBangCua(tongKhongNhanNhom, usesDays);
     const beforeTotal = tongBang ? tongBang(before) : M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
-    // Cờ "Hiện Thành Tiền nhóm" SAU nạp: theo đường nạp, và TỰ BẬT khi bảng kết quả còn nhóm SL > 1 (nhập Số Lượng nhóm mà
+    // Cờ "Hiện Thành Tiền nhóm" SAU nạp: theo đường nạp, và TỰ BẬT khi bảng kết quả còn nhóm SL ≠ 1 (nhập Số Lượng nhóm mà
     // tổng không nhân hệ số là xuất Excel ra sai tiền). Hai tổng dưới đây tính theo cờ HIỆU LỰC đó (`nhanSauNap` — bảng Hà Nội
     // thì không bao giờ nhân, cộng bằng extraTableSum), không theo cờ trong file. Sheet đang chọn "Bỏ qua" chỉ để xem, không nạp
     // → không có gì được bật, tổng theo cờ của file (xem doiChieuNhapExcel). Chế độ Nối: "sau nạp" của thẻ đối chiếu là phần
@@ -250,7 +250,7 @@ export function ImportExcelModal({
       rowRisk += fs.items.reduce((n, it) => n + (it.warn?.length || 0), 0);
       sheetRisk += fs.warnings.length;
       if (fs.totals?.subtotal != null) {
-        // Tổng theo cờ HIỆU LỰC sau nạp (đã tự bật nếu còn nhóm SL > 1) — y như bảng xem trước, kể cả phần Nối (phần tổng sheet
+        // Tổng theo cờ HIỆU LỰC sau nạp (đã tự bật nếu còn nhóm SL ≠ 1) — y như bảng xem trước, kể cả phần Nối (phần tổng sheet
         // thật sự tăng thêm: hàng nối vào trong nhóm cuối được nhân hệ số, cờ vừa bật đổi tổng hàng sẵn có). Phần lệch sinh ra CHỈ
         // vì hệ số nhóm (sheet nhân còn file không — ô vừa TỰ BẬT, sheet đích đang bật, hàng nối vào nhóm cuối — hoặc ngược lại ở
         // bảng Hà Nội) là chủ ý: đã nói ở bảng xem trước, nên KHÔNG đưa vào hộp xác nhận — cảnh báo, không chặn. Lệch thật (các
@@ -469,14 +469,14 @@ export function ImportExcelModal({
                         . Xem các dòng màu vàng trước khi nạp.
                       </li>}
                       {view.tuBatNhom && (view.nhanSauNap ? <li>
-                        <strong>Đã bật Thành Tiền nhóm</strong> vì {view.nguonNhom} có nhóm Số Lượng &gt; 1 nên tổng đã nhân hệ số nhóm
+                        <strong>Đã bật Thành Tiền nhóm</strong> vì {view.nguonNhom} có nhóm Số Lượng khác 1 nên tổng đã nhân hệ số nhóm
                         {view.lechDoHeSoNhom
                           ? <> và <strong>khác tổng ghi trong file</strong>: Excel là {M.fmtMoney(view.fileTotal)}, sau nạp là {M.fmtMoney(view.importedTotal)}. Đó là chủ ý (không nhân thì xuất Excel ra sai tiền) nên không chặn việc nạp.</>
                           : <> (không nhân thì xuất Excel ra sai tiền).</>}
                         {" "}Ô “Hiện Thành Tiền nhóm” sẽ bị khoá bật cho tới khi Số Lượng mọi nhóm về 1.
                       </li> : <li>
                         {/* Bảng mà tổng không bao giờ nhân hệ số nhóm (Hà Nội): cờ chỉ đổi ô Thành Tiền của dòng nhóm. */}
-                        <strong>Đã bật Thành Tiền nhóm</strong> vì {view.nguonNhom} có nhóm Số Lượng &gt; 1: ô Thành Tiền của dòng nhóm sẽ hiện số đã nhân hệ số nhóm.
+                        <strong>Đã bật Thành Tiền nhóm</strong> vì {view.nguonNhom} có nhóm Số Lượng khác 1: ô Thành Tiền của dòng nhóm sẽ hiện số đã nhân hệ số nhóm.
                         {" "}Tổng của bảng vẫn chỉ cộng từng hạng mục (bảng nội bộ không nhân hệ số nhóm). Ô “Hiện Thành Tiền nhóm” sẽ bị khoá bật cho tới khi Số Lượng mọi nhóm về 1.
                       </li>)}
                       {/* Lệch CHỈ vì hai bên hiểu Số Lượng các nhóm CỦA FILE khác nhau mà không phải do vừa tự bật (dòng trên đã
@@ -502,7 +502,7 @@ export function ImportExcelModal({
                       </li>}
                       {view.hangSanCoDoi && <li>
                         <strong>Bật Thành Tiền nhóm làm tổng các hàng sẵn có đổi {M.fmtMoney(view.hangSanCoDoi.truoc)} → {M.fmtMoney(view.hangSanCoDoi.sau)}</strong>
-                        {" "}(các nhóm Số Lượng &gt; 1 đã có trong sheet giờ được nhân hệ số).
+                        {" "}(các nhóm Số Lượng khác 1 đã có trong sheet giờ được nhân hệ số).
                       </li>}
                       {view.rowWarnings > 0 && <li>{view.rowWarnings} điểm cần kiểm tra nằm ngay tại từng dòng bên dưới.</li>}
                       {view.fs.warnings.map((w, i) => <li key={i}>{w}</li>)}

@@ -29,7 +29,9 @@ const lineAmount = (it: any, usesDays: boolean) => {
   // Nhân CHÍNH XÁC (không qua double) — khớp src/money.ts từng đồng (XLSX-06).
   return usesDays ? nhanLamTronDong(q, d, pr) : nhanLamTronDong(q, pr);
 };
-const groupMult = (it: any) => Math.max(1, qtyForAmount(it) || 1);
+// Hệ số nhóm: SL trống / 0 / âm → ×1, SL dương nhỏ hơn 1 nhân THẬT (chủ repo 2026-11-25, báo giá #108 "Cổng Aeon
+// BT" SL 0,5 "Chia 2" bị tính ×1). BẢN SAO của groupMult ở shared/quote-math.ts — sửa thì sửa CẢ.
+const groupMult = (it: any) => { const q = qtyForAmount(it); return q > 0 ? q : 1; };
 function groupLetter(n: number) {
   let s = "", x = n + 1;
   while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }

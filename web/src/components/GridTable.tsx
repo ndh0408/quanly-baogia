@@ -376,7 +376,7 @@ function GridTableInner(props: GridTableProps) {
   const laKhoiHangMuc = (fs: readonly string[] | undefined) => !!fs?.includes("name") && fs.some((f) => NUMERIC.has(f));
   const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
   // MỐC UNDO = 1 ký tự cờ + JSON của items. Cờ là ô "Thành Tiền nhóm" LÚC CHỤP ("1" bật / "0" tắt): nó không
-  // nằm trong `items` nên trước đây Ctrl+Z / Esc / xoá-rồi-hoàn-tác trả nhóm SL > 1 về mà cờ đứng nguyên (hoặc
+  // nằm trong `items` nên trước đây Ctrl+Z / Esc / xoá-rồi-hoàn-tác trả nhóm SL ≠ 1 về mà cờ đứng nguyên (hoặc
   // bị đoán lại) — báo giá cũ "tắt + SL 3" bị bật + khoá hộ mà không lùi được (xem restore / khoiPhucCoVeMoc).
   // Đọc qua ref vì mốc có thể được chụp từ bộ xử lý của lượt vẽ cũ.
   const coNhomRef = useRef(groupSubtotal);
@@ -621,15 +621,15 @@ function GridTableInner(props: GridTableProps) {
   // Tự bật "Thành Tiền nhóm" mà người dùng KHÔNG trực tiếp gõ/dán Số Lượng nhóm (Ctrl+Z / Ctrl+Y, công thức tham
   // chiếu): ô tích tự đổi + khoá và tổng nhảy ×N, nên phải nói vì sao. Gõ/dán thẳng vào ô SL nhóm thì im.
   const tuBatNhomGianTiep = () => { onGroupSubtotal?.(true); toast(TB_TU_BAT_NHOM, "info"); };
-  // …và chiều ngược lại: Ctrl+Z / Ctrl+Y / Esc TRẢ ô về TẮT (mốc là báo giá cũ "tắt + nhóm SL > 1" mà người dùng đã bật
+  // …và chiều ngược lại: Ctrl+Z / Ctrl+Y / Esc TRẢ ô về TẮT (mốc là báo giá cũ "tắt + nhóm SL ≠ 1" mà người dùng đã bật
   // giữa chừng). Ô tự bỏ tích + mở khoá, tổng rớt về số không nhân hệ số nhóm — phải nói, không thì đó là cú đổi tổng im lặng.
   const tuTatNhomGianTiep = () => { onGroupSubtotal?.(false); toast(TB_TU_TAT_NHOM, "info"); };
   // `khongTuBat`: lượt tính lại lúc MỞ lưới (khôi phục Số Ngày) — mở báo giá cũ không bao giờ được tự bật ô.
   const recomputeAll = (oDangGo?: string, khongTuBat = false) => {
     if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
-    // SL nhóm có thể là CÔNG THỨC ("=D2"): sửa ô được tham chiếu là đẩy nhóm lên > 1 mà không đường nào ở trên
+    // SL nhóm có thể là CÔNG THỨC ("=D2"): sửa ô được tham chiếu là đẩy nhóm thành SL ≠ 1 mà không đường nào ở trên
     // (commitCell / onNumInput / dán chỉ nhìn ô SL của chính hàng nhóm) thấy — ô đang tắt thì tổng sai im lặng.
-    // Chỉ bật khi lượt tính này VỪA ĐƯA nhóm SL > 1 vào (trước đó chưa có): báo giá cũ đã lưu "tắt + nhóm SL > 1"
+    // Chỉ bật khi lượt tính này VỪA ĐƯA nhóm SL ≠ 1 vào (trước đó chưa có): báo giá cũ đã lưu "tắt + nhóm SL ≠ 1"
     // mà sửa ô không liên quan thì trước/sau đều có → không đụng (giống restore()).
     const coNhomTruoc = coNhomNhanHeSo(items);
     const vong = oVongLap();
@@ -725,11 +725,11 @@ function GridTableInner(props: GridTableProps) {
       if (it.formulas) { delete (it.formulas as Record<string, string>)[f]; if (!Object.keys(it.formulas).length) delete it.formulas; }
       it[f] = NUMERIC.has(f) ? (raw.trim() === "" ? 0 : M.parseVN(raw)) : (MULTILINE.has(f) ? raw : raw.trim().replace(/\s+/g, " "));
     }
-    // Tự bật khi SL nhóm > 1 — nhưng CHỈ khi người dùng thật sự sửa: có gõ (giuCoHong = false; onNumInput đã ghi số
+    // Tự bật khi hệ số nhóm ≠ 1 (M.groupMult: SL 3, cả SL 0,5 — chủ repo 2026-11-25, báo giá #108) — nhưng CHỈ khi người dùng thật sự sửa: có gõ (giuCoHong = false; onNumInput đã ghi số
     // LIVE nên "số đổi" không còn dấu vết ở đây) hoặc lần chốt này làm đổi số (thanh công thức). Đi ngang qua ô SL
     // của nhóm trên báo giá cũ "tắt + SL 3" (bấm vào rồi Enter / bấm ra) mà bật ô là đổi tổng báo giá cũ — và từ
     // khi có khoá, ô còn không bỏ tích lại được.
-    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && (Number(it[f]) || 0) > 1 && !groupSubtotal
+    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && M.groupMult(items[i]) !== 1 && !groupSubtotal
       && (!giuCoHong || (Number(it[f]) || 0) !== slTruoc)) onGroupSubtotal?.(true);
   };
 
@@ -1196,10 +1196,10 @@ function GridTableInner(props: GridTableProps) {
       if (cp.noiBo && !(r >= dest.r0 && r <= dest.r1)) { it.chungTu = null; it.luuKho = false; it.ns = null; }
     }
   };
-  // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
+  // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) hệ số ≠ 1 (SL 3, cả SL 0,5 — báo giá #108) — nếu không,
   // sheetSubtotalGrouped ép mult=1 → MẤT hệ số ×N → tổng ÂM THẦM SAI (như SPA autoEnableGroupSub).
   //
-  // `truoc` (từ chupNhom, chụp TRƯỚC khi vùng bị ghi): chỉ bật khi thao tác này THẬT SỰ đưa vào một nhóm SL > 1
+  // `truoc` (từ chupNhom, chụp TRƯỚC khi vùng bị ghi): chỉ bật khi thao tác này THẬT SỰ đưa vào một nhóm SL ≠ 1
   // — hàng vốn không phải nhóm mà thành nhóm, hoặc nhóm có SL khác lúc trước. Không có `truoc` thì quét như xưa
   // (dùng khi CẢ HÀNG bị thay bằng dữ liệu mới: dán dựng lại từ Excel). Quét cả hàng mà không so sánh thì điền /
   // dán một cột chữ (ĐVT, Ghi chú, Tên) qua hàng nhóm của báo giá cũ "tắt + SL 3" cũng bật ô và nhân tổng ×3 — và
@@ -1216,7 +1216,7 @@ function GridTableInner(props: GridTableProps) {
       const it = items[i];
       if (!laNhom(it)) continue;
       const mult = M.groupMult(it);   // theo SỐ ĐANG HIỆN
-      if (mult > 1 && (!truoc || truoc[i - lo] !== mult)) { onGroupSubtotal?.(true); return; }
+      if (mult !== 1 && (!truoc || truoc[i - lo] !== mult)) { onGroupSubtotal?.(true); return; }
     }
   };
   const fillDown = () => {
@@ -1359,7 +1359,7 @@ function GridTableInner(props: GridTableProps) {
     const en = s.items[k]; if (!en) return;
     pushUndo();
     // Hàng NHÓM / nhóm con cũng mở được gợi ý — CHỈ bằng Alt+↓ (gõ tên nhóm đi tenNhom, không gọi nameSuggest): gợi ý
-    // điền cả Số Lượng, nên phải đi cùng luật tự bật như gõ / dán vào ô SL — không thì nhóm thành SL > 1 mà ô "Thành Tiền
+    // điền cả Số Lượng, nên phải đi cùng luật tự bật như gõ / dán vào ô SL — không thì nhóm thành SL ≠ 1 mà ô "Thành Tiền
     // nhóm" đang tắt và không khoá (tổng sai im lặng). Chụp hệ số nhóm TRƯỚC khi điền để báo giá cũ "tắt + SL 3" mà gợi ý
     // không đổi SL không bị bật hộ.
     const nhomTruoc = chupNhom(s.i, s.i);
@@ -1447,11 +1447,11 @@ function GridTableInner(props: GridTableProps) {
     const arr = khoAnhRef.current.parse<ItemK[]>(json.slice(1)); arr.forEach((it) => { if (it._k == null) it._k = nextK(); });
     items.splice(0, items.length, ...arr);
     // Ô "Thành Tiền nhóm" nằm trong MỐC (ký tự đầu, xem snap) nên lùi/tiến trả nó về đúng trạng thái lúc chụp
-    // KHI mốc có nhóm SL > 1 — chỉ khi đó cờ mới đổi được tổng (SL nhóm ≤ 1 thì hệ số vẫn ×1, để yên cờ người
+    // KHI mốc có nhóm SL ≠ 1 — chỉ khi đó cờ mới đổi được tổng (SL nhóm 1 / trống / 0 thì hệ số vẫn ×1, để yên cờ người
     // dùng vừa tự đặt):
     //  · mốc ĐANG BẬT mà ô đã bị bỏ tích (SL nhóm 2 → về 1 → bỏ tích → Ctrl+Z): bật lại + nói vì sao, kẻo tổng
     //    sai im lặng;
-    //  · mốc ĐANG TẮT (chỉ có ở báo giá cũ đã lưu "tắt + nhóm SL > 1") mà ô đã bị bật giữa chừng — bởi tự bật
+    //  · mốc ĐANG TẮT (chỉ có ở báo giá cũ đã lưu "tắt + nhóm SL ≠ 1") mà ô đã bị bật giữa chừng — bởi tự bật
     //    khi gõ / điền, hoặc do người dùng tích: trả về TẮT, đúng tổng đã lưu. Không trả thì "xoá nhóm rồi
     //    Ctrl+Z" là bật + khoá ô và nhân tổng ×N, và người dùng không còn cách quay lại.
     if (coNhomNhanHeSo(items)) {
@@ -1656,7 +1656,7 @@ function GridTableInner(props: GridTableProps) {
         const nhomTruoc = chupNhom(rc.r0, rc.r1);
         for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, ...dich1(r, FIELDS[c]), soThoNguon(0), quGoc(0, 0), bao); coSlTheoNguon(r, 0, FIELDS[c], fSrc1); }   // GRID-15: STT là ô tính, không ghi
         if (movingCut) finishCutMove(rc);
-        autoEnableGroupSub(rc.r0, rc.r1, nhomTruoc);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
+        autoEnableGroupSub(rc.r0, rc.r1, nhomTruoc);   // fill SL ≠ 1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
         syncActiveCell();   // ô đang focus nằm trong vùng (Shift+↓ đã dời tiêu điểm xuống) — L6
         baoSoDan(); baoChiChep();
@@ -1865,7 +1865,7 @@ function GridTableInner(props: GridTableProps) {
     const vaiDich = Array.from({ length: Math.max(...rows.map((row) => row.length)) }, (_, c) => truongDich(c) ?? "");
     const xetDanhTinh = cotNoiBo && !blockNoiBo && (internal ? sameBlock && thayHangMuc && laKhoiHangMuc(internal.fields) : laKhoiHangMuc(vaiDich));
     const tenTruoc = xetDanhTinh ? rows.map((_, r) => tenHangMuc(items[startRow + r]?.name)) : null;
-    const nhomTruoc = chupNhom(startRow, startRow + rows.length - 1);   // để tự bật CHỈ khi khối đưa vào nhóm SL > 1
+    const nhomTruoc = chupNhom(startRow, startRow + rows.length - 1);   // để tự bật CHỈ khi khối đưa vào nhóm SL ≠ 1
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       const it = items[ri] as Record<string, unknown>;
@@ -2247,7 +2247,7 @@ function GridTableInner(props: GridTableProps) {
           if (m && m.i === i && m.f === f) {
             const moc = histRef.current.dropMark(); editUndoRef.current = null;
             // Phiên gõ SL nhóm đã tự BẬT ô (báo giá cũ "tắt + SL 3": gõ '5' → bật) thì huỷ phiên phải trả luôn cờ về
-            // như mốc của nó — không thì SL về 3 mà ô kẹt bật + khoá. Chỉ khi nhóm SL > 1 vẫn còn (SL ≤ 1 thì cờ
+            // như mốc của nó — không thì SL về 3 mà ô kẹt bật + khoá. Chỉ khi nhóm SL ≠ 1 vẫn còn (SL 1 / trống thì cờ
             // không đổi tổng, giữ như cũ).
             if (moc !== undefined && moc.charAt(0) === "0" && groupSubtotal && coNhomNhanHeSo(items)) tuTatNhomGianTiep();
           }
@@ -2456,7 +2456,7 @@ function GridTableInner(props: GridTableProps) {
     try { el.setSelectionRange(pos, pos); } catch { /* */ }
     const n = M.parseVN(formatted); it[f] = n;
     if (it.formulas) delete (it.formulas as Record<string, string>)[f];
-    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && n > 1 && !groupSubtotal) onGroupSubtotal?.(true);
+    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && M.groupMult(items[i]) !== 1 && !groupSubtotal) onGroupSubtotal?.(true);
     closeAuto(); clearActiveRefs();
     // Gõ số là đường NÓNG nhất: trước đây mỗi phím gọi recomputeAll + onChange → React vẽ lại TOÀN
     // BỘ lưới. Đo được 73ms mỗi phím ở 1000 dòng (5.900 ô) — giật thấy rõ.
@@ -3148,7 +3148,7 @@ function GridTableInner(props: GridTableProps) {
         </div>
       )}
       {editable && onGroupSubtotal && (() => {
-        // KHOÁ Ở TRẠNG THÁI BẬT khi còn nhóm SL > 1 (xem lib/khoaThanhTienNhom): bỏ tích lúc đó là mất hệ số
+        // KHOÁ Ở TRẠNG THÁI BẬT khi còn nhóm SL ≠ 1 (xem lib/khoaThanhTienNhom): bỏ tích lúc đó là mất hệ số
         // ×N của nhóm và tổng sai im lặng. Tính TƯƠI mỗi lần vẽ từ items nên SL nhóm về 1 là nhả ngay và
         // giữ nguyên trạng thái đang có. `disabled` chặn chuột/bàn phím; onChange vẫn tự chặn phòng khi một
         // đường nào đó (kiểm thử, trợ năng) bắn được sự kiện vào ô đã khoá — và nó nhìn items SỐNG chứ không

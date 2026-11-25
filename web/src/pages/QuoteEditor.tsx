@@ -1174,7 +1174,7 @@ Lý do (không bắt buộc):`,
       const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
       // File có nhiều sheet hơn báo giá → TẠO THÊM sheet, đặt tên đúng tên tab trong file.
       if (p.targetIndex === NEW_SHEET) {
-        // Cờ "Hiện Thành Tiền nhóm": theo file, và TỰ BẬT khi hàng nạp có nhóm SL > 1 — nhập Số Lượng nhóm mà tổng không
+        // Cờ "Hiện Thành Tiền nhóm": theo file, và TỰ BẬT khi hàng nạp có nhóm SL ≠ 1 — nhập Số Lượng nhóm mà tổng không
         // nhân hệ số là xuất Excel ra sai tiền (lib/khoaThanhTienNhom.coSauNhapExcel; hộp nhập tính đúng như vậy).
         const coMoi = coSauNhapExcel({ cheDo: "moi", coTheoFile: p.file.groupSubtotal }, stamped);
         if (coMoi.tuBat) nBatNhom++;
@@ -1192,7 +1192,7 @@ Lý do (không bắt buộc):`,
       if (!target) continue;
       if (p.mode === "append") {
         target.items.push(...stamped);
-        // Nối: cờ của sheet đích đứng nguyên — trừ khi bảng sau khi nối có nhóm SL > 1 mà cờ đang tắt thì tự bật.
+        // Nối: cờ của sheet đích đứng nguyên — trừ khi bảng sau khi nối có nhóm SL ≠ 1 mà cờ đang tắt thì tự bật.
         const co = coSauNhapExcel({ cheDo: "noi", coCuaDich: target.groupSubtotal }, target.items);
         if (co.tuBat) { target.groupSubtotal = true; nBatNhom++; }
       } else {
@@ -1203,7 +1203,7 @@ Lý do (không bắt buộc):`,
         // file mà vẫn hiện tên mẫu ("GN (không ngày)"), còn tên thật thì biến mất.
         if (p.file.name) target.name = p.file.name;
         // Dòng nhóm trong file có ghi Thành Tiền ⇒ báo giá đó bật "tổng tiền theo nhóm" → theo file. KHÔNG làm mất cờ BẬT
-        // của sheet đang bật (file tắt thì sheet giữ bật), và tự bật khi hàng nạp còn nhóm SL > 1.
+        // của sheet đang bật (file tắt thì sheet giữ bật), và tự bật khi hàng nạp còn nhóm SL ≠ 1.
         const co = coSauNhapExcel({ cheDo: "thay", coCuaDich: coCu, coTheoFile: p.file.groupSubtotal }, target.items);
         target.groupSubtotal = co.co;
         if (co.tuBat) nBatNhom++;

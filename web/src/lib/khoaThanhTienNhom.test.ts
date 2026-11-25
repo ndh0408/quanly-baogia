@@ -14,10 +14,33 @@ describe("coNhomNhanHeSo — có nhóm nào mà SL nhân THẬT vào tổng khô
     expect(coNhomNhanHeSo([it_("section", 1.5)])).toBe(true);
   });
 
-  it("nhóm SL 1 / 0 / bỏ trống → không (groupMult tối thiểu 1)", () => {
+  it("nhóm SL 1 / 0 / âm / bỏ trống → không (hệ số ×1)", () => {
     expect(coNhomNhanHeSo([it_("section", 1), it_("item", 5)])).toBe(false);
     expect(coNhomNhanHeSo([it_("section", 0), it_("subsection", 0)])).toBe(false);
+    expect(coNhomNhanHeSo([it_("section", -1)])).toBe(false);
+    expect(coNhomNhanHeSo([{ kind: "section", name: "trống" } as M.Item])).toBe(false);
     expect(coNhomNhanHeSo([])).toBe(false);
+  });
+
+  // Chủ repo 2026-11-25, báo giá #108 sheet "Cổng": nhóm "Cổng Aeon BT" SL 0,5 ("Chia 2") — hệ số ×0,5 đổi tổng
+  // thật, nên ô phải tự bật + khoá như nhóm SL 3; để tắt là tổng sheet và tệp Excel GẤP ĐÔI. Bản cũ (`> 1`) bỏ qua.
+  it("nhóm / nhóm con SL dương NHỎ HƠN 1 → có (0,5 · 0,03 hiện 0,1 · SL chính xác 0,25)", () => {
+    expect(coNhomNhanHeSo([it_("section", 0.5), it_("item", 1)])).toBe(true);
+    expect(coNhomNhanHeSo([it_("section", 1), it_("subsection", 0.5)])).toBe(true);
+    expect(coNhomNhanHeSo([it_("section", 0.03)])).toBe(true);
+    expect(coNhomNhanHeSo([it_("section", 0.25, { quantityExact: true })])).toBe(true);
+    // 0,96 hiện "1" → ×1 (theo SỐ ĐANG HIỆN, như 1,04).
+    expect(coNhomNhanHeSo([it_("section", 0.96)])).toBe(false);
+  });
+
+  it("groupMult: 0,5→0,5 · 2→2 · 0→1 · trống→1 · −1→1 · 0,03→0,1 · SL chính xác 0,25→0,25", () => {
+    expect(M.groupMult(it_("section", 0.5))).toBe(0.5);
+    expect(M.groupMult(it_("section", 2))).toBe(2);
+    expect(M.groupMult(it_("section", 0))).toBe(1);
+    expect(M.groupMult({})).toBe(1);
+    expect(M.groupMult(it_("section", -1))).toBe(1);
+    expect(M.groupMult(it_("section", 0.03))).toBe(0.1);
+    expect(M.groupMult(it_("section", 0.25, { quantityExact: true }))).toBe(0.25);
   });
 
   it("SL 1,04 hiện là '1' (làm tròn 1 số lẻ như ô hiển thị) → không; SL 1,05 hiện '1,1' → có", () => {
@@ -48,6 +71,13 @@ describe("khoaBatNhom — khoá CHỈ ở trạng thái bật", () => {
   it("bật + không có → tự do", () => expect(khoaBatNhom(true, khong)).toBe(false));
   it("TẮT + có nhóm SL > 1 (báo giá cũ) → KHÔNG khoá", () => expect(khoaBatNhom(false, co)).toBe(false));
   it("tắt + không có → tự do", () => expect(khoaBatNhom(false, khong)).toBe(false));
+  it("bật + nhóm SL 0,5 (báo giá #108) → khoá; mọi nhóm SL 1 / trống / 0 → không khoá", () => {
+    expect(khoaBatNhom(true, [it_("section", 0.5), it_("item", 1)])).toBe(true);
+    expect(khoaBatNhom(true, [it_("section", 1), { kind: "subsection", name: "trống" } as M.Item, it_("section", 0), it_("item", 1)])).toBe(false);
+  });
+  it("nhập Excel: bảng kết quả có nhóm SL 0,5 mà cờ tắt → tự bật", () => {
+    expect(coSauNhapExcel({ cheDo: "moi", coTheoFile: false }, [it_("section", 0.5), it_("item", 2)])).toEqual({ co: true, tuBat: true });
+  });
 });
 
 describe("coSauNhapExcel — nhập Excel TỰ BẬT ô khi bảng kết quả còn nhóm SL > 1", () => {
@@ -104,7 +134,7 @@ describe("coSauNhapExcel — nhập Excel TỰ BẬT ô khi bảng kết quả c
 
   it("lời báo sau nạp nói số sheet và lý do", () => {
     expect(tbNhapTuBatNhom(2)).toMatch(/tự bật Thành Tiền nhóm ở 2 sheet/);
-    expect(tbNhapTuBatNhom(1)).toMatch(/nhóm Số Lượng > 1/);
+    expect(tbNhapTuBatNhom(1)).toMatch(/nhóm Số Lượng khác 1/);
     expect(tbNhapTuBatNhom(1)).toMatch(/tổng đã nhân hệ số nhóm/);
   });
 

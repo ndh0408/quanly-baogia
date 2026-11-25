@@ -10,7 +10,8 @@
 //   · hàng "item" và "sub" (dòng con) đều tính Thành tiền RIÊNG; "info" (dòng thông tin) không tính;
 //   · CHƯA bật "Hiện Thành Tiền nhóm" (groupSubtotal) → hàng nhóm / nhóm con chỉ là tiêu đề: cộng thẳng từng mục,
 //     SL của nhóm KHÔNG nhân vào đâu cả;
-//   · ĐÃ bật → mọi mục dưới một nhóm (hoặc nhóm con) nhân SL của CHÍNH nhóm đó (SL trống hoặc < 1 tính ×1); mục dưới
+//   · ĐÃ bật → mọi mục dưới một nhóm (hoặc nhóm con) nhân SL của CHÍNH nhóm đó (SL trống / 0 / âm tính ×1; SL 0,5 tính
+//     ×0,5 — chủ repo 2026-11-25, báo giá #108 "Cổng Aeon BT"); mục dưới
 //     nhóm con nhân SL nhóm con, KHÔNG nhân thêm SL nhóm cha. Mục đứng trước nhóm đầu tiên nhân 1;
 //   · mẫu đánh số nhóm con (numberSubsections): ô Thành tiền của nhóm CHA hiện cả phần nhóm con dồn lên, nhưng Tổng
 //     sheet không lấy ô đó — chỉ lấy mục trực tiếp của nhóm cha × SL nhóm cha, cộng từng nhóm con. Trỏ vào ô nhóm cha
@@ -84,13 +85,14 @@ export function congThucTongSheet(items: M.Item[], o: { groupSubtotal?: boolean;
     if (!nhomChaDonCon(m.hang)) { coNhom = true; phanTu.push({ thamChieu: oTT(m.hang), giaTri: tongCon * he }); continue; }
     const a = m.con[0], b = m.con[m.con.length - 1];
     const goc = a === b ? oTT(a) : `SUM(${oTT(a)}:${oTT(b)})`;
-    phanTu.push({ thamChieu: he > 1 ? `${goc}*${o.Lq}${m.hang + 1}` : goc, giaTri: tongCon * he });
-    ghiChu.push(`Nhóm “${tenNgan(ds[m.hang].name)}” (hàng ${m.hang + 1}): ô Thành tiền nhóm hiện CẢ phần nhóm con, nhưng Tổng sheet chỉ lấy các mục trực tiếp của nhóm${he > 1 ? ` × SL ${soVN(he)}` : ""}; mỗi nhóm con nhân SL của chính nó.`);
+    // Hệ số ≠ 1 (cả SL 0,5) thì nhân ô SL nhóm — như ô Thành Tiền nhóm của src/excel.ts (`gmult !== 1`), sửa thì sửa CẢ.
+    phanTu.push({ thamChieu: he !== 1 ? `${goc}*${o.Lq}${m.hang + 1}` : goc, giaTri: tongCon * he });
+    ghiChu.push(`Nhóm “${tenNgan(ds[m.hang].name)}” (hàng ${m.hang + 1}): ô Thành tiền nhóm hiện CẢ phần nhóm con, nhưng Tổng sheet chỉ lấy các mục trực tiếp của nhóm${he !== 1 ? ` × SL ${soVN(he)}` : ""}; mỗi nhóm con nhân SL của chính nó.`);
   }
 
-  if (coNhom) ghiChu.unshift("Ô Thành tiền của nhóm = tổng Thành tiền các mục trong nhóm × SL nhóm (SL trống hoặc nhỏ hơn 1 tính ×1); mục trong nhóm con nhân SL nhóm con. Tổng sheet cộng ô nhóm, không cộng lại từng mục bên trong.");
+  if (coNhom) ghiChu.unshift("Ô Thành tiền của nhóm = tổng Thành tiền các mục trong nhóm × SL nhóm (SL trống, 0 hoặc âm tính ×1); mục trong nhóm con nhân SL nhóm con. Tổng sheet cộng ô nhóm, không cộng lại từng mục bên trong.");
   if (!nhomTinh) {
-    const coSL = ds.filter((it) => laNhom(it) && M.qtyForAmount(it) > 1);
+    const coSL = ds.filter((it) => laNhom(it) && M.groupMult(it) !== 1);   // nhóm mà bật cờ thì tổng ĐỔI (cả SL 0,5)
     if (coSL.length) ghiChu.push(`Chưa bật “Hiện Thành Tiền nhóm” → SL của ${coSL.slice(0, 3).map((it) => `“${tenNgan(it.name)}”`).join(", ")}${coSL.length > 3 ? "…" : ""} KHÔNG nhân vào tổng; cộng thẳng từng mục.`);
   }
   if (ds.some((it) => it.kind === "info")) ghiChu.push("Dòng thông tin không tính tiền.");

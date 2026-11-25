@@ -665,7 +665,9 @@ export function buildFormulaContext(
       }
     }
   }
-  const heSoNhom = (it: EditorItem) => Math.max(1, (it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity)) || 1);   // = groupMult của web
+  // = groupMult của web (BẢN SAO — sửa thì sửa CẢ): SL trống / 0 / âm → ×1, SL dương nhỏ hơn 1 nhân THẬT (chủ repo
+  // 2026-11-25, báo giá #108 "Cổng Aeon BT" SL 0,5 bị kẹp ×1). Lệch với src/excel.ts là ô Thành Tiền nhóm mất tham chiếu.
+  const heSoNhom = (it: EditorItem) => { const q = it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity); return q > 0 ? q : 1; };
   const soONhomWeb = (row: number, field: string) =>
     field === "unitPrice" ? (tongNhom[row] || 0) : (nhom?.groupSubtotal ? (tongNhom[row] || 0) * heSoNhom(items[row]) : 0);
   // Chỉ dịch tham chiếu ô nhóm khi ô Excel được trỏ tới mang ĐÚNG con số web dùng cho ô ấy. Ô trống

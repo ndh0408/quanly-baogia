@@ -106,9 +106,17 @@ export function lineAmount(it: Item, usesDays: boolean) {
   return usesDays ? nhanLamTronDong(q, d, p) : nhanLamTronDong(q, p);
 }
 /** Hệ số nhân của hàng NHÓM = Số Lượng của nhóm, lấy ĐÚNG con số đang hiển thị trên lưới
- *  (qtyRound 1 số lẻ, hoặc 4 số lẻ với dòng quantityExact). Lấy số thô thì ô hiện "2,4" mà tiền
- *  nhân 2,4213 — người dùng lẫn khách không đối chiếu nổi. Tối thiểu 1 (nhóm bỏ trống = ×1). */
-export const groupMult = (it: Pick<Item, "quantity" | "quantityExact">) => Math.max(1, qtyForAmount(it) || 1);
+ *  (qtyRound 1 số lẻ — kể cả luật SL nhỏ khác 0 → 0,1 —, hoặc 4 số lẻ với dòng quantityExact). Lấy số
+ *  thô thì ô hiện "2,4" mà tiền nhân 2,4213 — người dùng lẫn khách không đối chiếu nổi.
+ *  SL trống / 0 / âm → ×1 (nhóm bỏ trống không xoá tiền). SL dương NHỎ HƠN 1 nhân THẬT: 0,5 → ×0,5.
+ *  Chủ repo 2026-11-25, báo giá #108 sheet "Cổng": nhóm "Cổng Aeon BT" ghi chú "Chia 2" gõ SL 0,5 mà
+ *  Thành Tiền nhóm và tổng sheet vẫn ×1 — bản cũ `Math.max(1, SL || 1)` muốn "trống = ×1" nhưng kẹp luôn
+ *  mọi SL < 1 lên 1. Hệ số ≠ 1 thì ô "Hiện Thành Tiền nhóm" tự bật + khoá (web/src/lib/khoaThanhTienNhom.ts).
+ *  BẢN SAO (shared/ không import được src/ và ngược lại): src/money.ts (computeQuoteTotals), src/pdf.ts
+ *  (groupMult), src/excel.ts (gmult + công thức ô Thành Tiền nhóm), src/quoteFormula.ts (heSoNhom — bộ tự
+ *  kiểm), src/excelImport.ts (computeSubtotal). Sửa luật thì sửa CẢ; tests/xg-he-so-nhom-duoi-1.test.js chạy
+ *  mọi bản trên cùng bảng giá trị. */
+export const groupMult = (it: Pick<Item, "quantity" | "quantityExact">) => { const q = qtyForAmount(it); return q > 0 ? q : 1; };
 // Tổng sheet có hệ số nhóm: section.Số Lượng nhân các dòng dưới nó (tới section kế); section tự nó = 0.
 export function sheetSubtotalGrouped(items: Item[], usesDays: boolean, groupSubtotal?: boolean) {
   let mult = 1, sum = 0;

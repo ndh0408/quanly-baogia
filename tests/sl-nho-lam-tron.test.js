@@ -70,11 +70,13 @@ describe("mọi bản qtyRound / qtyForAmount ra CÙNG một số", () => {
     expect(extraTableSum({ items: [it0] })).toBe(99_000);
   });
 
-  it("nhóm SL 0,03: hiện 0,1 nhưng hệ số nhóm vẫn ×1 (như mọi SL ≤ 1)", () => {
+  // Đổi 2026-11-25 (báo giá #108, chủ repo): hệ số nhóm = SL đang hiện nếu > 0 — không còn kẹp tối thiểu 1 — nên nhóm
+  // SL 0,03 hiện 0,1 thì nhân ×0,1. Bảng đầy đủ mọi bản: tests/xg-he-so-nhom-duoi-1.test.js.
+  it("nhóm SL 0,03: hiện 0,1 và hệ số nhóm ×0,1 (đúng số đang hiện)", () => {
     const items = [{ kind: "section", name: "N", quantity: 0.03 }, dong(2, 100_000)];
-    expect(WEB.groupMult(items[0])).toBe(1);
-    expect(Number(computeQuoteTotals({ vatPercent: 0, sheets: [{ groupSubtotal: true, items }] }).subtotal)).toBe(200_000);
-    expect(pdfTotals({ vatPercent: 0, sheets: [{ groupSubtotal: true, items }] }).subtotal).toBe(200_000);
+    expect(WEB.groupMult(items[0])).toBe(0.1);
+    expect(Number(computeQuoteTotals({ vatPercent: 0, sheets: [{ groupSubtotal: true, items }] }).subtotal)).toBe(20_000);
+    expect(pdfTotals({ vatPercent: 0, sheets: [{ groupSubtotal: true, items }] }).subtotal).toBe(20_000);
   });
 });
 

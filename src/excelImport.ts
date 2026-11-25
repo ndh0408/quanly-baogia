@@ -365,9 +365,10 @@ function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
 
 /** Làm tròn Số Lượng 1 chữ số — KHỚP qtyRound ở excel.ts / money (để đối chiếu Thành Tiền). SL khác 0 mà làm tròn
  *  ra 0 (0 < |SL| < 0,05) → ±0,1 (chủ repo 2026-11-09, báo giá #101: SL dương nhỏ hơn 0,05 làm tròn thành 0 làm mất
- *  tiền hạng mục). BẢN SAO của shared/quote-math.ts — sửa thì sửa CẢ. */
-function qtyRound(n: number) { let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; if (t === 0 && n !== 0) t = 0.1; return n < 0 ? -t : t; }
-function qtyExact(n: number) { const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000; return n < 0 ? -t : t; }
+ *  tiền hạng mục). BẢN SAO của shared/quote-math.ts — sửa thì sửa CẢ. `Number(x) || 0` như mọi bản khác: bản cũ nhận
+ *  thẳng `n` nên SL null qua `null !== 0` thành 0,1 — nhóm SL null bị nhân ×0,1 từ khi hệ số nhóm nhận SL < 1 (2026-11-25). */
+function qtyRound(x: number) { const n = Number(x) || 0; let t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; if (t === 0 && n !== 0) t = 0.1; return n < 0 ? -t : t; }
+function qtyExact(x: number) { const n = Number(x) || 0; const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000; return n < 0 ? -t : t; }
 const qtyForAmount = (it: Pick<ImportedItem, "quantity" | "quantityExact">) => it.quantityExact ? qtyExact(it.quantity) : qtyRound(it.quantity);
 
 /** 0→"A" … chữ nhóm tự sinh (khớp sectionLetter ở excel.ts). */
@@ -766,7 +767,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       }
       // Ô CHỮ không đọc được số → 0 (soát toàn diện đợt 4): "ĐG1.500.000" / "Liên hệ" ở Đơn Giá mà tệp
       // không có cột Thành Tiền thì không cảnh báo nào khác bắt được. Nhóm: như trên, chỉ xét SL.
-      // SL của NHÓM và Số Ngày trống / 0 thì app tính ×1 (groupMult = max(1, SL || 1); ngày trống = ×1) —
+      // SL của NHÓM và Số Ngày trống / 0 thì app tính ×1 (groupMult: SL > 0 ? SL : 1; ngày trống = ×1) —
       // câu báo phải nói đúng con số app dùng, không phải "đã để 0" (phản biện đợt 4).
       for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0]] as const) {
         if (isGroup && role !== "quantity") continue;
@@ -1090,7 +1091,9 @@ export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "gr
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
   let total = 0, mult = 1, seen = false;
   for (const it of s.items) {
-    if (it.kind === "section" || it.kind === "subsection") { mult = Math.max(1, qtyForAmount(it) || 1); seen = true; continue; }
+    // Hệ số nhóm: SL trống / 0 / âm → ×1, SL dương nhỏ hơn 1 nhân THẬT (chủ repo 2026-11-25, báo giá #108 "Cổng
+    // Aeon BT" SL 0,5 bị kẹp ×1). BẢN SAO của groupMult ở shared/quote-math.ts — sửa thì sửa CẢ.
+    if (it.kind === "section" || it.kind === "subsection") { const q = qtyForAmount(it); mult = q > 0 ? q : 1; seen = true; continue; }
     if (it.kind === "item" || it.kind === "sub") total += line(it) * (seen ? mult : 1);
   }
   return total;

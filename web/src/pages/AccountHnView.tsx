@@ -231,7 +231,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     for (const p of payload.plans) {
       const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
       if (p.targetIndex === NEW_SHEET) {
-        // Bảng MỚI: cờ theo file, và TỰ BẬT khi hàng nạp có nhóm SL > 1 — cùng luật với mọi đường nhập và với luật khoá của lưới.
+        // Bảng MỚI: cờ theo file, và TỰ BẬT khi hàng nạp có nhóm SL ≠ 1 — cùng luật với mọi đường nhập và với luật khoá của lưới.
         // (Bảng HN không xuất Excel và tổng là extraTableSum, không nhân hệ số nhóm: cờ ở đây chỉ đổi ô Thành Tiền của dòng nhóm.)
         const coMoi = coSauNhapExcel({ cheDo: "moi", coTheoFile: p.file.groupSubtotal }, stamped);
         if (coMoi.tuBat) nBatNhom++;
@@ -243,7 +243,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       if (!target) continue;
       if (p.mode === "append") target.items.push(...stamped);
       else target.items.splice(0, target.items.length, ...stamped);
-      // Cờ của bảng đích đứng nguyên ở cả Nối lẫn Thay (màn này không gán cờ theo file) — trừ khi bảng sau nạp có nhóm SL > 1
+      // Cờ của bảng đích đứng nguyên ở cả Nối lẫn Thay (màn này không gán cờ theo file) — trừ khi bảng sau nạp có nhóm SL ≠ 1
       // mà cờ đang tắt thì tự BẬT. Thay: cờ đang bật thì giữ bật (không bao giờ bị tắt vì nhập).
       const co = coSauNhapExcel({ cheDo: p.mode === "append" ? "noi" : "thay", coCuaDich: target.groupSubtotal, coTheoFile: p.file.groupSubtotal, thayGiuCoCuaDich: true }, target.items);
       if (co.tuBat) { target.groupSubtotal = true; nBatNhom++; }

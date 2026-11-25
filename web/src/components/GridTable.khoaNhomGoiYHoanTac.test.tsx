@@ -123,7 +123,7 @@ describe("gợi ý danh mục điền Số Lượng cho hàng NHÓM → đi cùn
     expect(trangThai()).toEqual([true, true]);
   });
 
-  it("Ctrl+Z trả SL nhóm về 1: giữ nguyên ô đang bật (SL ≤ 1 thì cờ không đổi tổng), nhả khoá, không toast", async () => {
+  it("Ctrl+Z trả SL nhóm về 1: giữ nguyên ô đang bật (SL 1 thì cờ không đổi tổng), nhả khoá, không toast", async () => {
     datDanhMuc([mucRap("Quầy bắp", 3, 1)]);
     const items = [nhom({ name: "quay bap", quantity: 1 }), muc()];
     const { o } = moLuoi(items, false, { fxBar: true });

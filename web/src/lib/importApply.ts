@@ -455,8 +455,8 @@ export type NhomCuoiNhan = { ten: string; nhomPhu: boolean; soLuong: string; tro
  *
  *  · `hangSauNap`: TOÀN BỘ hàng của bảng sau khi nạp (Nối: hàng cũ rồi tới hàng mới ở CUỐI); `hangNap`: riêng các hàng lấy từ
  *    file. Nối thì phần đứng trước `hangNap` trong `hangSauNap` chính là bảng TRƯỚC khi nạp.
- *  · `co`: cờ HIỆU LỰC sau nạp; `tuBat`: cờ vừa được bật vì nhập; `nguonNhom`: nhóm SL > 1 đến từ file hay chỉ có sẵn ở sheet
- *    đích (Nối vào sheet cũ "tắt + nhóm SL > 1" bằng file không có nhóm nào).
+ *  · `co`: cờ HIỆU LỰC sau nạp; `tuBat`: cờ vừa được bật vì nhập; `nguonNhom`: nhóm SL ≠ 1 đến từ file hay chỉ có sẵn ở sheet
+ *    đích (Nối vào sheet cũ "tắt + nhóm SL ≠ 1" bằng file không có nhóm nào).
  *  · `nhanSauNap`: tổng của bảng đích sau nạp có nhân Số Lượng nhóm không = cờ hiệu lực — TRỪ bảng mà tổng KHÔNG BAO GIỜ nhân
  *    hệ số nhóm (`tongKhongNhanNhom`: bảng Hà Nội, tổng là `extraTableSum` chỉ cộng hạng mục; cờ ở đó chỉ quyết định ô Thành
  *    Tiền của dòng nhóm hiện số đã nhân hay để trống). Mọi tổng trong hộp đi theo nó, để hộp nói đúng con số màn gọi sẽ hiện.

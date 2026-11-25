@@ -77,8 +77,11 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
       if (it.kind === "section" || it.kind === "subsection") {   // nhóm/nhóm con: header — đặt mult, không tự cộng. Item con vẫn vào tổng cộng.
         // Hệ số nhóm lấy SL ĐÃ làm tròn đúng như lưới hiển thị (cùng phép làm tròn với qty dòng
         // thường ngay dưới) — trước đây nhân số thô nên tổng lệch con số người dùng nhìn thấy.
+        // SL trống / 0 / âm → ×1; SL dương nhỏ hơn 1 nhân THẬT (0,5 → ×0,5) — chủ repo 2026-11-25, báo giá #108
+        // "Cổng Aeon BT" ("Chia 2") SL nhóm 0,5 bị `Math.max(1, …)` kẹp lên ×1. BẢN SAO của groupMult
+        // (shared/quote-math.ts, có danh sách mọi bản) — sửa thì sửa CẢ.
         const gq = Number(slTinhTien(it.quantity, it.quantityExact));
-        mult = sh.groupSubtotal ? Math.max(1, gq || 1) : 1;
+        mult = sh.groupSubtotal ? (gq > 0 ? gq : 1) : 1;
         return acc;
       }
       if (it.kind === "info") return acc;   // dòng thông tin: không tính tiền (khớp với Excel + client)

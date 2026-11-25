@@ -92,6 +92,20 @@ describe("congThucTongSheet — công thức Tổng sheet theo địa chỉ ô c
     expect(congThucTongSheet(ds, { groupSubtotal: true, usesDays: false, numberSubs: false, La, Lq }).congThuc).toBe("=G1+G4");
   });
 
+  // Chủ repo 2026-11-25, báo giá #108: nhóm SL 0,5 nhân THẬT ×0,5 — công thức phải nhân ô SL nhóm như SL 2 (bản cũ `he > 1`
+  // bỏ ×E1 → công thức ra 300 + 3.000 trong khi tổng thật là 150 + 3.000).
+  it("mẫu đánh số nhóm con, nhóm cha SL 0,5: mục trực tiếp × E1; ghi chú không nói SL nhỏ hơn 1 tính ×1", () => {
+    const ds = [it_("section", 0.5, 0, "Cha"), it_("item", 1, 100, "a"), it_("item", 1, 200, "b"), it_("subsection", 3, 0, "Con"), it_("item", 1, 1000, "c")];
+    const ct = congThucTongSheet(ds, { groupSubtotal: true, usesDays: false, numberSubs: true, La, Lq });
+    expect(ct.congThuc).toBe("=SUM(G2:G3)*E1+G4");
+    expect(ct.dienGiai).toBe("= 150 + 3.000 = 3.150");
+    expect(M.sheetSubtotalGrouped(ds, false, true)).toBe(3_150);
+    expect(ct.ghiChu.join(" ")).toMatch(/× SL 0,5/);
+    expect(ct.ghiChu.join(" ")).not.toMatch(/nhỏ hơn 1 tính ×1/);
+    // Chưa bật: nhóm SL 0,5 cũng là nhóm mà SL "KHÔNG nhân vào tổng" — phải được kể tên.
+    expect(congThucTongSheet(ds, { groupSubtotal: false, usesDays: false, La, Lq }).ghiChu.join(" ")).toMatch(/SL của “Cha”, “Con” KHÔNG nhân vào tổng/);
+  });
+
   it("số âm viết thành phép trừ, tổng lẻ ghi rõ làm tròn", () => {
     const ds = [it_("item", 1, 500_000), it_("item", 1, -120_000, "Giảm"), it_("section", 1.5, 0, "N"), it_("item", 1, 333)];
     const ct = congThucTongSheet(ds, { groupSubtotal: true, usesDays: false, La, Lq });

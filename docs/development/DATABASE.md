@@ -253,30 +253,33 @@ BEGIN READ ONLY;
 ROLLBACK;
 ```
 
-### Kiểm báo giá cũ tắt Thành Tiền nhóm mà có nhóm SL > 1
+### Kiểm báo giá cũ tắt Thành Tiền nhóm mà có nhóm SL ≠ 1
 
 **Vì sao cần.** `sheetSubtotalGrouped` (web) và `src/money.ts` (máy chủ) chỉ nhân Số
 Lượng nhóm vào tiền các mục con khi `QuoteSheet.groupSubtotal` BẬT. Báo giá lưu trước khi
-có luật "tự bật + khoá" (2026-09-30) có thể ở trạng thái "tắt + nhóm SL > 1": tổng đã lưu
+có luật "tự bật + khoá" (2026-09-30) có thể ở trạng thái "tắt + nhóm SL ≠ 1": tổng đã lưu
 KHÔNG nhân hệ số nhóm. Lưới mới không tự tạo ra trạng thái này nữa (gõ · dán · điền · gợi ý
 danh mục · nhập Excel đều tự bật ô), nhưng dữ liệu cũ vẫn còn, và **mở ra không tự bật** —
 nên phải tìm bằng SQL. Câu (1) liệt kê đúng những nhóm đó để người phụ trách xem từng báo giá.
 
-**"SL > 1" là theo SỐ ĐANG HIỆN, không theo số thô** — đúng `M.groupMult` (định nghĩa ở
+**"SL ≠ 1" là theo SỐ ĐANG HIỆN, không theo số thô** — đúng `M.groupMult` (định nghĩa ở
 `shared/quote-math.ts`, web dùng qua `web/src/lib/quoteMath.ts`):
-`groupMult(it) = Math.max(1, qtyForAmount(it) || 1)`, tức nhóm nhân thật ⇔ `qtyForAmount(it) > 1`.
+`groupMult(it) = qtyForAmount(it) > 0 ? qtyForAmount(it) : 1`, tức nhóm nhân thật ⇔ số đang hiện
+`> 0` và `≠ 1` (SL trống / 0 / âm → ×1). Chủ repo 2026-11-25 (báo giá #108, nhóm "Cổng Aeon BT"
+SL 0,5 ghi chú "Chia 2" mà Thành Tiền nhóm vẫn ×1): bản cũ `Math.max(1, qtyForAmount(it) || 1)` kẹp
+mọi SL dương nhỏ hơn 1 lên ×1, nên các câu dưới từng chỉ lọc `> 1`.
 `qtyForAmount` rẽ HAI nhánh theo cờ `quantityExact` của chính dòng nhóm:
 
-| Dòng nhóm | `qtyForAmount` (= số đang hiện) | Nhóm nhân thật (> 1) khi |
+| Dòng nhóm | `qtyForAmount` (= số đang hiện) | Nhóm nhân thật (≠ 1) khi |
 |---|---|---|
-| `quantityExact = false` | `qtyRound`: làm tròn nửa-lên **1 số lẻ**; SL khác 0 mà tròn ra 0 (0 < \|SL\| < 0,05) → ±0,1 | SL ≥ **1,05** (1,04 hiện "1" → ×1; 1,05 hiện "1,1" → ×1,1) |
-| `quantityExact = true` | `qtyExact`: làm tròn nửa-lên **4 số lẻ** | SL ≥ 1,00005 — cột `Decimal(18,4)` nên là SL **> 1** (1,0001 đã nhân thật) |
+| `quantityExact = false` | `qtyRound`: làm tròn nửa-lên **1 số lẻ**; SL khác 0 mà tròn ra 0 (0 < \|SL\| < 0,05) → ±0,1 | SL > 0 mà không hiện "1": SL < **0,95** hoặc ≥ **1,05** (0,96 và 1,04 hiện "1" → ×1; 0,5 → ×0,5; 0,03 hiện "0,1" → ×0,1; 1,05 hiện "1,1" → ×1,1) |
+| `quantityExact = true` | `qtyExact`: làm tròn nửa-lên **4 số lẻ** | số 4 lẻ > 0 và ≠ 1 — cột `Decimal(18,4)` nên là SL **> 0 và ≠ 1** (0,9999 và 1,0001 đã nhân thật) |
 
 `src/money.ts` làm tròn y như vậy (Decimal `ROUND_HALF_UP`, 4 hoặc 1 số lẻ theo `quantityExact`).
 Luật "SL nhỏ khác 0 → ±0,1" (chủ repo 2026-11-09, báo giá #101: `=0.3*0.15` lưu 0,045 mà Thành Tiền
-trống) KHÔNG chép vào các câu SQL dưới: chúng chỉ lọc `slHien > 1`, mà SL dưới 0,05 thì hiện 0 hay
-0,1 cũng không bao giờ > 1. Câu SQL nào cần đúng SỐ hiện / số nhân tiền thì phải thêm nhánh đó.
-Mỗi câu dưới tính cột `slHien` bằng CHÍNH công thức đó rồi lọc `slHien > 1`. Đừng làm tròn 1 số
+trống) PHẢI có trong các câu SQL dưới: nhóm SL 0,03 hiện 0,1 và nhân ×0,1, còn `round(SL, 1)` cho 0 —
+lọc trên số đó là bỏ sót nhóm ấy. Mỗi câu dưới tính cột `slHien` bằng CHÍNH công thức đó (kể cả nhánh
+±0,1) rồi lọc `slHien > 0 AND slHien <> 1`. Đừng làm tròn 1 số
 lẻ cho MỌI dòng: dòng `quantityExact` có SL từ 1,0001 đến 1,0499 làm tròn 1 số lẻ ra "1", nhưng
 vẫn nhân thật — sẽ bị bỏ sót.
 
@@ -288,7 +291,9 @@ WITH nhom AS (
          s.id AS "sheetId", s."order" AS "thuTuSheet", s.name AS "tenSheet",
          g.id AS "itemId", g."order" AS "thuTuDong", g.kind, g.label, g.name AS "tenNhom",
          g.quantity AS "slLuu", g."quantityExact",
-         CASE WHEN g."quantityExact" THEN round(g.quantity, 4) ELSE round(g.quantity, 1) END AS "slHien"   -- = qtyForAmount
+         CASE WHEN g."quantityExact" THEN round(g.quantity, 4)                                  -- = qtyExact
+              WHEN g.quantity <> 0 AND round(g.quantity, 1) = 0 THEN sign(g.quantity) * 0.1    -- SL nhỏ khác 0 → ±0,1
+              ELSE round(g.quantity, 1) END AS "slHien"                                        -- = qtyForAmount
   FROM "QuoteSheet" s
   JOIN "Quote" q     ON q.id = s."quoteId" AND q."deletedAt" IS NULL      -- bỏ báo giá đã xoá mềm
   JOIN "QuoteItem" g ON g."sheetId" = s.id
@@ -296,7 +301,7 @@ WITH nhom AS (
     AND g.kind IN ('section', 'subsection')
 )
 SELECT * FROM nhom
-WHERE "slHien" > 1                                                         -- = groupMult(it) > 1
+WHERE "slHien" > 0 AND "slHien" <> 1                                       -- = groupMult(it) ≠ 1
 ORDER BY "quoteId", "thuTuSheet", "thuTuDong";
 ```
 
@@ -305,13 +310,13 @@ ORDER BY "quoteId", "thuTuSheet", "thuTuDong";
 `groupSubtotal` riêng. Nhưng tổng của chúng (`extraTableSum` ở `web/src/components/ExtraTables.tsx`
 và `src/quoteUtils.ts`) KHÔNG bao giờ nhân hệ số nhóm dù cờ bật hay tắt: cờ chỉ quyết định ô
 Thành Tiền của dòng nhóm (và công thức tham chiếu tới ô đó) có hiện số hay để trống. Nên "tắt +
-nhóm SL > 1" ở đó không làm sai con số nào đã lưu — hai câu dưới chỉ cho biết còn bao nhiêu bảng
+nhóm SL ≠ 1" ở đó không làm sai con số nào đã lưu — hai câu dưới chỉ cho biết còn bao nhiêu bảng
 ở trạng thái đó, không cần xử lý gì.
 
 Số lượng trong JSON là số JS chưa ép về 4 số lẻ, nên `slHien` của (2) và (3) chép NGUYÊN công
 thức `qtyRound` / `qtyExact`, kể cả số khử nhiễu `+1e-6` / `+1e-8` (`floor(x + 0,5)` là
-`Math.round` với số không âm): ngưỡng thật là 1,0499999 và 1,000049999999, không phải 1,05 và
-1,00005. Chỉ một số nằm ĐÚNG ranh giới tới sai số dấu phẩy động (vd đúng 1,0499999) là JS và SQL có
+`Math.round` với số không âm): ngưỡng thật quanh 1 là 0,9499999 / 1,0499999 và 0,999949999999 /
+1,000049999999, không phải 0,95 / 1,05 và 0,99995 / 1,00005. Chỉ một số nằm ĐÚNG ranh giới tới sai số dấu phẩy động (vd đúng 1,0499999) là JS và SQL có
 thể nói khác nhau. Cột jsonb là cột TỰ DO (có thể là `null`, object, chuỗi; `items` có thể không
 phải mảng; phần tử có thể không phải object) nên mọi `jsonb_array_elements` đều có rào
 `jsonb_typeof` — cùng lối với `bangNoiBoTheoSheet` ở `src/services/quoteService.ts`; một dòng dữ
@@ -340,12 +345,13 @@ WITH bang_tat AS (
   WHERE jsonb_typeof(it.item) = 'object'
 ), hien AS (
   SELECT d.*, sign(sl) * CASE WHEN chinh_xac THEN floor(abs(sl) * 10000 + 0.00000001 + 0.5) / 10000   -- = qtyExact
-                              ELSE floor(abs(sl) * 10 + 0.000001 + 0.5) / 10 END AS "slHien"         -- = qtyRound
+                              ELSE greatest(floor(abs(sl) * 10 + 0.000001 + 0.5) / 10,                -- = qtyRound
+                                            CASE WHEN sl <> 0 THEN 0.1 ELSE 0 END) END AS "slHien"   -- SL nhỏ khác 0 → ±0,1
   FROM dong d
 )
 SELECT * FROM hien
 WHERE kind IN ('section', 'subsection')
-  AND "slHien" > 1                                                         -- = groupMult(it) > 1
+  AND "slHien" > 0 AND "slHien" <> 1                                       -- = groupMult(it) ≠ 1
 ORDER BY "quoteNumber", "sheetId";
 
 -- (3) Bảng Hà Nội ở cấp báo giá (Quote.hnTables) — cùng khuôn, không có sheet
@@ -368,12 +374,13 @@ WITH bang_tat AS (
   WHERE jsonb_typeof(it.item) = 'object'
 ), hien AS (
   SELECT d.*, sign(sl) * CASE WHEN chinh_xac THEN floor(abs(sl) * 10000 + 0.00000001 + 0.5) / 10000   -- = qtyExact
-                              ELSE floor(abs(sl) * 10 + 0.000001 + 0.5) / 10 END AS "slHien"         -- = qtyRound
+                              ELSE greatest(floor(abs(sl) * 10 + 0.000001 + 0.5) / 10,                -- = qtyRound
+                                            CASE WHEN sl <> 0 THEN 0.1 ELSE 0 END) END AS "slHien"   -- SL nhỏ khác 0 → ±0,1
   FROM dong d
 )
 SELECT * FROM hien
 WHERE kind IN ('section', 'subsection')
-  AND "slHien" > 1                                                         -- = groupMult(it) > 1
+  AND "slHien" > 0 AND "slHien" <> 1                                       -- = groupMult(it) ≠ 1
 ORDER BY "quoteNumber";
 ```
 
@@ -385,6 +392,11 @@ ORDER BY "quoteNumber";
 > (không) · SL âm / 0 · báo giá xoá mềm · cờ đã bật · bảng JSON thiếu cờ hoặc cờ `null` ·
 > `quantity` không phải số · cột jsonb là `null` / object / chuỗi · `items` không phải mảng ·
 > phần tử không phải object · bản cũ `category = 'hanoi'`; cả ba chạy được trong `BEGIN READ ONLY`.
+> 2026-11-25 (bộ lọc đổi sang `slHien > 0 AND slHien <> 1` + nhánh ±0,1): chạy lại trên PGlite với dữ
+> liệu giả, so với `groupMult` MỚI — khớp ở SL 0,5 · 0,03 (hiện 0,1) · 0,0001 · 0,94 / 0,9499 (hiện
+> 0,9) · 0,95 / 0,96 / 1,04 (hiện "1") · 1,05 · 2 · 0 · âm · `quantityExact` 0,25 / 0,9999 / 1,0001 /
+> 0,00005 (nhân) và 1 / 0,00004 / 0 / âm (không) · báo giá xoá mềm · cờ đã bật · hàng mục ·
+> `quantity` không phải số · bản cũ `category = 'hanoi'`.
 > **Chưa chạy trên CSDL nào thật.** Chạy ở dev trước, rồi so vài dòng bằng mắt với trình soạn báo
 > giá (ô "Hiện Thành Tiền nhóm" và Số Lượng của nhóm) trước khi tin con số đếm.
 
@@ -392,7 +404,7 @@ ORDER BY "quoteNumber";
 
 Đừng "chữa" kết quả bằng `UPDATE "QuoteSheet" SET "groupSubtotal" = true …` (hay sửa JSON
 tương đương). Bật cờ là **đổi tổng** của báo giá đã lưu — có thể đã gửi khách, đã chốt, đã
-xuất hoá đơn — và đổi theo hướng TĂNG đúng bằng hệ số nhóm. Ba lý do cụ thể:
+xuất hoá đơn — và đổi đúng bằng hệ số nhóm (TĂNG với SL > 1, GIẢM với SL < 1). Ba lý do cụ thể:
 
 1. `QuoteSheet.subtotal` và `Quote.subtotal` / `total` là số **đã vật chất hoá lúc Lưu** (xem
    chú thích ở schema). Sửa cờ bằng SQL thì máy chủ tính ra tổng mới nhưng các cột đã lưu vẫn là

@@ -1096,7 +1096,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     const r = slotRows[i];
     const isSubSection = items[i].kind === "subsection";
     const gq = qtyForAmount(items[i]);
-    const gmult = showGroupSub ? Math.max(1, gq || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
+    // ×SL chỉ khi bật "thành tiền nhóm". SL trống / 0 / âm → ×1; SL dương nhỏ hơn 1 nhân THẬT (chủ repo 2026-11-25,
+    // báo giá #108 "Cổng Aeon BT" SL 0,5 "Chia 2" bị `Math.max(1, …)` kẹp ×1). BẢN SAO của groupMult
+    // (shared/quote-math.ts) — sửa thì sửa CẢ, kể cả hai chỗ chọn công thức `gmult !== 1` bên dưới.
+    const gmult = showGroupSub ? (gq > 0 ? gq : 1) : 1;
     // Đơn Giá nhóm = SUM Thành Tiền các mục con (CÔNG THỨC SỐNG). Thành Tiền nhóm = Đơn Giá nhóm ×
     // Số Lượng nhóm (sống, chỉ khi bật). Không có mục con → ghi số như cũ (an toàn).
     const childRng = childExcelRange(i);
@@ -1118,7 +1121,9 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     let thanhTien: ONhom = null;
     if (cols.amount) {
       if (showGroupSub && hasGroupBody) {
-        const fAmt = gmult > 1 ? `${cols.unitPrice}${r}*${cols.quantity}${r}` : `${cols.unitPrice}${r}`;   // ×SL khi SL>1; SL≤1 → = đơn giá nhóm
+        // ×SL khi hệ số ≠ 1 — kể cả SL 0,5 (ô SL nhóm mang đúng số đang hiện nên Excel tính lại ra cùng số).
+        // Hệ số 1 (SL 1 / trống / 0 / âm) → = đơn giá nhóm, GIỮ NGUYÊN công thức cũ: ô SL nhóm âm mà nhân vào là sai.
+        const fAmt = gmult !== 1 ? `${cols.unitPrice}${r}*${cols.quantity}${r}` : `${cols.unitPrice}${r}`;
         thanhTien = { formula: fAmt, result: sectionSum[i] * gmult };
       } else {
         thanhTien = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
@@ -1219,7 +1224,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         // + mục lẻ của cha ×SL cha — đúng quy ước "hệ số nhóm đặt lại ở mỗi nhóm" của
         // sheetSubtotalGrouped/computeQuoteTotals, tức đúng con số lưới web và DB đang giữ.
         if (subRows.length) {
-          if (looseSum) groupAmtTerms.push({ row: r, expr: gmult > 1 ? `${looseSum}*${cols.quantity}${r}` : looseSum });
+          if (looseSum) groupAmtTerms.push({ row: r, expr: gmult !== 1 ? `${looseSum}*${cols.quantity}${r}` : looseSum });   // ≠ 1: cả SL 0,5 (#108)
           for (const rr of subRows) { coveredSubRows.add(rr); groupAmtTerms.push({ row: rr, expr: `${cols.amount}${rr}` }); }
         } else if (!coveredSubRows.has(r)) {
           groupAmtTerms.push({ row: r, expr: `${cols.amount}${r}` });

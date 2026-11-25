@@ -35,9 +35,9 @@ import * as M from "../lib/quoteMath";
 
 const MAU: EditorTemplate[] = [{ id: 1, code: "marico_decor", name: "GN (không ngày)", layout: { hasDays: false, hasDetail: false, reserveDetail: true, numberSubsections: false } }];
 /** Dòng cảnh báo tự bật: nói ĐÃ BẬT, vì nhóm SL > 1 ở đâu (file / sheet đích) và tổng đã nhân hệ số nhóm. */
-const TU_BAT = /Đã bật Thành Tiền nhóm vì (file|sheet đích) có nhóm Số Lượng > 1 nên tổng đã nhân hệ số nhóm/;
+const TU_BAT = /Đã bật Thành Tiền nhóm vì (file|sheet đích) có nhóm Số Lượng khác 1 nên tổng đã nhân hệ số nhóm/;
 /** …ở bảng Hà Nội (tổng không bao giờ nhân hệ số nhóm): bật chỉ đổi ô Thành Tiền của dòng nhóm. */
-const TU_BAT_HN = /Đã bật Thành Tiền nhóm vì (file|sheet đích) có nhóm Số Lượng > 1: ô Thành Tiền của dòng nhóm/;
+const TU_BAT_HN = /Đã bật Thành Tiền nhóm vì (file|sheet đích) có nhóm Số Lượng khác 1: ô Thành Tiền của dòng nhóm/;
 
 const hangNhom = (sl: number): ImportedItem => ({ kind: "section", name: "Nhóm A", quantity: sl, unitPrice: 0, row: 7 });
 const hangMuc: ImportedItem = { kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, row: 8 };
