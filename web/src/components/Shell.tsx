@@ -3,7 +3,7 @@ import { api, type Me } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
 import { xoaMoiBanNhap } from "../lib/localDraft";
 import { dangXuat, phatDangXuat } from "../lib/authSync";
-import { statusLabel, ROLE_LABEL } from "../lib/format";
+import { statusLabel, ROLE_LABEL, codeLabel } from "../lib/format";
 import { PhienBanChanMenu } from "./PhienBan";
 import { taiLaiTrang } from "../lib/phienBan";
 
@@ -271,7 +271,7 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
           canPers ? api.listPersonnel(q, 1, 5).catch(() => null) : Promise.resolve(null),
         ]);
         if (id !== reqId.current) return;
-        const quotes: Hit[] = (s.results.quotes || []).map((x) => ({ kind: "quote", id: x.id, code: x.projectCode || x.quoteNumber || "—", title: x.title, status: x.status }));
+        const quotes: Hit[] = (s.results.quotes || []).map((x) => ({ kind: "quote", id: x.id, code: codeLabel(x) || "—", title: x.title, status: x.status }));
         const customers: Hit[] = (s.results.customers || []).map((x) => ({ kind: "customer", id: x.id, code: x.code, name: x.name, sub: x.phone || x.email || "" }));
         const personnel: Hit[] = (pers?.data || []).slice(0, 5).map((x) => ({ kind: "personnel", id: Number(x.id), name: String(x.fullName), sub: [(x as Record<string, unknown>).projectName, (x as Record<string, unknown>).projectCode].filter(Boolean).join(" · ") }));
         setRes({ quotes, customers, personnel });

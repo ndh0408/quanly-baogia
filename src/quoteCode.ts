@@ -8,10 +8,29 @@
 // │ nên `src/` không import được `shared/`. Hai bản KHÔNG ĐƯỢC LỆCH:            │
 // │ tests/projectcode-parity.test.js chạy cả hai trên cùng dữ liệu và bắt lệch.  │
 // └─────────────────────────────────────────────────────────────────────────────┘
-export type CodeQuote = { projectCode?: string | null; quoteNumber?: string | null; projectVersion?: number | null };
+export type CodeQuote = { projectCode?: string | null; quoteNumber?: string | null; projectVersion?: number | null; status?: string | null };
 
-/** Mã dự án hiển thị: projectCode (không có thì lùi về quoteNumber) + "_v2…" khi có phiên bản. */
+/**
+ * Chữ đứng thay MÃ DỰ ÁN khi báo giá CHƯA CHỐT. Chủ repo 2026-11-25: "tạo mới chưa duyệt thì không có mã nào, duyệt
+ * khách chốt thì mới tạo mã dự án" — mã chỉ được cấp lúc chốt (src/maDuAn.ts), nên báo giá chưa chốt mang
+ * projectCode = null và hiện "NHÁP <số báo giá>": số báo giá đi kèm để hai file nháp vẫn phân biệt được.
+ */
+export const NHAN_NHAP = "NHÁP";
+
+/**
+ * Báo giá hiện dạng NHÁP: KHÔNG có mã dự án VÀ biết chắc là CHƯA CHỐT.
+ *
+ * VÌ SAO PHẢI BIẾT `status`: báo giá ĐÃ CHỐT mà không có mã vẫn tồn tại — người tạo không có tiền tố mã
+ * (`User.projectCode` trống) thì chốt xong vẫn null, và mã của nó từ trước tới nay CHÍNH LÀ số báo giá: trang
+ * Nhân sự lưu cứng chuỗi đó (`PersonnelRecord.projectCode`) và buildProjectRef khớp BẰNG-ĐÚNG. Hiện "NHÁP" cho
+ * báo giá đó là đứt tra cứu hợp đồng của mọi hồ sơ nhân sự trỏ vào nó. Nên vắng `status` (chỗ gọi chỉ đọc báo
+ * giá đã chốt, không chọn cột này) = hành vi cũ: lùi về số báo giá.
+ */
+export const laNhap = (q: CodeQuote): boolean => !q.projectCode && !!q.status && q.status !== "converted";
+
+/** Mã dự án hiển thị: projectCode (+ "_v2…" khi có phiên bản); chưa chốt → "NHÁP <số BG>"; đã chốt mà không mã → số BG. */
 export function codeLabel(q: CodeQuote): string {
+  if (laNhap(q)) return q.quoteNumber ? `${NHAN_NHAP} ${q.quoteNumber}` : NHAN_NHAP;
   const c = q.projectCode || q.quoteNumber || "";
   return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c;
 }

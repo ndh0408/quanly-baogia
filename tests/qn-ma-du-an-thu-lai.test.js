@@ -18,6 +18,12 @@
  * Cần một mã dự án đã tồn tại mà bộ đếm KHÔNG biết. Chú thích ở chính `createQuote` khai đây là ca
  * có thật: dữ liệu chuyển từ hệ cũ, hoặc bộ đếm vừa dựng lại bởi migration 20260907120000.
  * Bài này dựng đúng tình huống đó: tạo sẵn một báo giá mang mã `<prefix>26_001` rồi để bộ đếm ở 0.
+ *
+ * ── TỪ 2026-11-25: MÃ CẤP LÚC CHỐT, KHÔNG CÒN LÚC TẠO ──────────────────────
+ * Chủ repo: "tạo mới chưa duyệt thì không có mã nào, duyệt khách chốt thì mới tạo mã dự án". createQuote không
+ * gọi nextProjectCode nữa (nên vòng thử lại "đụng mã dự án" ở đó đã gỡ); việc cấp mã dời vào markConverted
+ * (src/maDuAn.ts `capMaDuAnKhiChot`). CÙNG ca có thật vẫn phải đúng ở chỗ mới: mã đã tồn tại mà bộ đếm không biết
+ * → lần chốt BỎ QUA mã đó, nhận mã kế tiếp, không 409 / 500.
  * ============================================================================
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -39,7 +45,7 @@ const PWD = "Test1234!a";
 const MA_NV = `P${String(Date.now()).slice(-6)}`;
 const YY = String(new Date().getFullYear()).slice(-2);
 
-describe.runIf(dbAvailable)("Thử lại khi đụng mã dự án", () => {
+describe.runIf(dbAvailable)("Đụng mã dự án đã tồn tại (bộ đếm không biết)", () => {
   let app, nv, companyId, templateId;
 
   beforeAll(async () => {
@@ -50,7 +56,7 @@ describe.runIf(dbAvailable)("Thử lại khi đụng mã dự án", () => {
         username: `${TAG}-nv`,
         displayName: `${TAG} nv`,
         role: "admin",
-        projectCode: MA_NV, // nhân viên CÓ mã dự án → createQuote sẽ gọi nextProjectCode
+        projectCode: MA_NV, // nhân viên CÓ tiền tố → lúc CHỐT sẽ gọi nextProjectCode
         passwordHash: await bcrypt.hash(PWD, 4),
       },
     });
@@ -99,7 +105,7 @@ describe.runIf(dbAvailable)("Thử lại khi đụng mã dự án", () => {
     await prisma.quoteCounter.deleteMany({ where: { prefix: MA_NV } }).catch(() => {});
   });
 
-  it("đụng mã dự án đã tồn tại → lượt thử lại CẤP MÃ MỚI, không lặp lại mã cũ", async () => {
+  it("đụng mã dự án đã tồn tại → lần CHỐT bỏ qua mã đó, cấp MÃ KẾ TIẾP, không lặp lại mã cũ", async () => {
     const r = await nv.post("/api/quotes").send({
       title: `${TAG} bg moi`,
       companyId,
@@ -115,17 +121,17 @@ describe.runIf(dbAvailable)("Thử lại khi đụng mã dự án", () => {
       ],
     });
 
-    // Trước bản vá: 409 "Số báo giá bị trùng" — sai hẳn nguyên nhân, và sau 4 lượt chèn/rollback.
     expect(
       r.status,
       `tạo báo giá hỏng: ${JSON.stringify(r.body).slice(0, 220)}`,
     ).toBe(201);
+    expect(r.body.projectCode, "tạo mới không còn mang mã dự án").toBeNull();
 
+    const c = await nv.post(`/api/quotes/${r.body.id}/mark-converted`).send({});
+    expect(c.status, `chốt hỏng: ${JSON.stringify(c.body).slice(0, 220)}`).toBe(200);
     // Phải nhảy sang mã KẾ TIẾP, không phải mã đã bị chiếm.
-    expect(r.body.projectCode, "cấp lại đúng mã đã tồn tại").not.toBe(`${MA_NV}${YY}_001`);
-    expect(r.body.projectCode, `mã cấp ra không đúng khuôn: ${r.body.projectCode}`).toMatch(
-      new RegExp(`^${MA_NV}${YY}_\\d{3}$`),
-    );
+    expect(c.body.projectCode, "cấp lại đúng mã đã tồn tại").not.toBe(`${MA_NV}${YY}_001`);
+    expect(c.body.projectCode).toBe(`${MA_NV}${YY}_002`);
   }, 60_000);
 
   it("KHÔNG để lại báo giá rác từ các lượt thử lại", async () => {

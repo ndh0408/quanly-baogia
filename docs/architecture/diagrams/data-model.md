@@ -76,9 +76,14 @@ Tám điều mà sơ đồ **không** nói ra được, và đều quan trọng:
 * **`Quote.subtotal`/`vat`/`total` và `QuoteSheet.subtotal` là giá trị VẬT CHẤT
   HOÁ.** Ghi lúc lưu bằng `computeQuoteTotals`. Trang Quản lý dự án nhờ đó không
   phải kéo toàn bộ `QuoteItem` vào RAM để cộng lại.
-* **`@@unique([projectCode, projectVersion])`** chặn race "Bản mới cùng mã" tạo
-  hai `_v2` song song. `projectCode` null thì Postgres coi các NULL là khác nhau,
-  nên báo giá không có mã dự án không bị ràng buộc này.
+* **`@@unique([projectCode, projectVersion])`** chặn hai bản cùng mã cùng phiên bản.
+  `projectCode` null thì Postgres coi các NULL là khác nhau, nên báo giá không có mã
+  dự án không bị ràng buộc này.
+* **Mã dự án chỉ cấp lúc KHÁCH CHỐT** (từ 2026-11-25, `src/maDuAn.ts`): báo giá chưa
+  chốt mang `projectCode` null và hiện `NHÁP <số BG>`. "Bản mới" (phiên bản) nhớ gốc
+  dự án ở `Quote.projectRootId` (không FK); chốt thì lấy lại mã của dự án + phiên bản
+  kế tiếp, khoá tư vấn theo gốc dự án để hai phiên bản chốt song song không cùng `_v2`.
+  Dữ liệu cũ dọn bằng công cụ chạy tay — [DON_MA_DU_AN.md](../../operations/DON_MA_DU_AN.md).
 
 ## CRM và nhân sự
 

@@ -81,6 +81,11 @@ everything from `0_init` directly.
   "InputInvoiceEntry";` (ghi sẵn ở đầu `migration.sql`) — và phải gỡ luôn dòng của migration này
   trong `_prisma_migrations`, nếu không lượt `migrate deploy` sau tưởng nó đã áp và bản mới chạy thiếu
   bảng. Có dữ liệu thì **KHÔNG lùi schema**: lùi ảnh (`deploy.sh rollback`) là đủ.
+- `20261125090000_quote_project_root` — `Quote.projectRootId` (INTEGER NULL, **không FK**) + index btree: gốc dự án của
+  "Bản mới", vì từ bản này mã dự án chỉ cấp lúc KHÁCH CHỐT (`src/maDuAn.ts`) nên bản nháp phiên bản mới không mang mã để
+  nhận nhau. **Expand-only, chỉ DDL**, không đụng dữ liệu; app cũ chạy tiếp được. Dữ liệu cũ (mã cấp lúc tạo, liên kết
+  phiên bản qua projectCode) dọn bằng công cụ chạy tay `node dist/tools/donMaDuAn.js` — runbook
+  `docs/operations/DON_MA_DU_AN.md`. Lùi schema chỉ khi chưa có bản nháp phiên bản nào tạo bằng app mới (mất liên kết gốc).
 
 ### Drift ĐƯỢC PHÉP — danh sách ĐÍCH DANH, do NOT drop
 

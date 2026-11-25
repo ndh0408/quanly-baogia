@@ -28,6 +28,10 @@ import { logger } from "./logger.js";
 export const MA_NHAT_KY_GIAN_TIEP = [
   "personnel.accounting-note",
   "personnel.note",
+  // Công cụ dọn mã dự án (src/maDuAnDonDep.ts) ghi nhật ký bằng `tx.auditEvent.createMany` TRONG transaction của nó
+  // (đổi mã và dòng nhật ký phải cùng còn hoặc cùng mất) — không qua audit(), nên bộ dò cũng không thấy.
+  "quote.ma-du-an.don",
+  "personnel.ma-du-an.don",
 ] as const;
 
 export async function audit(ctx: Request | null, action: string, opts: Record<string, any> = {}) {

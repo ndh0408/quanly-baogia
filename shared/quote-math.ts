@@ -241,14 +241,19 @@ export const blankSubSection = (): Item => ({ kind: "subsection", label: "", nam
 
 export const STATUS_LABEL: Record<string, string> = { draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối", sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt" };
 export const statusLabel = (s: string) => STATUS_LABEL[s] || s || "—";
-export const codeLabel = (q: { projectCode?: string | null; projectVersion?: number | null; quoteNumber?: string }) => { const c = q.projectCode || q.quoteNumber || ""; return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c; };
+type MaQuote = { projectCode?: string | null; projectVersion?: number | null; quoteNumber?: string | null; status?: string | null };
+/** Chữ đứng thay mã dự án khi báo giá CHƯA CHỐT — mã chỉ cấp lúc khách chốt (chủ repo 2026-11-25). MIRROR src/quoteCode.ts. */
+export const NHAN_NHAP = "NHÁP";
+/** Chưa có mã VÀ biết chắc chưa chốt. Vắng `status` = hành vi cũ (lùi về số BG) — lý do ở src/quoteCode.ts `laNhap`. */
+export const laNhap = (q: MaQuote): boolean => !q.projectCode && !!q.status && q.status !== "converted";
+export const codeLabel = (q: MaQuote) => { if (laNhap(q)) return q.quoteNumber ? `${NHAN_NHAP} ${q.quoteNumber}` : NHAN_NHAP; const c = q.projectCode || q.quoteNumber || ""; return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c; };
 /**
  * MÃ SẢN XUẤT CỦA MỘT SHEET = mã báo giá + hậu tố HAI CHỮ SỐ ("_01", "_02").
  * `codeNo` là SỐ ĐÃ ĐÓNG BĂNG trong CSDL (`QuoteSheet.codeNo`), KHÔNG phải vị trí trong mảng —
  * xoá sheet 02 thì 03 vẫn là 03. Báo giá MỘT sheet thì không có hậu tố.
  * ⚠️ MIRROR của src/quoteCode.ts; tests/projectcode-parity.test.js khoá hai bản không được lệch.
  */
-export function sheetCode(q: { projectCode?: string | null; projectVersion?: number | null; quoteNumber?: string }, codeNo: number, total: number) {
+export function sheetCode(q: MaQuote, codeNo: number, total: number) {
   const base = codeLabel(q);
   return total > 1 ? `${base}_${String(codeNo).padStart(2, "0")}` : base;
 }

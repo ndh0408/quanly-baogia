@@ -20,7 +20,9 @@ type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (t
 // KHI ĐÃ BẬT MÃ HOÁ, idCard BỊ LOẠI khỏi cột tìm kiếm. `searchText` là cột phẳng không mã hoá nằm
 // ngay cạnh trong cùng bản dump — để CCCD trong đó thì mã hoá cột `idCard` chỉ còn là trang trí.
 // Tra CCCD bằng-đúng vẫn chạy, qua chỉ mục mù (idCardLookupWhere).
-const personnelSearchText = (r: Record<string, any>) =>
+// XUẤT cho công cụ dọn mã dự án (src/maDuAnDonDep.ts) — đổi mã sản xuất của hồ sơ thì searchText phải dựng lại bằng
+// ĐÚNG công thức này, không phải một bản chép tay.
+export const personnelSearchText = (r: Record<string, any>) =>
   isPiiEncryptionEnabled()
     ? normalizeSearch(r.fullName, r.projectName, r.projectNameContract, r.projectCode, r.taxCode, r.phone)
     : normalizeSearch(r.fullName, r.projectName, r.projectNameContract, r.projectCode, r.taxCode, r.phone, r.idCard);

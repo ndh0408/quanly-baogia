@@ -1284,7 +1284,7 @@ Lý do (không bắt buộc):`,
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h1>{isNew ? "Tạo báo giá mới" : "Báo giá " + M.codeLabel(q)}{!isNew && <span className={`status ${q.status}`} style={{ marginLeft: 10 }}>{M.statusLabel(q.status)}</span>}</h1>
+        <h1>{isNew ? "Tạo báo giá mới" : "Báo giá " + M.codeLabel(q)}{!isNew && <span className={`status ${q.status}`} style={{ marginLeft: 10 }}>{M.statusLabel(q.status)}</span>}{!isNew && M.laNhap(q) && <span className="muted" title="Mã dự án chỉ được cấp khi khách chốt — trước đó báo giá mang chữ NHÁP kèm số báo giá" style={{ marginLeft: 10, fontSize: 12, fontWeight: 400 }}>· mã dự án cấp khi khách chốt</span>}</h1>
         <button className="btn" onClick={back}>← Quay lại</button>
       </div>
 

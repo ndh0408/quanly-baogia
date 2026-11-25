@@ -327,6 +327,8 @@ người đang soạn báo giá không ăn 409; không sinh `QuoteVersion`.
 | `saveHn` · `deleteQuote` | `Quote` FOR UPDATE · `Quote` FOR NO KEY UPDATE → rồi mới đọc khoản |
 | Dịch vụ kế toán, công cụ `backfillKhoanChi` (`--ghi`, `--xac-nhan`) | `Quote` FOR SHARE → đọc hàng → khoản FOR UPDATE; **không bao giờ** khoá `QuoteSheet` |
 | `backfillKhoanChi --sua-rid` (ghi trường `rid` của JSON hàng) | như đường Lưu: `QuoteSheet` FOR UPDATE → `Quote` FOR NO KEY UPDATE |
+| Chốt báo giá (`markConverted` → cấp mã dự án, `src/maDuAn.ts`) | `QuoteSheet` FOR UPDATE → `Quote` (đổi trạng thái) → khoá tư vấn theo gốc dự án → hàng `QuoteCounter` (chỉ khi cấp mã mới); không đọc khoản |
+| Công cụ dọn mã dự án `donMaDuAn --ap-dung` | `LOCK TABLE "Quote", "PersonnelRecord", "QuoteCounter" IN EXCLUSIVE MODE` (đọc vẫn chạy, mọi lệnh ghi chờ) — chạy tay, app nên dừng |
 
 `FOR SHARE` không chặn kế toán khác (tương thích nhau) nhưng xung đột với `FOR UPDATE` / `FOR NO KEY UPDATE` của đường Lưu:
 Lưu đang giữ `Quote` thì kế toán chờ rồi đọc bản đã commit (hàng vừa bị xoá → 404, không tạo khoản);

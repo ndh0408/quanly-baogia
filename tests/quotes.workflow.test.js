@@ -118,18 +118,29 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
 
   // Concurrent "Bản mới cùng mã dự án" must NOT both land on _v2 (race). The
   // @@unique([projectCode, projectVersion]) + in-tx version recompute serialize them.
+  // Từ 2026-11-25 mã dự án + số phiên bản cấp lúc KHÁCH CHỐT (src/maDuAn.ts): hai "Bản mới" là hai NHÁP không mã cùng
+  // nhớ gốc; cuộc đua _v2 dời sang lúc chốt — hai bản chốt song song phải ra hai phiên bản KHÁC nhau cùng mã gốc.
   it("concurrent 'new version, same project' get distinct versions (no duplicate _v2)", async () => {
     const srcRes = await manager.post("/api/quotes").send(quotePayload({ title: `${TAG} ver-race` }));
     expect(srcRes.status).toBe(201);
     const srcId = srcRes.body.id;
+    const goc = await manager.post(`/api/quotes/${srcId}/mark-converted`).send({});
+    expect(goc.status).toBe(200);
     const [a, b] = await Promise.all([
       manager.post(`/api/quotes/${srcId}/duplicate`).send({ sameProject: true }),
       manager.post(`/api/quotes/${srcId}/duplicate`).send({ sameProject: true }),
     ]);
     expect(a.status).toBe(201);
     expect(b.status).toBe(201);
-    expect(a.body.projectCode).toBe(b.body.projectCode);          // cùng mã dự án
-    expect([a.body.projectVersion, b.body.projectVersion].sort()).toEqual([2, 3]); // KHÔNG phải [2,2]
+    expect([a.body.projectCode, b.body.projectCode]).toEqual([null, null]);   // nháp: chưa có mã
+    const [ca, cb] = await Promise.all([
+      manager.post(`/api/quotes/${a.body.id}/mark-converted`).send({}),
+      manager.post(`/api/quotes/${b.body.id}/mark-converted`).send({}),
+    ]);
+    expect([ca.status, cb.status]).toEqual([200, 200]);
+    const maGoc = goc.body.projectCode || goc.body.quoteNumber;
+    expect([ca.body.projectCode, cb.body.projectCode]).toEqual([maGoc, maGoc]);          // cùng mã dự án
+    expect([ca.body.projectVersion, cb.body.projectVersion].sort()).toEqual([2, 3]); // KHÔNG phải [2,2]
   });
 
   // Vòng đời mới (luồng duyệt nội bộ BỎ 2026-06-22): Nháp → Khách chốt (converted) /

@@ -40,6 +40,10 @@ người đang dùng ngay lúc này.
   và không có ràng buộc unique — hai người đặt trùng prefix là hợp lệ và sẽ DÙNG CHUNG bộ đếm.
   (Trước 2026-09-07 cột này free-format hoàn toàn và quản trị gõ tay cả năm vào — xem
   migration `20260907120000_project_code_year`.)
+- **Mã dự án của BÁO GIÁ chỉ cấp lúc KHÁCH CHỐT** (`src/maDuAn.ts`, trong transaction của `markConverted`;
+  chốt hỏng không tiêu số). Tạo mới / Nhân bản / Bản mới → `Quote.projectCode` null, hiển thị `NHÁP <số BG>`
+  (`codeLabel` cần biết `status`; đã chốt mà không mã thì vẫn là số BG — trang Nhân sự tra bằng chuỗi đó). "Bản
+  mới" nhớ gốc ở `Quote.projectRootId`, chốt thì lấy lại mã dự án + phiên bản kế. Đừng cấp lại mã ở đường tạo.
 - **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị **bỏ qua âm thầm**,
   làm lọt thông báo tiếng Anh ra giao diện. Dùng tham số `error`.
 - **Tiền dùng `Decimal`**, không dùng float JS. Đổi sang `Number` là mất chính xác.

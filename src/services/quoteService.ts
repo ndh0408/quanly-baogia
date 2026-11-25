@@ -9,7 +9,8 @@ import type { Request } from "express";
 import { prisma, type TxClient } from "../db.js";
 import { config } from "../config.js";
 import { computeQuoteTotals, assertTotalsStorable, tinhConvertedTotal, chuanHoaTheoCot, chuanHoaVat, D } from "../money.js";
-import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCounter } from "../quoteNumber.js";
+import { nextQuoteNumber, syncQuoteCounter } from "../quoteNumber.js";
+import { capMaDuAnKhiChot, timGocDuAn } from "../maDuAn.js";
 import { namVN, namNganVN, homNayVN } from "../vnTime.js";
 import { normalizeSearch } from "../searchText.js";
 import { audit } from "../audit.js";
@@ -323,7 +324,7 @@ export async function createQuote(req: Request) {
   // để `company.*` đỡ, xem chú thích ở `fromPhone` bên dưới.
   const creator = await prisma.user.findUnique({
     where: { id: userId },
-    select: { projectCode: true, phone: true, title: true, senderName: true, displayName: true },
+    select: { phone: true, title: true, senderName: true, displayName: true },
   });
   const draft: Record<string, any> = {
     title: b.title,
@@ -406,21 +407,10 @@ export async function createQuote(req: Request) {
           // Báo giá MỚI: mốc nước xuất phát 0, và ghi luôn mốc sau khi cấp để lượt sửa đầu tiên
           // đã có sẵn (xem mocSoMaSheet / migration 20260908060000).
           data: {
-            // `projectCode: null` PHẢI ĐÈ LÊN `...draft` — xem khối dưới, đây là lỗi đã tái hiện được.
-            //
-            // ── VÌ SAO ──────────────────────────────────────────────────────
-            // `draft.projectCode` chỉ được gán ở `nextProjectCode` bên dưới, tức SAU lượt `create`
-            // này. Ở LƯỢT THỬ LẠI, nó còn nguyên giá trị của lần vừa hỏng. Không đè thì `create`
-            // ghi thẳng mã đã đụng vào `@@unique([projectCode, projectVersion])` → P2002 ngay tại
-            // `create`, TRƯỚC khi `nextProjectCode` kịp cấp mã kế tiếp. Bốn lượt thử y hệt nhau rồi
-            // 409 "Số báo giá bị trùng" — sai hẳn nguyên nhân (đụng MÃ DỰ ÁN, không phải số báo
-            // giá), và mỗi lượt còn chèn rồi rollback TOÀN BỘ hạng mục (báo giá 20.000 dòng = 4
-            // lượt chèn vô ích).
-            //
-            // Trước khi dời việc cấp số xuống cuối transaction, `nextProjectCode` chạy TRƯỚC
-            // `create` nên mỗi lượt thử tự nhiên có mã mới. Dời xuống làm mất tính chất đó; dòng
-            // này trả lại nó. Mã thật được ghi ở lượt `update` bên dưới.
-            ...draft, projectCode: null,
+            // KHÔNG CÓ MÃ DỰ ÁN lúc tạo (chủ repo 2026-11-25: "tạo mới chưa duyệt thì không có mã nào, duyệt khách chốt
+            // thì mới tạo mã dự án") — mã cấp ở markConverted (src/maDuAn.ts). Báo giá chưa chốt hiện "NHÁP <số BG>".
+            // Ghi tường minh `projectCode: null` để không trường nào lọt vào `draft` cấp được mã theo đường khác.
+            ...draft, projectCode: null, projectRootId: null,
             quoteNumber: soTam, searchText: "", sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0),
             // Phần Hà Nội gõ ngay lúc tạo — đã qua hai chốt cờ duyệt / đã chi ở đầu hàm (`hnTaoMoi`).
             ...(hnTaoMoi !== undefined ? { hnTables: hnTaoMoi } : {}),
@@ -439,37 +429,25 @@ export async function createQuote(req: Request) {
         // Số do client gửi không đi qua bộ đếm → phải đẩy bộ đếm theo, nếu không lần cấp TỰ ĐỘNG
         // kế tiếp sinh lại số đã dùng và đốt sạch ngân sách thử lại (xem syncQuoteCounter).
         if (b.quoteNumber) await syncQuoteCounter(b.quoteNumber, prefix, tx as any);
-        if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx as any);
-        const searchText = normalizeSearch(quoteNumber, draft.projectCode, draft.title, draft.toCompany, draft.toContact);
+        const searchText = normalizeSearch(quoteNumber, null, draft.title, draft.toCompany, draft.toContact);
         // KHÔNG `include` ở đây: đây là câu lệnh nằm TRONG vùng khoá, nó chỉ cần ghi một hàng.
         await tx.quote.update({
           where: { id: created.id },
-          data: { quoteNumber, searchText, ...(draft.projectCode ? { projectCode: draft.projectCode } : {}) },
+          data: { quoteNumber, searchText },
         });
         // `snapshotQuoteVersion` đọc lại báo giá từ CSDL, nên phải chạy SAU lượt cập nhật trên —
         // nếu không, lịch sử phiên bản v1 sẽ ghi lại SỐ TẠM.
         await snapshotQuoteVersion(tx, created.id, userId, "create");
-        // Trả về bản đã nạp đầy đủ từ lượt `create` (ngoài vùng khoá), vá lại đúng ba trường vừa
-        // ghi. Đọc lại lần nữa chỉ để lấy ba giá trị mình vừa tự viết ra là tốn một lượt quét cả
+        // Trả về bản đã nạp đầy đủ từ lượt `create` (ngoài vùng khoá), vá lại đúng hai trường vừa
+        // ghi. Đọc lại lần nữa chỉ để lấy hai giá trị mình vừa tự viết ra là tốn một lượt quét cả
         // báo giá — và tốn nó ở đúng chỗ đắt nhất.
-        return { ...created, quoteNumber, searchText, ...(draft.projectCode ? { projectCode: draft.projectCode } : {}) };
+        return { ...created, quoteNumber, searchText };
       });
       break;
     } catch (e) {
       const code = e instanceof Prisma.PrismaClientKnownRequestError ? e.code : undefined;
-      // ĐỤNG MÃ DỰ ÁN, KHÔNG PHẢI SỐ BÁO GIÁ. `@@unique([projectCode, projectVersion])` cũng ném
-      // P2002, và khối dưới chỉ biết đẩy bộ đếm SỐ BÁO GIÁ — lượt sau sinh LẠI ĐÚNG mã dự án cũ,
-      // bốn lượt y hệt rồi 409 với nội dung sai hẳn. Ghi nhận mã vừa bị chiếm vào bộ đếm mã dự án
-      // (NGOÀI transaction, GREATEST nên không lùi) để lượt sau nhảy sang mã kế tiếp.
-      // `meta.target` là UNDEFINED với driver adapter (Prisma 7) — ĐÃ ĐO. Đọc thẳng nó là để nhánh
-      // này chết im lặng: bốn lượt thử y hệt nhau rồi 409 nói sai nguyên nhân. Xem src/prismaLoi.ts.
-      const dungMaDuAn = trungTren(e, "projectCode");
-      if (dungMaDuAn && attempt < 3) {
-        if (draft.projectCode && creator?.projectCode) {
-          await syncProjectCodeCounter(String(draft.projectCode), creator.projectCode).catch(() => {});
-        }
-        continue;
-      }
+      // Đường tạo không còn ghi mã dự án (cấp lúc chốt — src/maDuAn.ts), nên nhánh "đụng MÃ DỰ ÁN" từng nằm ở đây
+      // (đẩy bộ đếm mã rồi thử lại) đã gỡ: P2002 ở đây chỉ còn là SỐ BÁO GIÁ.
       if (code === "P2002" && !b.quoteNumber && attempt < 3) {
         // Thử lại KHÔNG tự khỏi: transaction hỏng cuốn theo cả lần tăng bộ đếm (chủ ý "không đốt
         // số" của nextQuoteNumber), nên lượt sau sinh LẠI ĐÚNG số vừa đụng — bốn lượt cùng một số,
@@ -883,10 +861,19 @@ export async function updateQuote(req: Request) {
   // Cập nhật searchText: field có trong payload thì dùng nó (KỂ CẢ null = xóa, vd toContact), không thì
   // giữ cũ. Dùng `k in data` thay `?? existing` để xóa-rỗng phản ánh đúng vào index (không stale).
   const pick = (k: string, old: any) => (k in data ? (data as any)[k] : old);
-  data.searchText = normalizeSearch(
-    pick("quoteNumber", existing.quoteNumber), existing.projectCode,
+  const dungSearchText = (projectCode: string | null) => normalizeSearch(
+    pick("quoteNumber", existing.quoteNumber), projectCode,
     pick("title", existing.title), pick("toCompany", existing.toCompany), pick("toContact", existing.toContact)
   );
+  data.searchText = dungSearchText(existing.projectCode);
+  // MÃ DỰ ÁN TƯƠI cho searchText — đọc TRONG transaction, ngay trước lệnh ghi. Từ 2026-11-25 mã được cấp lúc CHỐT
+  // (markConverted → src/maDuAn.ts), mà `existing` đọc NGOÀI transaction: một lần Lưu đọc trước khi chốt rồi ghi sau
+  // khi chốt commit sẽ đè searchText KHÔNG có mã → dự án vừa chốt không tìm ra theo mã. Khoá Quote (FOR NO KEY UPDATE)
+  // để chờ lượt chốt đang dở; thứ tự khoá vẫn là QuoteSheet → Quote như mọi đường ghi.
+  const searchTextTuoi = async (tx: TxClient) => {
+    const [r] = await tx.$queryRaw<{ projectCode: string | null }[]>`SELECT "projectCode" FROM "Quote" WHERE id = ${id} FOR NO KEY UPDATE`;
+    data.searchText = dungSearchText(r ? r.projectCode : existing.projectCode);
+  };
 
   let updated;
   if (Array.isArray(b.sheets)) {
@@ -1059,6 +1046,7 @@ export async function updateQuote(req: Request) {
       });
       await chotKhoaLacQuan(tx);
       if (dongBoSo) await syncQuoteCounter(dongBoSo.so, dongBoSo.prefix, tx as any);
+      await searchTextTuoi(tx);
       const u = await tx.quote.update({
         where: { id },
         data: { ...data, sheets: { create: sheetsTao } },
@@ -1118,6 +1106,7 @@ export async function updateQuote(req: Request) {
       }
       await chotKhoaLacQuan(tx);
       if (dongBoSo) await syncQuoteCounter(dongBoSo.so, dongBoSo.prefix, tx as any);
+      await searchTextTuoi(tx);
       const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE as any });
       await snapshotQuoteVersion(tx, id, userId, "update");
       return u;
@@ -1819,7 +1808,7 @@ export async function markConverted(req: Request) {
   // bản trước đọc trang NGOÀI transaction rồi mới updateMany — một lần Lưu chen giữa làm doanh thu
   // chốt tính từ giá CŨ. Cùng thứ tự khoá với updateQuote/saveHn → không deadlock.
   // Tính bằng tinhConvertedTotal (Decimal, kẹp ≥ 0) — CÙNG hàm mà các đường tính lại sau khi chốt dùng.
-  const { upd, trang, chia } = await prisma.$transaction(async (tx) => {
+  const { upd, trang, chia, maCap } = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
     const trang = await tx.quoteSheet.findMany({
       where: { quoteId: id },
@@ -1839,14 +1828,26 @@ export async function markConverted(req: Request) {
       data: { status: "converted", convertedAt: new Date(), convertedTotal },
     });
     const chia: KetQuaChia | null = upd.count && chiaKhiChot ? await apDungChiaTrongTx(tx, id, chiaKhiChot) : null;
-    return { upd, trang, chia };
+    // MÃ DỰ ÁN CẤP Ở ĐÂY, không còn ở lúc tạo (chủ repo 2026-11-25 — src/maDuAn.ts). CUỐI transaction: phép chia sai ở
+    // trên ném lỗi → rollback trước khi chạm bộ đếm; và khoá hàng bộ đếm chỉ giữ từ đây tới commit.
+    const maCap = upd.count ? await capMaDuAnKhiChot(tx, id) : null;
+    return { upd, trang, chia, maCap };
+  }).catch((e: unknown) => {
+    // @@unique([projectCode, projectVersion]) — capMaDuAnKhiChot khoá theo dự án + bỏ qua mã đã dùng nên chỉ còn ca dữ
+    // liệu sửa tay lạ. Nói đúng nguyên nhân thay vì 500; chưa gì được ghi (rollback trọn).
+    if (trungTren(e, "projectCode")) throw httpError(409, "Mã dự án vừa bị trùng khi chốt — vui lòng bấm chốt lại");
+    throw e;
   });
   if (!upd.count) {
     throw httpError(409, "Báo giá vừa đổi trạng thái — vui lòng tải lại");
   }
   const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
-  await audit(req, "quote.convert", { resource: "quote", resourceId: id, before: { status: existing.status } });
+  await audit(req, "quote.convert", {
+    resource: "quote", resourceId: id, before: { status: existing.status, projectCode: existing.projectCode ?? null },
+    // Mã cấp lúc chốt phải TRUY ĐƯỢC ("mã này ra đời lúc nào, ai bấm") — trang Nhật ký đọc `after`.
+    ...(maCap ? { after: { projectCode: maCap.projectCode, projectVersion: maCap.projectVersion, cachCapMa: maCap.cach } } : {}),
+  });
   if (chia) await audit(req, "quote.invoice.split", { resource: "quote", resourceId: id, before: { sheets: chia.truoc }, after: { sheets: chia.sau, luc: "chot" } });
   // `total` GIỮ NGUYÊN trong webhook (bên nhận cũ vẫn đọc được), và thêm `convertedTotal` —
   // số thật sự chốt. Đổi nghĩa `total` ở đây là làm sai mọi tích hợp đang chạy.
@@ -2208,7 +2209,7 @@ export async function duplicateQuote(req: Request) {
   // View bị lược thì không nhân bản được (RBAC-06): bản sao là báo giá CỦA HỌ nên GET không còn lược,
   // và chính phản hồi 201 đã trả presentQuote đầy đủ — một cú bấm là đọc trọn giá bán/khách.
   if (viewBiLuoc(req.session)) throw httpError(403, "Bạn chỉ được xem phần được giao của báo giá này");
-  // Bản sao mang `createdById` + mã dự án của NGƯỜI BẤM (xem phần tạo bản sao bên dưới). Với
+  // Bản sao mang `createdById` của NGƯỜI BẤM — và lúc khách chốt, mã dự án theo tiền tố của họ (src/maDuAn.ts). Với
   // account phụ thì đó đúng là đường lách "báo giá vẫn của tôi": một cú bấm là báo giá của chủ
   // thành báo giá của họ, mang mã dự án của họ.
   if (laAccountPhu(req.session, src)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này nên không nhân bản được. Hãy nhờ người tạo báo giá bấm Nhân bản.");
@@ -2216,19 +2217,16 @@ export async function duplicateQuote(req: Request) {
   const sameProject = req.body.sameProject === true;
   const t = computeQuoteTotals({ vatPercent: src.vatPercent, sheets: src.sheets });
 
-  // Resolve title + project-code base. The version number is computed INSIDE the tx
-  // (below) so a P2002 from the @@unique([projectCode, projectVersion]) constraint retries
-  // onto the next free version instead of two concurrent "Bản mới" both landing on _v2.
+  // ── BẢN SAO KHÔNG MANG MÃ DỰ ÁN — cả "Nhân bản" lẫn "Bản mới" (chủ repo 2026-11-25) ──────────────────────
+  // Mã chỉ cấp lúc KHÁCH CHỐT (src/maDuAn.ts). Trước đây "Nhân bản" tiêu NGAY một mã mới theo tiền tố người bấm, còn
+  // "Bản mới" (sameProject) chép mã của dự án kèm `_v{n+1}` — nên một bản v2 khách không chốt vẫn chiếm _v2 mãi mãi.
+  // Nay "Bản mới" chỉ ghi LIÊN KẾT về gốc dự án (`projectRootId`); chốt thì lấy lại mã của dự án + phiên bản kế tiếp
+  // (không tiêu số mới) — anh chọn "cũng gỡ mã" cho bản nháp phiên bản mới.
   let newTitle = src.title + " (copy)";
-  let sameProjectCode = null;
-  let dupCreatorProjectCode: string | null = null;
+  let projectRootId: number | null = null;
   if (sameProject) {
-    // Bản mới CÙNG mã dự án (v2, v3…) để gửi khách — giữ projectCode.
-    sameProjectCode = src.projectCode || src.quoteNumber;
-    newTitle = src.title; // giữ nguyên tiêu đề; phân biệt bằng nhãn v{n}
-  } else {
-    const dupCreator = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { projectCode: true } });
-    dupCreatorProjectCode = dupCreator?.projectCode || null;
+    projectRootId = await timGocDuAn(prisma as unknown as TxClient, src.id, src.projectRootId);
+    newTitle = src.title; // giữ nguyên tiêu đề; phân biệt bằng nhãn v{n} (gắn lúc chốt)
   }
 
   // CẮT TRẠNG THÁI DO SERVER SỞ HỮU khỏi một hàng bảng nội bộ (HN / HCM / phí khách): duyệt, đã
@@ -2251,11 +2249,12 @@ export async function duplicateQuote(req: Request) {
     return con;
   };
 
-  const buildData = (quoteNumber: string, projectCode: string | null, projectVersion: number) => ({
+  const buildData = (quoteNumber: string) => ({
     quoteNumber,
-    projectCode,
-    projectVersion,
-    searchText: normalizeSearch(quoteNumber, projectCode, newTitle, src.toCompany, src.toContact),
+    projectCode: null,
+    projectVersion: 1,
+    projectRootId,
+    searchText: normalizeSearch(quoteNumber, null, newTitle, src.toCompany, src.toContact),
     title: newTitle,
     // Ba trường từng bị RƠI khi nhân bản: mất liên kết khách (tên tệp xuất mất mã KH), mất tên
     // ngắn, và `showTotals` về mặc định true — bản gốc đã ẩn bảng tổng thì bản sao lại hiện nó
@@ -2328,32 +2327,19 @@ export async function duplicateQuote(req: Request) {
     },
   });
 
-  // Allocate the number (+ per-employee project code) and create + snapshot v1
-  // INSIDE one transaction with a P2002 retry — mirrors the main create path so a
-  // failed insert rolls the counter back (no burned numbers) and the copy always
-  // gets an initial QuoteVersion snapshot.
+  // Allocate the number and create + snapshot v1 INSIDE one transaction with a P2002 retry — mirrors the main
+  // create path so a failed insert rolls the counter back (no burned numbers) and the copy always gets an initial
+  // QuoteVersion snapshot.
   let created;
   const prefixNhanBan = src.company?.quotePrefix || "GN";
-  // Số VÀ MÃ DỰ ÁN của LƯỢT VỪA HỎNG — cùng lý do như createQuote, xem khối catch bên dưới.
-  const capSoNhanBan: { so: string | null; ma: string | null } = { so: null, ma: null };
+  // Số của LƯỢT VỪA HỎNG — cùng lý do như createQuote, xem khối catch bên dưới.
+  const capSoNhanBan: { so: string | null } = { so: null };
   for (let attempt = 0; ; attempt++) {
     try {
       created = await prisma.$transaction(async (tx: any) => {
         const quoteNumber = await nextQuoteNumber(prefixNhanBan, tx);
         capSoNhanBan.so = quoteNumber;
-        let projectCode, projectVersion;
-        if (sameProject) {
-          projectCode = sameProjectCode;
-          // Tính version trong tx + includeDeleted → đơn điệu, không tái dùng số của bản
-          // xóa-mềm; khi 2 request đua nhau, P2002 đẩy lần retry sang version kế tiếp.
-          const agg = await tx.quote.aggregate({ where: { projectCode: sameProjectCode }, _max: { projectVersion: true }, includeDeleted: true });
-          projectVersion = Math.max(src.projectVersion || 1, agg._max.projectVersion || 0) + 1;
-        } else {
-          projectCode = dupCreatorProjectCode ? await nextProjectCode(dupCreatorProjectCode, tx) : null;
-          capSoNhanBan.ma = projectCode;
-          projectVersion = 1;
-        }
-        const c = await tx.quote.create({ data: buildData(quoteNumber, projectCode, projectVersion), include: QUOTE_INCLUDE });
+        const c = await tx.quote.create({ data: buildData(quoteNumber), include: QUOTE_INCLUDE });
         await snapshotQuoteVersion(tx, c.id, req.session.userId, "duplicate");
         return c;
       });
@@ -2367,20 +2353,11 @@ export async function duplicateQuote(req: Request) {
         // gì. Đẩy số đã bị chiếm vào bộ đếm NGOÀI transaction (GREATEST nên không lùi) để lượt sau
         // nhảy sang số kế tiếp.
         //
-        // CHỈ KHI ĐỤNG ĐÚNG CỘT quoteNumber (MONEY-09). P2002 của `@@unique([projectCode,
-        // projectVersion])` — hai người cùng bấm "Bản mới cùng dự án" — KHÔNG làm số báo giá bị
-        // chiếm: số vừa cấp chưa ai dùng, rollback đã trả nó về bộ đếm. Đẩy bộ đếm lên số đó ở ca này
+        // CHỈ KHI ĐỤNG ĐÚNG CỘT quoteNumber (MONEY-09): P2002 của cột khác KHÔNG làm số báo giá bị
+        // chiếm — số vừa cấp chưa ai dùng, rollback đã trả nó về bộ đếm. Đẩy bộ đếm lên số đó ở ca này
         // là ĐỐT một số báo giá, tạo lỗ trong dãy chứng từ. Cùng cách phân biệt createQuote đã dùng.
+        // (Bản sao không còn mang mã dự án — cấp lúc chốt, src/maDuAn.ts — nên không còn bộ đếm mã nào phải đẩy.)
         if (capSoNhanBan.so && trungTren(e, "quoteNumber")) await syncQuoteCounter(capSoNhanBan.so, prefixNhanBan).catch(() => {});
-        // ĐẨY CẢ BỘ ĐẾM MÃ DỰ ÁN — bị bỏ sót ở lượt vá trước, mà nhánh "nhân bản KHÔNG cùng dự án"
-        // cấp mã mới bằng `nextProjectCode` NGAY TRONG transaction. Transaction hỏng cuốn theo lần
-        // tăng bộ đếm đó, nên lượt thử lại sinh LẠI ĐÚNG mã vừa đụng `@@unique([projectCode,
-        // projectVersion])` — bốn lượt cùng một mã rồi 409, và mỗi lần bấm đốt 4 số báo giá cho một
-        // thao tác không bao giờ thành công. `createQuote` đã làm đúng (dòng ~354); đây là bản đối
-        // xứng. GREATEST trong syncProjectCodeCounter nên bộ đếm không bao giờ lùi.
-        if (capSoNhanBan.ma && dupCreatorProjectCode) {
-          await syncProjectCodeCounter(capSoNhanBan.ma, dupCreatorProjectCode).catch(() => {});
-        }
         continue;
       }
       if (code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");

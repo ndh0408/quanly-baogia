@@ -11,6 +11,7 @@ import { getConfig } from "./templateConfigs.js";
 import { thangNgayVN } from "./vnTime.js";
 import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
 import { phuTrangThaiHn } from "./hnDuyetHang.js";
+import { codeLabel, laNhap } from "./quoteCode.js";
 
 // Data-URL ảnh base64 hợp lệ TOÀN CHUỖI (không chỉ tiền tố). Dùng để lọc cột "Hình ảnh" khi lưu —
 // khớp validators.customerLogo/itemSchema.images. Kiểm tiền tố sẽ lọt markup thoát thuộc tính src="".
@@ -41,9 +42,15 @@ const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/
  * Tiêu đề rút gọn trống thì lùi về tiêu đề chính. MMDD là NGÀY TẢI theo giờ Việt Nam (src/vnTime.ts)
  * — TÍNH LẠI MỖI LẦN TẢI, nên tải lại hôm sau ra tên mới, không đè lên bản đã tải.
  * Không có mã khách hàng lẫn tiêu đề thì lùi hẳn về số báo giá như trước.
+ *
+ * BÁO GIÁ CHƯA CHỐT đứng đầu bằng "NHAP_<số BG>" (chủ repo 2026-11-25): mã dự án chỉ cấp lúc khách chốt, nên file
+ * nháp gửi khách không có mã nào để đối chiếu — chữ NHÁP + số báo giá nội bộ cho biết đây là bản nào. Báo giá đã
+ * chốt giữ nguyên hình dạng cũ.
  */
 export type QuoteTenFile = {
   quoteNumber?: string | null;
+  projectCode?: string | null;
+  status?: string | null;
   shortTitle?: string | null;
   title?: string | null;
   customer?: { code?: string | null } | null;
@@ -68,8 +75,11 @@ export function tenFileXuat(q: QuoteTenFile | string | null | undefined, quoteId
   const quote: QuoteTenFile = typeof q === "string" || q == null ? { quoteNumber: q as string | null } : q;
   const maKH = anToanTenFile(quote.customerCode ?? quote.customer?.code, 20);
   const ten = anToanTenFile(quote.shortTitle?.trim() || quote.title, 60);
-  const phan = [maKH, ten, thangNgayVN()].filter(Boolean);
-  const an = phan.length > 1 ? phan.join("_") : anToanTenFile(quote.quoteNumber) || `quote-${quoteId}`;
+  // "NHÁP GN26045" → "NHAP_GN26045" (bỏ dấu + gom khoảng trắng như mọi phần khác của tên).
+  const nhap = laNhap(quote) ? anToanTenFile(codeLabel(quote), 40) : "";
+  const an = maKH || ten
+    ? [nhap, maKH, ten, thangNgayVN()].filter(Boolean).join("_")
+    : nhap || anToanTenFile(quote.quoteNumber) || `quote-${quoteId}`;
   return `${an}.${ext}`;
 }
 
@@ -226,6 +236,9 @@ function presentQuoteForAccountHn(q: any) {
     quoteNumber: q.quoteNumber,
     projectCode: q.projectCode,
     projectVersion: q.projectVersion,
+    // Trạng thái (không phải tiền/khách) — để nhãn mã hiện "NHÁP <số BG>" khi chưa chốt (codeLabel); danh sách
+    // account HN (presentQuoteRow hnOnly) vốn đã trả cột này.
+    status: q.status,
     title: q.title,
     companyId: q.companyId,
     companyName: q.company?.shortName || q.company?.name || null,

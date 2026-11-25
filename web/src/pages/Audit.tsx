@@ -32,6 +32,7 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["quote.internal.vat", "Hóa đơn đầu vào: đưa / thay / gỡ hóa đơn VAT"],
     ["quote.internal.ke-toan", "Hóa đơn đầu vào: hình thức chi / ngày HĐ / ghi chú KT / ảnh chứng từ"],
     ["quote.list-note", "Ghi chú / màu ở danh sách báo giá"],
+    ["quote.ma-du-an.don", "Dọn mã dự án (công cụ: gỡ → NHÁP / đánh lại liền số)"],
     // MƯỜI MÃ DƯỚI ĐÂY (ở đây và ở nhóm Nhân sự) TỪNG VẮNG MẶT, và bài test phủ mã vẫn XANH:
     // bộ dò của nó chỉ khớp `audit(req, "chuỗi")`, bỏ hết dạng ternary và dạng truyền qua biến.
     // Nhãn đặt theo ĐÚNG việc mà nơi gọi làm — đã đọc từng nơi gọi, không suy từ tên mã.
@@ -53,7 +54,7 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
   ["Nhân sự (hồ sơ) & danh bạ", [
     ["personnel.create", "Thêm hồ sơ nhân sự"], ["personnel.update", "Sửa hồ sơ nhân sự"], ["personnel.delete", "Xóa hồ sơ nhân sự"],
     ["personnel.payment-proof.view", "Xem ảnh chứng từ thanh toán (nhân sự)"], ["personnel.contract-download", "Tải hợp đồng dịch vụ (nhân sự)"],
-    ["personnel.team-note", "Sửa ghi chú nội bộ (nhân sự)"],
+    ["personnel.team-note", "Sửa ghi chú nội bộ (nhân sự)"], ["personnel.ma-du-an.don", "Đổi mã dự án theo công cụ dọn mã"],
     ["personnel.pay", "Đánh dấu ĐÃ thanh toán (nhân sự)"], ["personnel.unpay", "Gỡ đánh dấu đã thanh toán (nhân sự)"],
     ["personnel.confirm", "Xác nhận hồ sơ nhân sự"], ["personnel.unconfirm", "Gỡ xác nhận hồ sơ nhân sự"],
     // Hai mã này `audit()` nhận QUA BIẾN (writeNoteField), nên bộ dò tĩnh không lần ra —
@@ -117,6 +118,8 @@ const FIELD_LABEL: Record<string, string> = {
   // Tài khoản / hồ sơ nhân sự / danh bạ (hay gặp ở user.*, personnel.*, employee.*)
   fullName: "Họ tên", displayName: "Tên hiển thị", username: "Tên đăng nhập", email: "Email", phone: "Điện thoại",
   active: "Kích hoạt", company: "Công ty", projectName: "Tên dự án", projectNameContract: "Tên hợp đồng", projectCode: "Mã dự án",
+  // Mã dự án cấp lúc khách chốt (quote.convert) + công cụ dọn mã (quote.ma-du-an.don).
+  projectVersion: "Phiên bản dự án", projectRootId: "Gốc dự án (id báo giá)", cachCapMa: "Cách cấp mã", viec: "Việc",
   taxCode: "Mã số thuế", idCard: "CCCD", bankName: "Ngân hàng", bankAccount: "Số tài khoản",
   laborContractNo: "Số HĐ lao động", position: "Chức vụ", department: "Phòng ban",
 };
@@ -130,7 +133,11 @@ const fmtVal = (v: unknown): string => {
   return s;
 };
 // Giá trị MÃ của vài khoá → chữ đọc được (máy chủ ghi mã ổn định để còn lọc / so được).
-const GIA_TRI_TRUONG: Record<string, Record<string, string>> = { paidMethod: { "chuyen-khoan": "Chuyển khoản", "tien-mat": "Tiền mặt" } };
+const GIA_TRI_TRUONG: Record<string, Record<string, string>> = {
+  paidMethod: { "chuyen-khoan": "Chuyển khoản", "tien-mat": "Tiền mặt" },
+  cachCapMa: { moi: "Mã mới theo tiền tố người tạo", "phien-ban": "Lấy lại mã dự án (phiên bản mới)", "so-bao-gia-goc": "Số báo giá của gốc (kiểu cũ)" },
+  viec: { doi: "Đánh lại mã", go: "Gỡ mã → NHÁP", "lien-ket": "Đổi liên kết gốc", giu: "Giữ mã", "kieu-cu": "Giữ mã kiểu cũ" },
+};
 const fmtTruong = (k: string, v: unknown): string => (typeof v === "string" && GIA_TRI_TRUONG[k]?.[v]) || fmtVal(v);
 // "" ≡ null ≡ undefined → KHÔNG coi là thay đổi (tránh dòng "(trống) → (trống)" vô nghĩa).
 const normNullish = (x: unknown) => (x == null || x === "" ? null : x);
