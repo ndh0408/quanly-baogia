@@ -37,10 +37,10 @@ const laNhom = (it: M.Item | undefined) => it?.kind === "section" || it?.kind ==
 type Muc = { loai: "hang"; hang: number } | { loai: "nhom"; hang: number; con: number[] };
 
 /** Công thức của ô Tổng sheet (= "Cộng" khi có Discount) theo địa chỉ ô của lưới: `La` cột Thành tiền, `Lq` cột Số lượng. */
-export function congThucTongSheet(items: M.Item[], o: { groupSubtotal?: boolean; usesDays: boolean; numberSubs?: boolean; La: string; Lq: string }): CongThucO & { phanTu: PhanTuTong[] } {
+export function congThucTongSheet(items: M.Item[], o: { groupSubtotal?: boolean; usesDays: boolean; usesShifts?: boolean; numberSubs?: boolean; La: string; Lq: string }): CongThucO & { phanTu: PhanTuTong[] } {
   const ds = items || [];
   const nhomTinh = !!o.groupSubtotal;
-  const tien = (r: number) => M.lineAmount(ds[r], o.usesDays);
+  const tien = (r: number) => M.lineAmount(ds[r], o.usesDays, !!o.usesShifts);
   const oTT = (r: number) => `${o.La}${r + 1}`;
   // Dựng dãy mục đúng thứ tự vòng lặp của sheetSubtotalGrouped: gặp nhóm thì (nếu nhóm tính) mở nhóm mới, gặp info thì bỏ.
   const day: Muc[] = [];
@@ -99,7 +99,7 @@ export function congThucTongSheet(items: M.Item[], o: { groupSubtotal?: boolean;
   if (ds.some((it, i) => !laNhom(it) && it.kind !== "info" && tien(i) < 0)) ghiChu.push("Hàng có Thành tiền âm được trừ đi.");
 
   // Số cuối lấy từ CHÍNH hàm tính tổng của báo giá (không cộng lại phanTu) — diễn giải không bao giờ lệch số đang hiện.
-  const gross = M.roundVnd(M.sheetSubtotalGrouped(ds, o.usesDays, nhomTinh));
+  const gross = M.roundVnd(M.sheetSubtotalGrouped(ds, o.usesDays, nhomTinh, !!o.usesShifts));
   if (!phanTu.length) return { congThuc: "=0", dienGiai: "Chưa có hàng nào tính tiền", ghiChu, phanTu };
   const cong = phanTu.reduce((acc, p) => acc + p.giaTri, 0);
   const lamTron = Math.abs(cong - gross) > 1e-6 ? ` = ${soVN(cong)} → làm tròn đến đồng: ${M.fmtMoney(gross)}` : ` = ${M.fmtMoney(gross)}`;

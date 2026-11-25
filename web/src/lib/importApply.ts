@@ -20,7 +20,7 @@ type ImportTargetSheet = { name?: string | null; templateId?: number };
  * kết quả phải là [1, 2, 0], không phải [0, 1, 2]. Nếu không còn sheet cùng mẫu thì tạo sheet mới.
  */
 export function autoTargetIndexes(
-  files: Pick<ImportedSheet, "name" | "templateCode" | "hasDays" | "numberSubs">[],
+  files: (Pick<ImportedSheet, "name" | "templateCode" | "hasDays" | "numberSubs"> & { hasShifts?: boolean })[],
   targets: ImportTargetSheet[],
   templates: EditorTemplate[],
 ): number[] {
@@ -55,6 +55,7 @@ export function autoTargetIndexes(
   files.forEach((file, fi) => {
     if (out[fi] !== NEW_IMPORT_SHEET || file.templateCode) return;
     take(fi, (tpl) => !!tpl.layout?.hasDays === file.hasDays
+      && !!tpl.layout?.hasShifts === !!file.hasShifts   // cột Số Ca (CINETOUR) cũng là cấu trúc cốt lõi
       && !!tpl.layout?.numberSubsections === file.numberSubs);
   });
 
@@ -80,12 +81,13 @@ export function sapXepTheoFile<T>(sheets: T[], theoFile: T[]): void {
 }
 
 /** Sơ đồ địa chỉ ô A1 của lưới — PHẢI khớp mảng ADDR trong components/GridTable.tsx. */
-export function addrFields(opts: { addrDetail: boolean; usesDays: boolean; internalNote?: boolean }): string[] {
+export function addrFields(opts: { addrDetail: boolean; usesDays: boolean; usesShifts?: boolean; internalNote?: boolean }): string[] {
   return [
     "_stt", "name",
     ...(opts.addrDetail ? ["detail"] : []),
     "unit", "quantity",
     ...(opts.usesDays ? ["days"] : []),
+    ...(opts.usesShifts ? ["shifts"] : []),
     "unitPrice", "_amount", "notes",
     ...(opts.internalNote ? ["internalNote"] : []),
   ];
@@ -115,6 +117,8 @@ export type ApplyOpts = {
   /** Mẫu ĐÍCH: lưới có chừa cột Chi Tiết trong sơ đồ địa chỉ không / có cột Số Ngày không. */
   addrDetail: boolean;
   usesDays: boolean;
+  /** Mẫu đích có cột SỐ CA (CINETOUR) không — như `usesDays`. */
+  usesShifts?: boolean;
   /**
    * Mẫu đích có HIỆN cột Chi Tiết không (layout.hasDetail) — KHÁC `addrDetail`, vốn chỉ nói "có
    * chừa khe địa chỉ". Mẫu ẩn cột thì chừa khe mà không hiện; mẫu Colorfull thì hiện.
@@ -129,12 +133,12 @@ export type ApplyResult = { items: M.Item[]; droppedFormulas: number };
 
 /** Đổi hạng mục đọc từ file → item của lưới (kèm dịch công thức sang chữ cột của lưới đích). */
 export function toGridItems(imported: ImportedItem[], opts: ApplyOpts): ApplyResult {
-  const fields = addrFields({ addrDetail: opts.addrDetail, usesDays: opts.usesDays });
+  const fields = addrFields({ addrDetail: opts.addrDetail, usesDays: opts.usesDays, usesShifts: opts.usesShifts });
   const base = opts.baseRow || 0;
   let dropped = 0;
   const items = imported.map((src) => {
     const it: M.Item = {
-      ...M.blankItem(opts.usesDays),
+      ...M.blankItem(opts.usesDays, opts.usesShifts),
       kind: src.kind,
       name: src.name || "",
       // CHI TIẾT: nạp khi mẫu đích HIỆN cột đó, bỏ khi không.
@@ -154,6 +158,8 @@ export function toGridItems(imported: ImportedItem[], opts: ApplyOpts): ApplyRes
       quantityExact: !!src.quantityExact,
       unitPrice: Number(src.unitPrice) || 0,
       days: opts.usesDays ? (src.days != null ? Number(src.days) : 1) : null,
+      // Số Ca: như Số Ngày — mẫu đích có cột thì nạp (trống = 1), không có thì không mang khoá này.
+      ...(opts.usesShifts ? { shifts: src.shifts != null ? Number(src.shifts) : 1 } : {}),
       notes: src.notes || "",
     };
     if (src.label) it.label = src.label;
@@ -200,7 +206,7 @@ const numEq = (a: unknown, b: unknown) => Math.abs((Number(a) || 0) - (Number(b)
 
 const FIELD_LABEL: Record<string, string> = {
   name: "Hạng mục", unit: "ĐVT", quantity: "Số lượng", unitPrice: "Đơn giá",
-  days: "Số ngày", notes: "Ghi chú", detail: "Chi tiết", kind: "Loại dòng", label: "Chữ nhóm",
+  days: "Số ngày", shifts: "Số ca", notes: "Ghi chú", detail: "Chi tiết", kind: "Loại dòng", label: "Chữ nhóm",
   formulas: "Công thức", quantityExact: "Cách tính Số lượng", images: "Hình ảnh",
 };
 const KIND_LABEL: Record<string, string> = {
@@ -208,7 +214,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 export const kindLabel = (k?: string) => KIND_LABEL[k || "item"] || k || "—";
 
-function diffFields(a: M.Item, b: M.Item, usesDays: boolean, showDetail?: boolean): DiffField[] {
+function diffFields(a: M.Item, b: M.Item, usesDays: boolean, showDetail?: boolean, usesShifts?: boolean): DiffField[] {
   const out: DiffField[] = [];
   const push = (f: string, before: unknown, after: unknown) => out.push({ field: f, label: FIELD_LABEL[f] || f, before, after });
   if (norm(a.name) !== norm(b.name)) push("name", a.name || "", b.name || "");
@@ -222,6 +228,7 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean, showDetail?: boolea
   if (!!a.quantityExact !== !!b.quantityExact) push("quantityExact", !!a.quantityExact, !!b.quantityExact);
   if (!numEq(a.unitPrice, b.unitPrice)) push("unitPrice", Number(a.unitPrice) || 0, Number(b.unitPrice) || 0);
   if (usesDays && !numEq(a.days ?? 1, b.days ?? 1)) push("days", a.days ?? 1, b.days ?? 1);
+  if (usesShifts && !numEq(a.shifts || 1, b.shifts || 1)) push("shifts", a.shifts || 1, b.shifts || 1);   // trống/0 = ×1
   // Chi Tiết chỉ so khi mẫu đích HIỆN cột đó — mẫu ẩn thì hai bên luôn rỗng, đưa vào chỉ tổ nhiễu.
   // Thiếu dòng này thì bảng đối chiếu báo "không đổi" ĐÚNG LÚC Chi Tiết đang bị ghi đè: lớp bảo vệ
   // "xem kỹ trước khi nạp" của hộp thoại mù ngay ở cột rộng nhất của mẫu Colorfull.
@@ -242,13 +249,13 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean, showDetail?: boolea
 const LCS_MAX = 1200;
 
 /** So thẳng theo VỊ TRÍ khi bảng quá dài — vẫn thấy dòng nào đổi số, chỉ không dò được chèn/xoá. */
-function diffByPosition(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean): DiffRow[] {
+function diffByPosition(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean, usesShifts?: boolean): DiffRow[] {
   const rows: DiffRow[] = [];
   const n = Math.max(before.length, after.length);
   for (let i = 0; i < n; i++) {
     const a = before[i], b = after[i];
     if (a && b) {
-      const fields = diffFields(a, b, usesDays, showDetail);
+      const fields = diffFields(a, b, usesDays, showDetail, usesShifts);
       rows.push({ kind: fields.length ? "changed" : "same", beforeNo: i + 1, afterNo: i + 1, itemKind: b.kind, name: b.name || a.name || "", item: b, fields, warn: warnOf?.(i) });
     } else if (b) rows.push({ kind: "added", afterNo: i + 1, itemKind: b.kind, name: b.name || "", item: b, fields: [], warn: warnOf?.(i) });
     else if (a) rows.push({ kind: "removed", beforeNo: i + 1, itemKind: a.kind, name: a.name || "", item: a, fields: [] });
@@ -342,7 +349,8 @@ const coNoiBo = (it: Record<string, unknown>) => (typeof it.ns === "string" && i
 const soTienHang = (it: Record<string, unknown>): string | null => {
   const q = it.quantity, dg = it.unitPrice;
   if (q == null && dg == null) return null;
-  return `${Number(q) || 0}|${Number(dg) || 0}|${it.days != null ? Number(it.days) : ""}`;
+  // Số Ca (CINETOUR) chỉ nối khi hàng có số — y hệt máy chủ.
+  return `${Number(q) || 0}|${Number(dg) || 0}|${it.days != null ? Number(it.days) : ""}${it.shifts != null ? `|ca${Number(it.shifts)}` : ""}`;
 };
 
 export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean; giuCongThucNgayAn?: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number; daChiMat: string[]; noiBoMat: number; tienDaTraDoi: string[]; congThucNgayAnMat: number } {
@@ -410,11 +418,11 @@ export function khoanDaChiTrongSheetXoa(sheets: readonly { items?: unknown; extr
 }
 
 /** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */
-export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean): DiffRow[] {
-  if (before.length > LCS_MAX || after.length > LCS_MAX) return diffByPosition(before, after, usesDays, warnOf, showDetail);
+export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean, usesShifts?: boolean): DiffRow[] {
+  if (before.length > LCS_MAX || after.length > LCS_MAX) return diffByPosition(before, after, usesDays, warnOf, showDetail, usesShifts);
   return buocGhepLcs(before, after).map((b): DiffRow => {
     if (b.k === "pair") {
-      const fields = diffFields(before[b.i], after[b.j], usesDays, showDetail);
+      const fields = diffFields(before[b.i], after[b.j], usesDays, showDetail, usesShifts);
       return {
         kind: fields.length ? "changed" : "same",
         beforeNo: b.i + 1, afterNo: b.j + 1,
@@ -496,6 +504,7 @@ export function doiChieuNhapExcel(o: {
   hangSauNap: M.Item[];
   hangNap: M.Item[];
   usesDays: boolean;
+  usesShifts?: boolean;
   thayGiuCoCuaDich?: boolean;
   tongKhongNhanNhom?: boolean;
   tongBang?: (hang: M.Item[]) => number;
@@ -509,7 +518,7 @@ export function doiChieuNhapExcel(o: {
   const nhanSauNap = boQua ? coFile : co && !o.tongKhongNhanNhom;
   // `tong`: phép cộng của lưới báo giá theo cờ nhóm — cũng là cách file Excel tự cộng tổng của nó. `tongDich`: tổng THẬT của bảng
   // đích (lưới: chính `tong`; bảng Hà Nội: `tongBang` = extraTableSum). "Bỏ qua" chỉ để xem → mọi tổng theo cách của file.
-  const tong = (hang: M.Item[], nhan: boolean) => M.sheetSubtotalGrouped(hang, o.usesDays, nhan);
+  const tong = (hang: M.Item[], nhan: boolean) => M.sheetSubtotalGrouped(hang, o.usesDays, nhan, !!o.usesShifts);
   const tongRieng = !boQua && o.tongKhongNhanNhom ? o.tongBang : undefined;
   const tongDich = (hang: M.Item[], nhan: boolean) => (tongRieng ? tongRieng(hang) : tong(hang, nhan));
   // Các hàng của file khi đứng MỘT MÌNH (hệ số bắt đầu ×1): theo cờ sau nạp và theo cờ của chính file (phép của lưới — cách file tự

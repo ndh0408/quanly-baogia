@@ -20,6 +20,7 @@ import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuy
 import { useTrangAnToan } from "../lib/phienBan";
 import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
 import { useDaChiBaoGia } from "../lib/daChiHang";
+import { demHangCoSoCa } from "../lib/soCa";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
 const RONG: never[] = [];
@@ -164,6 +165,7 @@ function noiDungBangNoiBo(ts: unknown) {
       kind: it?.kind ?? null, label: it?.label ?? null, name: String(it?.name || "").trim(), detail: it?.detail ?? null,
       unit: it?.unit ?? null, quantity: Number(it?.quantity) || 0, quantityExact: !!it?.quantityExact,
       unitPrice: Number(it?.unitPrice) || 0, days: it?.days != null ? Number(it.days) : null, notes: it?.notes ?? null,
+      shifts: it?.shifts != null ? Number(it.shifts) : null,   // Số Ca (mẫu CINETOUR) — sửa là "chưa lưu"
       formulas: it?.formulas ?? null, approved: !!it?.approved,
       ns: it?.ns ?? null, luuKho: !!it?.luuKho, chungTu: it?.chungTu ?? null,   // ba cột nội bộ — sửa là "chưa lưu"
     })),
@@ -682,6 +684,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // thứ tự hook đổi giữa các lần render và React vỡ trạng thái. Trạng thái báo giá đọc qua `qRef`
   // (ref ổn định) nên phụ thuộc chỉ còn `templates` — đúng thứ ta muốn: càng ít đổi càng tốt.
   const usesDaysOf = useCallback((tid?: number) => !!templates.find((t) => t.id === tid)?.layout?.hasDays, [templates]);
+  const usesShiftsOf = useCallback((tid?: number) => !!templates.find((t) => t.id === tid)?.layout?.hasShifts, [templates]);
   const addrDetailOf = useCallback((tid?: number) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }, [templates]);
   // Sheet MỚI: dùng đúng mẫu app đoán được từ file, miễn mẫu đó thuộc công ty của báo giá;
   // không đoán ra thì theo mẫu của sheet đang mở.
@@ -701,6 +704,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const activeSheet = sheets[ai];
   const tpl = templates.find((t) => t.id === activeSheet.templateId);
   const usesDays = !!tpl?.layout?.hasDays;
+  const usesShifts = !!tpl?.layout?.hasShifts;   // mẫu CINETOUR: cột SỐ CA
   const showDetail = !!tpl?.layout?.hasDetail;
   // Chi Tiết đã bỏ; chỉ giữ khe địa chỉ nội bộ để công thức báo giá cũ không lệch cột.
   const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);
@@ -847,22 +851,23 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         ...q,
         sheets: sheets.map((s, i) => {
           const stpl = templates.find((t) => t.id === s.templateId);
-          const sUsesDays = !!stpl?.layout?.hasDays;
+          const sUsesDays = !!stpl?.layout?.hasDays, sUsesShifts = !!stpl?.layout?.hasShifts;
           return {
             // GỬI KÈM id sheet: lưu = server xoá-tạo-lại sheet, có id nó mới BÊ được trạng thái
             // mức sheet sang bản mới (khách duyệt sheet, chữ ký, số hoá đơn…). Giá trị vẫn do
             // server quyết — client chỉ dùng id để ghép.
             id: s.id, templateId: s.templateId, name: s.name, order: i + 1, groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
             discount: Math.max(0, Number(s.discount) || 0),   // Discount RIÊNG của sheet (server kẹp lại theo tổng sheet)
-            items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }),
+            items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; if (!sUsesShifts && o.shifts != null) o.shifts = null; delete (o as ItemK)._k; return o; }),
             // dọn days bảng nội bộ theo template TỪNG bảng (đối xứng lưới chính) → tổng nội bộ không phồng.
             // Đợt 4: CÙNG luật chọn mẫu với lưới (ExtraTables.tplOf = mauBangHn: thiếu templateId / mẫu không
             // còn thì mẫu đầu của công ty). Tra thẳng theo id thì bảng cũ thiếu mẫu mà mẫu dự phòng CÓ ngày bị
             // xoá days lúc Lưu — trong khi lưới đang hiện cột Số Ngày và nhân nó.
             extraTables: (Array.isArray(s.extraTables) ? s.extraTables : []).map((x) => {
               const xx = x as { templateId?: number; items?: ItemK[] } & Record<string, unknown>;
-              const xUsesDays = !!mauBangHn(xx, templates, q.companyId)?.layout?.hasDays;
-              return { ...xx, items: (xx.items || []).map((it) => { const o = { ...it, days: xUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }) };
+              const xMau = mauBangHn(xx, templates, q.companyId)?.layout;
+              const xUsesDays = !!xMau?.hasDays, xUsesShifts = !!xMau?.hasShifts;
+              return { ...xx, items: (xx.items || []).map((it) => { const o = { ...it, days: xUsesDays ? it.days : null }; if (!xUsesShifts && o.shifts != null) o.shifts = null; delete (o as ItemK)._k; return o; }) };
             }),
           };
         }),
@@ -876,9 +881,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       const hnSuaDuoc = coScope("hanoi");
       payload.hnTables = hnTables.map((x) => {
         const coNgay = !hnSuaDuoc || !!mauBangHn(x, templates, q.companyId)?.layout?.hasDays;
+        const coCa = !hnSuaDuoc || !!mauBangHn(x, templates, q.companyId)?.layout?.hasShifts;   // cùng luật với Số Ngày
         return {
           ...x, _k: undefined,
-          items: (x.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; delete (o as ItemK)._k; return o; }),
+          items: (x.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; if (!coCa && o.shifts != null) o.shifts = null; delete (o as ItemK)._k; return o; }),
         };
       }).map((x) => { const o = { ...x }; delete (o as { _k?: number })._k; return o; });
       delete payload._new; delete payload._activeSheet;
@@ -1033,7 +1039,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       // mà máy chủ dùng để tính lại. Tính ở đây chỉ để HIỂN THỊ; máy chủ không nhận số này.
       // CÙNG công thức với `perSheet` ở dưới (dòng ~605) — hai chỗ tính khác nhau là hai con số
       // tiền khác nhau trên cùng một màn hình.
-      net: M.sheetTotals(s, !!templates.find((x) => x.id === s.templateId)?.layout?.hasDays).net,
+      net: M.sheetTotals(s, usesDaysOf(s.templateId), usesShiftsOf(s.templateId)).net,
       custStatus: (s.custStatus as string | null) ?? null,
     }));
 
@@ -1272,13 +1278,13 @@ Lý do (không bắt buộc):`,
   // ── summary tổng báo giá (mọi sheet) ─────────────────────────────────────────
   // Mỗi sheet có khối riêng: Cộng → Discount → Tổng Cộng. Tổng báo giá cộng phần ĐÃ TRỪ của các
   // sheet rồi mới tính VAT — cùng luật với src/money.ts và file Excel xuất ra.
-  const perSheet = sheets.map((s) => M.sheetTotals(s, !!templates.find((x) => x.id === s.templateId)?.layout?.hasDays));
+  const perSheet = sheets.map((s) => M.sheetTotals(s, usesDaysOf(s.templateId), usesShiftsOf(s.templateId)));
   const tt = M.quoteTotals(perSheet, q.vatPercent);
   const stt = perSheet[ai] ?? { gross: 0, discount: 0, net: 0 };   // khối tổng của sheet ĐANG MỞ
   const sheetVat = M.roundVnd(stt.net * (Number(q.vatPercent) || 0) / 100);
   // Bấm số ở khối tổng / bảng Tổng báo giá → hiện công thức tham chiếu ô + tô ô góp vào (components/CongThucTong). Chỉ
   // dựng closure ở đây; công thức chỉ được tính lúc bấm. Sơ đồ địa chỉ phải khớp đúng props của <GridTable> chính bên dưới.
-  const xemTong = xemKhoiTong({ items: activeSheet.items, groupSubtotal: !!activeSheet.groupSubtotal, usesDays, numberSubs, diaChi: { giuChiTiet: addrDetail, usesDays, internalNote: true }, tong: stt, vatPct: Number(q.vatPercent) || 0, vat: sheetVat });
+  const xemTong = xemKhoiTong({ items: activeSheet.items, groupSubtotal: !!activeSheet.groupSubtotal, usesDays, usesShifts, numberSubs, diaChi: { giuChiTiet: addrDetail, usesDays, usesShifts, internalNote: true }, tong: stt, vatPct: Number(q.vatPercent) || 0, vat: sheetVat });
   const xemBang = xemBangTong({ cacSheet: sheets.map((s, i) => ({ ten: s.name || templates.find((x) => x.id === s.templateId)?.name || `Sheet ${i + 1}`, custStatus: s.custStatus, tong: perSheet[i] ?? { gross: 0, discount: 0, net: 0 } })), tt, vatPct: Number(q.vatPercent) || 0, sheetDangMo: ai });
 
   return (
@@ -1420,11 +1426,25 @@ Lý do (không bắt buộc):`,
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ fontSize: 13 }}>Tên sheet: <input autoComplete="off" name="sheetName" value={activeSheet.name || ""} disabled={!suaMain || saving} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
-          <label style={{ fontSize: 13 }}>Template: <select name="templateId" value={activeSheet.templateId} disabled={!suaMain || saving} onChange={(e) => {
+          <label style={{ fontSize: 13 }}>Template: <select name="templateId" value={activeSheet.templateId} disabled={!suaMain || saving} onChange={async (e) => {
             // L64: KHÔNG null hoá `days` ở đây. Chọn nhầm mẫu không ngày rồi chọn lại là mất sạch số Ngày
             // (lưới gắn lại theo mẫu nên Ctrl+Z không cứu). Mẫu không ngày thì tiền vốn không nhân ngày
             // (lineAmount/sheetTotals theo `usesDays`) và save() đã tự gửi `days: null`.
-            activeSheet.templateId = Number(e.target.value); mark(); redraw();
+            const moi = Number(e.target.value);
+            // SỐ CA (CINETOUR) → mẫu không có cột Số Ca: Thành tiền thôi nhân Số Ca, và Lưu thì Số Ca bị bỏ (máy chủ ép
+            // null như Số Ngày). Đó là đổi TIỀN — hỏi trước khi có hàng mang Số Ca khác 1, không đổi im lặng. Giữ nguyên
+            // số trong phiên như `days`: chọn lại mẫu CINETOUR trước khi Lưu là lấy lại.
+            const soCa = demHangCoSoCa(activeSheet.items);
+            if (usesShifts && !usesShiftsOf(moi) && soCa > 0) {
+              const truoc = M.sheetTotals(activeSheet, usesDays, true).net, sau = M.sheetTotals(activeSheet, usesDaysOf(moi), false).net;
+              const tenMoi = templates.find((t) => t.id === moi)?.name || "mới";
+              const dongY = await confirmModal("Đổi sang mẫu không có cột Số Ca?",
+                `Mẫu "${tenMoi}" không có cột SỐ CA: ${soCa} hạng mục đang có Số Ca khác 1 sẽ KHÔNG còn được nhân Số Ca — Tổng sheet đổi từ ${M.fmtMoney(truoc)} thành ${M.fmtMoney(sau)}. ` +
+                "Số Ca vẫn giữ trong phiên này (chọn lại mẫu CINETOUR trước khi Lưu là lấy lại); Lưu với mẫu mới thì Số Ca bị bỏ.",
+                { danger: true, confirmText: "Đổi mẫu" });
+              if (!dongY || qRef.current !== q || !songRef.current) { redraw(); return; }
+            }
+            activeSheet.templateId = moi; mark(); redraw();
           }}>{sapMauHienThi(templates.filter((t) => t.companyId === q.companyId)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
           {suaMain && (
@@ -1472,7 +1492,7 @@ Lý do (không bắt buộc):`,
           anThanhThem={luoiDangLam.id !== "chinh"}
           onDangDung={() => datDangLam("chinh", "Báo giá chính")}
           clfTheme={!!tpl?.code?.startsWith("clofull")}
-          usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaMain && !saving} internalNote
+          usesDays={usesDays} usesShifts={usesShifts} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaMain && !saving} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
           showImages={!!activeSheet.showImages} onShowImages={(v) => { activeSheet.showImages = v; mark(); redraw(); }}
           sheetTotalLine={false}
@@ -1684,6 +1704,7 @@ Lý do (không bắt buộc):`,
           sheets={sheets}
           templates={templates}
           usesDaysOf={usesDaysOf}
+          usesShiftsOf={usesShiftsOf}
           addrDetailOf={addrDetailOf}
           newSheetTemplateId={newSheetTemplateId}
           onApply={applyImport}

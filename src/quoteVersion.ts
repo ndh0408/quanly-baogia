@@ -61,7 +61,7 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
             orderBy: { order: "asc" },
             select: {
               order: true, kind: true, productId: true, name: true, detail: true, unit: true,
-              quantity: true, quantityExact: true, unitPrice: true, days: true,
+              quantity: true, quantityExact: true, unitPrice: true, days: true, shifts: true,
               notes: true, internalNote: true, formulas: true,
             },
           },
@@ -135,6 +135,8 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
         quantityExact: it.quantityExact,
         unitPrice: it.unitPrice.toString(),
         days: it.days?.toString() ?? null,
+        // Số Ca (CINETOUR): chỉ có khoá khi dòng mang số — ảnh chụp phiên bản của mọi báo giá khác y như trước.
+        ...(it.shifts != null ? { shifts: it.shifts.toString() } : {}),
         notes: it.notes,
         internalNote: it.internalNote,
         formulas: it.formulas,

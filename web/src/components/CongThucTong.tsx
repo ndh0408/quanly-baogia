@@ -126,12 +126,12 @@ export function OCongThuc({ nhan, giaTri, tienTo = "", nguy = false, ma, tinh }:
 
 /** Khối tổng của sheet ĐANG MỞ (Cộng/Tổng sheet · Discount · Tổng cộng · VAT · Thành tiền). Ô Thành tiền được tô nằm ở
  *  lưới chính — phần tử bọc `[data-luoi-chinh]` trong cùng `.editor` (QuoteEditor). */
-export function xemKhoiTong(a: { items: M.Item[]; groupSubtotal: boolean; usesDays: boolean; numberSubs: boolean; diaChi: CauHinhDiaChi; tong: M.SheetTotals; vatPct: number; vat: number }) {
+export function xemKhoiTong(a: { items: M.Item[]; groupSubtotal: boolean; usesDays: boolean; usesShifts?: boolean; numberSubs: boolean; diaChi: CauHinhDiaChi; tong: M.SheetTotals; vatPct: number; vat: number }) {
   const coDisc = a.tong.discount > 0;
   return {
     cong: (goc: HTMLElement): KetQuaXem => {
       const so = soDoDiaChi(a.diaChi);
-      const ct = congThucTongSheet(a.items, { groupSubtotal: a.groupSubtotal, usesDays: a.usesDays, numberSubs: a.numberSubs, La: chuCot(so, "_amount"), Lq: chuCot(so, "quantity") });
+      const ct = congThucTongSheet(a.items, { groupSubtotal: a.groupSubtotal, usesDays: a.usesDays, usesShifts: !!a.usesShifts, numberSubs: a.numberSubs, La: chuCot(so, "_amount"), Lq: chuCot(so, "quantity") });
       const luoi = goc.closest(".editor")?.querySelector("[data-luoi-chinh] table.excel-table");
       return { ...ct, oThamChieu: oLuoiTheoCongThuc(luoi, ct.congThuc, so, a.items.length) };
     },

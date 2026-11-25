@@ -311,7 +311,7 @@ export function InvoicesInPage({ me }: { me: Me }) {
                             <div className="inv-in-sub"><span className={`extra-cat-badge cat-${r.category}`}>{LOAI_BANG[r.category] ?? r.category}</span>{phu && <span>{phu}</span>}</div>
                           </td>
                           <td className="inv-in-ns">{r.ns || dash}</td>
-                          <td className="num nowrap">{fmtSoLuong(r.quantity)}{r.days != null && r.days > 0 ? <div className="inv-in-sub">× {fmtSoLuong(r.days)} ngày</div> : null}</td>
+                          <td className="num nowrap">{fmtSoLuong(r.quantity)}{r.days != null && r.days > 0 ? <div className="inv-in-sub">× {fmtSoLuong(r.days)} ngày</div> : null}{r.shifts != null && r.shifts > 0 ? <div className="inv-in-sub">× {fmtSoLuong(r.shifts)} ca</div> : null}</td>
                           <td className="num nowrap">{fmtMoney(r.unitPrice)}</td>
                           <td className="num nowrap"><strong>{fmtMoney(r.amount)}</strong></td>
                           <td className="inv-in-ct">

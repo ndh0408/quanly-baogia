@@ -22,7 +22,7 @@
 //
 // TIỀN dùng ĐÚNG `extraTableSum` (làm tròn từng dòng, `quantityExact`, days theo MẪU của bảng) — một bản tính
 // thứ hai ở đây là cách có hai con số cho cùng một khoản chi. Không bao giờ mang `paidProof` (ảnh ủy nhiệm chi).
-import { extraTableSum, bangNoiBoCoNgay, type MauBangNoiBo } from "./quoteUtils.js";
+import { extraTableSum, bangNoiBoCoNgay, bangNoiBoCoCa, type MauBangNoiBo } from "./quoteUtils.js";
 import { codeLabel, sheetCode, soMa } from "./quoteCode.js";
 import { daDuyetHangHn, dauDuyetHangHn } from "./hnDuyetHang.js";
 import {
@@ -55,6 +55,8 @@ export type HangDauVao = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "side"> &
   category: LoaiBangDauVao; tableName: string | null;
   rid: string | null; name: string; detail: string | null; unit: string | null;
   quantity: number; unitPrice: number; days: number | null; amount: number;
+  /** Số Ca — chỉ có khoá khi bảng dùng mẫu CINETOUR và hàng mang số (trang Hóa đơn đầu vào in "× N ca"). */
+  shifts?: number;
   ns: string | null; chungTu: "VAT" | "HDNS" | "TM" | null; luuKho: boolean;
   approvedAt: string | null; approvedByName: string | null;
   trangThaiHang: TrangThaiHangDauVao;
@@ -125,6 +127,7 @@ function dongTuAnhChup(p: {
     side, category: loai, tableName: chup?.tableName ?? null,
     rid: e.rid, name: chup?.name || "(không rõ tên)", detail: null, unit: chup?.unit ?? null,
     quantity: chup?.quantity ?? 0, unitPrice: chup?.unitPrice ?? 0, days: chup?.days ?? null, amount: chup?.amount ?? 0,
+    ...(chup?.shifts != null ? { shifts: chup.shifts } : {}),
     ns: null, chungTu: null, luuKho: false,
     approvedAt: null, approvedByName: null,
     trangThaiHang: p.trangThai,
@@ -175,6 +178,7 @@ export function hangHoaDonDauVao(p: {
       const loai = nhan(t);
       if (!loai || !Array.isArray(t.items)) return;
       const coNgay = bangNoiBoCoNgay(t, q.companyId, dsMau);
+      const coCa = bangNoiBoCoCa(t, q.companyId, dsMau);
       let cha = "";   // tên hạng mục gần nhất — dòng CON (ô gộp) có tên trống và thừa hưởng nó
       t.items.forEach((it: unknown, ii: number) => {
         if (!laBang(it)) return;
@@ -187,7 +191,7 @@ export function hangHoaDonDauVao(p: {
         // Hàng chưa đủ điều kiện chỉ vào danh sách khi đã có dữ liệu kế toán — nhóm "Cần chú ý".
         if (!dong && !e && !coDauVetJsonCu(it)) return;
         const trung = !!rid && (demRid[side].get(rid) ?? 0) > 1;
-        const amount = extraTableSum({ items: [it] }, coNgay);
+        const amount = extraTableSum({ items: [it] }, coNgay, coCa);
         const dto = dtoKhoanChi({ quoteId: q.id, side, rid: rid ?? "", entry: e, anh: anhCua(e), itJson: it, tienHienTai: amount, tenNguoi });
         out.push({
           ...goc,
@@ -199,6 +203,7 @@ export function hangHoaDonDauVao(p: {
           rid, name: ten ?? cha, detail: chu(it.detail), unit: chu(it.unit),
           quantity: Number(it.quantity) || 0, unitPrice: Number(it.unitPrice) || 0,
           days: coNgay && it.days != null ? Number(it.days) : null,
+          ...(coCa && it.shifts != null && Number.isFinite(Number(it.shifts)) ? { shifts: Number(it.shifts) } : {}),
           // Một dòng qua ĐÚNG hàm cộng bảng (category bỏ trống → không lọc "chỉ hàng đã duyệt": đã lọc ở đây rồi).
           amount,
           ns: chu(it.ns), chungTu: CHUNG_TU.has(String(it.chungTu)) ? (it.chungTu as "VAT" | "HDNS" | "TM") : null, luuKho: !!it.luuKho,

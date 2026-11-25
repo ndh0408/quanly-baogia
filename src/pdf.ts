@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
 import { nhanLamTronDong } from "./tienDong.js";
 import { ngayThangNamVN } from "./vnTime.js";
+import { getConfig } from "./templateConfigs.js";
 
 // Toán tiền GIỐNG HỆT lưới web + file Excel (shared/quote-math.ts, src/excel.ts). Khai cục bộ chứ
 // KHÔNG import shared/: runtime chạy tsx trên src/ nên "../shared/quote-math.js" không resolve được
@@ -24,11 +25,22 @@ function qtyExact(x: unknown) {
   return n < 0 ? -t : t;
 }
 const qtyForAmount = (it: any) => (it?.quantityExact ? qtyExact(it.quantity) : qtyRound(it?.quantity));
-const lineAmount = (it: any, usesDays: boolean) => {
+const lineAmount = (it: any, usesDays: boolean, usesShifts = false) => {
   const q = qtyForAmount(it), d = Number(it?.days) || 1, pr = Number(it?.unitPrice) || 0;
-  // Nhân CHÍNH XÁC (không qua double) — khớp src/money.ts từng đồng (XLSX-06).
+  // Nhân CHÍNH XÁC (không qua double) — khớp src/money.ts từng đồng (XLSX-06). Số Ca trống = 1 như Số Ngày.
+  if (usesShifts) { const s = Number(it?.shifts) || 1; return usesDays ? nhanLamTronDong(q, d, s, pr) : nhanLamTronDong(q, s, pr); }
   return usesDays ? nhanLamTronDong(q, d, pr) : nhanLamTronDong(q, pr);
 };
+/** Sheet có nhân Số Ngày / Số Ca không — suy từ DỮ LIỆU (dòng có số > 0), y phép của src/money.ts: máy chủ ép
+ *  days / shifts = null ở mẫu không có cột đó (chuanHoaSoNgayTheoMau — cả Số Ca) nên suy từ dòng là ra đúng
+ *  mẫu; và ô trống tính như 1 nên mẫu CÓ cột mà chưa ai điền cũng ra cùng số. */
+const coNhan = (items: any[], f: "days" | "shifts") => (items || []).some((it: any) => it && it[f] != null && Number(it[f]) > 0);
+/** IN cột Số Ca / Số Ngày ở bảng PDF: mẫu của sheet có cột đó (CINETOUR), hoặc dòng đang mang số. */
+function sheetCoCot(sh: any, f: "days" | "shifts"): boolean {
+  const code = sh?.template?.code || sh?.templateCode;
+  if (code) { try { if (getConfig(code)?.items?.columns?.[f]) return true; } catch { /* mẫu chưa có config */ } }
+  return coNhan(sh?.items || [], f);
+}
 // Hệ số nhóm: SL trống / 0 / âm → ×1, SL dương nhỏ hơn 1 nhân THẬT (chủ repo 2026-11-25, báo giá #108 "Cổng Aeon
 // BT" SL 0,5 "Chia 2" bị tính ×1). BẢN SAO của groupMult ở shared/quote-math.ts — sửa thì sửa CẢ.
 const groupMult = (it: any) => { const q = qtyForAmount(it); return q > 0 ? q : 1; };
@@ -38,12 +50,12 @@ function groupLetter(n: number) {
   return s;
 }
 // Tổng 1 sheet (chưa trừ Discount) — cùng luật với sheetSubtotalGrouped ở shared/quote-math.ts.
-export function sheetGross(items: any[], usesDays: boolean, groupSubtotal: boolean) {
+export function sheetGross(items: any[], usesDays: boolean, groupSubtotal: boolean, usesShifts = false) {
   let mult = 1, sum = 0;
   for (const it of items || []) {
     if (it?.kind === "section" || it?.kind === "subsection") { mult = groupSubtotal ? groupMult(it) : 1; continue; }
     if (it?.kind === "info") continue;
-    sum += lineAmount(it, usesDays) * mult;
+    sum += lineAmount(it, usesDays, usesShifts) * mult;
   }
   return Math.round(sum);
 }
@@ -58,9 +70,8 @@ export function sheetGross(items: any[], usesDays: boolean, groupSubtotal: boole
 export function pdfTotals(quote: any) {
   const vatPct = Number(quote?.vatPercent) || 0;
   const sheets = (quote?.sheets || []).map((sh: any) => {
-    // CÙNG phép suy với drawItemsTable (dòng có days > 0) — lệch là tiền lệch.
-    const usesDays = (sh?.items || []).some((it: any) => it && it.days != null && Number(it.days) > 0);
-    const gross = sheetGross(sh?.items || [], usesDays, !!sh?.groupSubtotal);
+    // CÙNG phép suy với drawItemsTable (dòng có days / shifts > 0) — lệch là tiền lệch.
+    const gross = sheetGross(sh?.items || [], coNhan(sh?.items, "days"), !!sh?.groupSubtotal, coNhan(sh?.items, "shifts"));
     const dRaw = Math.round(Number(sh?.discount) || 0);
     const discount = dRaw > 0 ? Math.min(dRaw, Math.max(0, gross)) : 0;
     return { gross, discount, net: gross - discount };
@@ -178,7 +189,7 @@ export async function renderQuotePdf(quote: any) {
         doc.moveDown(0.3);
         doc.font("bold").fontSize(11).text(nhan);
       }
-      drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal, { quoteNumber: quote.quoteNumber, sheetName: sh.name });
+      drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal, { quoteNumber: quote.quoteNumber, sheetName: sh.name }, { ca: sheetCoCot(sh, "shifts"), ngay: sheetCoCot(sh, "days") });
       runningIdx += (sh.items || []).filter((it: any) => it?.kind !== "section" && it?.kind !== "subsection" && it?.kind !== "info").length;
       const st = tt.sheets[i];
       if (st && quote.showTotals === false) {
@@ -243,12 +254,19 @@ function drawItemsTable(
   baseIdx: number,
   groupSubtotal: boolean,
   where: { quoteNumber?: string; sheetName?: string } = {},
+  cot: { ca?: boolean; ngay?: boolean } = {},
 ) {
+  // MẪU CINETOUR (cột SỐ CA): bảng in thêm cột "Số ca", và — chỉ ở mẫu này — cả "Số ngày" khi sheet có ngày, để
+  // khách đọc được SL × Ngày × Ca × Đơn giá = Thành tiền ngay trên giấy. Bề ngang bảng KHÔNG đổi (505pt): phần thêm
+  // lấy từ cột Hạng mục. Mẫu không có Số Ca giữ NGUYÊN bảng sáu cột như trước (kể cả mẫu có ngày — nằm ngoài việc này).
+  const inNgay = !!cot.ca && !!cot.ngay;
   const cols: { w: number; label: string; align: "left" | "center" | "right" | "justify" }[] = [
     { w: 30, label: "STT", align: "center" },
-    { w: 200, label: "Hạng mục", align: "left" },
+    { w: 200 - (cot.ca ? 40 : 0) - (inNgay ? 40 : 0), label: "Hạng mục", align: "left" },
     { w: 50, label: "ĐVT", align: "center" },
     { w: 50, label: "SL", align: "right" },
+    ...(inNgay ? [{ w: 40, label: "Số ngày", align: "right" as const }] : []),
+    ...(cot.ca ? [{ w: 40, label: "Số ca", align: "right" as const }] : []),
     { w: 80, label: "Đơn giá", align: "right" },
     { w: 95, label: "Thành tiền", align: "right" },
   ];
@@ -272,8 +290,8 @@ function drawItemsTable(
     return atY + 18;
   };
 
-  // Sheet dùng cột Số Ngày hay không — suy từ dữ liệu, vì PDF không in cột đó nhưng tiền phải nhân.
-  const usesDays = items.some((it) => it && it.days != null && Number(it.days) > 0);
+  // Sheet dùng cột Số Ngày / Số Ca hay không — suy từ dữ liệu như pdfTotals (tiền phải nhân dù cột có in hay không).
+  const usesDays = coNhan(items, "days"), usesShifts = coNhan(items, "shifts");
   // Tổng từng nhóm (Σ dòng con tới nhóm kế) để in Thành Tiền ở hàng nhóm, đúng như lưới web.
   const sectionSum: Record<number, number> = {};
   {
@@ -281,7 +299,7 @@ function drawItemsTable(
     items.forEach((it, i) => {
       if (it?.kind === "section" || it?.kind === "subsection") { cur = i; sectionSum[i] = 0; return; }
       if (it?.kind === "info") return;
-      if (cur >= 0) sectionSum[cur] += lineAmount(it, usesDays);
+      if (cur >= 0) sectionSum[cur] += lineAmount(it, usesDays, usesShifts);
     });
   }
 
@@ -347,7 +365,7 @@ function drawItemsTable(
     // Hệ số nhóm (SL nhóm, khi bật "Thành Tiền nhóm") chỉ áp ở HÀNG NHÓM bên dưới, không nhân vào
     // Thành Tiền từng mục — xem XLSX-02 ở nhánh mục thường.
 
-    let stt = "", text = String(it?.name || ""), unit = "", qtyS = "", priceS = "", amtS = "";
+    let stt = "", text = String(it?.name || ""), unit = "", qtyS = "", priceS = "", amtS = "", ngayS = "", caS = "";
     if (isGroup) {
       // Chữ nhóm LẤY TRƯỚC rồi mới tăng: groupLetter(0) = "A". Bản trước tăng trước nên nhóm đầu in
       // "B" trong khi Excel (sectionLetter, bắt đầu từ -1 rồi ++) và màn hình in "A" (XLSX-01).
@@ -365,7 +383,10 @@ function drawItemsTable(
       // KHÔNG nhân hệ số nhóm ở hàng MỤC (XLSX-02): Excel (ROUND(SL×ĐG)) và lưới web đều in Thành
       // Tiền mục = SL × ĐG, hệ số nhóm chỉ áp ở hàng NHÓM. Nhân ở đây làm dòng "1 × 100.000 = 300.000"
       // và tổng Thành Tiền các mục ≠ Đơn Giá nhóm. Khối tổng dùng pdfTotals nên không đổi.
-      amtS = fmt(lineAmount(it, usesDays));
+      amtS = fmt(lineAmount(it, usesDays, usesShifts));
+      // Ô trống in "1" — đúng thừa số đã nhân (Số Ngày / Số Ca trống = ×1), như ô Excel.
+      if (inNgay) ngayS = fmtNumCell(Number(it?.days) || 1);
+      if (cot.ca) caS = fmtNumCell(Number(it?.shifts) || 1);
     }
 
     // Chiều cao hàng phải ĐO THẬT chứ không đếm "\n": chữ được vẽ CÓ ràng bề rộng cột ngay bên
@@ -396,7 +417,9 @@ function drawItemsTable(
     manh.forEach((phan, mi) => {
       // Hàng NỐI chỉ mang phần chữ còn lại: STT / ĐVT / số lượng / đơn giá / thành tiền đã in ở
       // hàng đầu, lặp lại sẽ đọc thành nhiều dòng tiền khác nhau.
-      const vals = mi === 0 ? [stt, phan, unit, qtyS, priceS, amtS] : ["", phan, "", "", "", ""];
+      const dau = mi === 0 ? [stt, phan, unit, qtyS] : ["", phan, "", ""];
+      const giua = [...(inNgay ? [mi === 0 ? ngayS : ""] : []), ...(cot.ca ? [mi === 0 ? caS : ""] : [])];
+      const vals = [...dau, ...giua, ...(mi === 0 ? [priceS, amtS] : ["", ""])];
       doc.font(rowFont);
       const cellH = vals.map((v, i2) => doc.heightOfString(String(v), { width: cols[i2].w - 4 }));
       const textH = Math.max(...cellH);

@@ -24,6 +24,11 @@ export const BO_CUC_XUAT: string[][] = [
   ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount", "notes"],          // CLF / GN không ngày
   ["_stt", "name", "detail", "unit", "quantity", "days", "unitPrice", "_amount", "notes"],  // CLF có ngày
   ["_stt", "name", "unit", "quantity", "days", "unitPrice", "_amount", "notes"],            // GN có ngày
+  // Bốn mẫu CINETOUR (cột SỐ CA) — đặt SAU ba bố cục cũ: hoà điểm thì bố cục cũ đứng trước vẫn thắng như trước.
+  ["_stt", "name", "unit", "quantity", "shifts", "unitPrice", "_amount", "notes"],                    // GN CINETOUR không ngày
+  ["_stt", "name", "unit", "quantity", "days", "shifts", "unitPrice", "_amount", "notes"],            // GN CINETOUR có ngày
+  ["_stt", "name", "detail", "unit", "quantity", "shifts", "unitPrice", "_amount", "notes"],          // CLF CINETOUR không ngày
+  ["_stt", "name", "detail", "unit", "quantity", "days", "shifts", "unitPrice", "_amount", "notes"],  // CLF CINETOUR có ngày
 ];
 
 const so = (s: string | undefined): number | null => {
@@ -40,7 +45,7 @@ const so = (s: string | undefined): number | null => {
  *  mà mọi SL = 1 ("1 người × N ngày") hoà điểm với bố cục "không ngày" (Ngày đọc thành SL vẫn ra
  *  SL × ĐG = TT), bố cục đứng trước thắng → Chi Tiết "người", ĐVT "1", SL = số ngày (soát toàn diện L17). */
 export function diemBoCot(rows: string[][], roles: string[]): number {
-  const iq = roles.indexOf("quantity"), ip = roles.indexOf("unitPrice"), ia = roles.indexOf("_amount"), id = roles.indexOf("days");
+  const iq = roles.indexOf("quantity"), ip = roles.indexOf("unitPrice"), ia = roles.indexOf("_amount"), id = roles.indexOf("days"), ic = roles.indexOf("shifts");
   const iu = roles.indexOf("unit");
   if (iq < 0 || ip < 0 || ia < 0) return 0;
   let diem = 0;
@@ -50,7 +55,9 @@ export function diemBoCot(rows: string[][], roles: string[]): number {
     if (iu >= 0 && so(r[iu]) != null) continue;   // ĐVT đọc ra SỐ → bố cục lệch cột
     const d = id >= 0 ? so(r[id]) : null;
     if (id >= 0 && d == null && String(r[id] ?? "").trim() !== "") continue;   // ô Ngày có chữ → sai bố cục
-    const ky = q * p * (d || 1);
+    const c = ic >= 0 ? so(r[ic]) : null;
+    if (ic >= 0 && c == null && String(r[ic] ?? "").trim() !== "") continue;   // ô Số Ca có chữ → sai bố cục
+    const ky = q * p * (d || 1) * (c || 1);
     // Số Lượng hiển thị đã làm tròn (1 số lẻ) nên Thành Tiền có thể lệch vài phần trăm.
     if (Math.abs(ky - a) <= Math.max(1, Math.abs(a) * 0.03)) diem++;
   }

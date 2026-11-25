@@ -86,6 +86,12 @@ everything from `0_init` directly.
   nhận nhau. **Expand-only, chỉ DDL**, không đụng dữ liệu; app cũ chạy tiếp được. Dữ liệu cũ (mã cấp lúc tạo, liên kết
   phiên bản qua projectCode) dọn bằng công cụ chạy tay `node dist/tools/donMaDuAn.js` — runbook
   `docs/operations/DON_MA_DU_AN.md`. Lùi schema chỉ khi chưa có bản nháp phiên bản nào tạo bằng app mới (mất liên kết gốc).
+- `20261125090200_quote_item_shifts` — cột SỐ CA của mẫu CINETOUR: `QuoteItem.shifts DECIMAL(10,2)` NULL được, không
+  DEFAULT (cùng kiểu với `days`). **Thuần thêm cột** — NULL = ×1 nên tiền mọi báo giá đang có không đổi; bản app CŨ
+  chạy tiếp được (không biết cột). Lùi schema chỉ khi chưa hạng mục nào mang số ca.
+- `20261125090300_cinetour_templates` — bốn mẫu CINETOUR (`gn_cinetour`, `gn_cinetour_conngay`, `clofull_cinetour`,
+  `clofull_cinetour_conngay`): `INSERT … ON CONFLICT (code) DO NOTHING`, tra công ty theo MÃ (`gia_nguyen`, `clofull`).
+  Chạy lại không nhân đôi; CSDL chưa seed thì không chèn gì. Tệp mẫu dựng bằng `node scripts/dung-mau-cinetour.mjs`.
 
 ### Drift ĐƯỢC PHÉP — danh sách ĐÍCH DANH, do NOT drop
 

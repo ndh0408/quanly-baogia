@@ -117,9 +117,11 @@ function donCauTruc(tables: unknown) {
  * (src/quoteUtils.ts) cộng TÊN + MẪU của bảng chứa nó (đổi mẫu là đổi luật nhân Số Ngày, tức đổi tiền; tên bảng
  * đi theo dòng ra trang Hóa đơn đầu vào). `coNgay` = mẫu của bảng có cột Số Ngày không: không có thì Số Ngày không
  * vào tiền, và web gửi `days: null` cho bảng đó — so nguyên văn là khoá oan một hàng cũ còn days trong CSDL.
+ * `coCa` = cùng ý cho cột SỐ CA (mẫu CINETOUR); khoá `shifts` chỉ góp vào vân tay khi hàng CÓ số ca — vân tay của mọi
+ * hàng không có Số Ca giữ nguyên như trước khi có cột này.
  * Không gồm `rid`, `approved*`, `paid*`, công thức (kết quả công thức đã nằm trong số).
  */
-export function vanTayHangHn(it: Record<string, any>, t: Record<string, any> | null | undefined, coNgay = true, boCotNoiBo = false): string {
+export function vanTayHangHn(it: Record<string, any>, t: Record<string, any> | null | undefined, coNgay = true, boCotNoiBo = false, coCa = true): string {
   return JSON.stringify([
     t?.name ? String(t.name).trim() : null,
     t?.templateId != null && Number(t.templateId) ? Number(t.templateId) : null,
@@ -128,6 +130,7 @@ export function vanTayHangHn(it: Record<string, any>, t: Record<string, any> | n
     coNgay && it?.days != null ? Number(it.days) : null,
     it?.notes ?? null,
     ...(boCotNoiBo ? [] : [it?.ns ?? null, !!it?.luuKho, it?.chungTu ?? null]),
+    ...(coCa && it?.shifts != null ? [{ ca: Number(it.shifts) }] : []),
   ]);
 }
 
@@ -195,15 +198,19 @@ export function reconcileTrangThaiHn(
   pl: unknown,
   db: unknown,
   q: PhanHn | null | undefined,
-  opts: { khoaChoDuyet?: boolean; moCotNoiBo?: boolean; coNgayDb?: (t: Record<string, any>) => boolean; coNgayPl?: (t: Record<string, any>) => boolean } = {},
+  opts: { khoaChoDuyet?: boolean; moCotNoiBo?: boolean; coNgayDb?: (t: Record<string, any>) => boolean; coNgayPl?: (t: Record<string, any>) => boolean;
+    /** Mẫu của bảng có cột SỐ CA không (CSDL / payload) — như coNgay*. Không truyền = có (Số Ca, nếu hàng mang, vào vân tay). */
+    coCaDb?: (t: Record<string, any>) => boolean; coCaPl?: (t: Record<string, any>) => boolean } = {},
 ) {
   const coNgayDb = opts.coNgayDb ?? (() => true);
   const coNgayPl = opts.coNgayPl ?? coNgayDb;
+  const coCaDb = opts.coCaDb ?? (() => true);
+  const coCaPl = opts.coCaPl ?? coCaDb;
   type Truoc = { tt: TrangThaiHangHn; dau: ReturnType<typeof dauDuyetHangHn>; van: string; ten: string };
   const theoRid = new Map<string, Truoc>();
   const theoViTri = new Map<string, Truoc>();
   for (const { t, it, ten, ti, ii } of hangTienHn(db)) {
-    const rec: Truoc = { tt: trangThaiHangHn(it, q), dau: dauDuyetHangHn(it, q), van: vanTayHangHn(it, t, coNgayDb(t), !!opts.moCotNoiBo), ten };
+    const rec: Truoc = { tt: trangThaiHangHn(it, q), dau: dauDuyetHangHn(it, q), van: vanTayHangHn(it, t, coNgayDb(t), !!opts.moCotNoiBo, coCaDb(t)), ten };
     const r = chu(it.rid);
     if (r) { if (!theoRid.has(r)) theoRid.set(r, rec); } else theoViTri.set(`${ti}:${ii}`, rec);
   }
@@ -216,7 +223,7 @@ export function reconcileTrangThaiHn(
     if (p && daDung.has(p)) p = undefined;          // bản sao thứ hai của cùng một hàng → hàng mới
     if (p) {
       daDung.add(p);
-      if (khoa(p.tt) && vanTayHangHn(it, t, coNgayPl(t), !!opts.moCotNoiBo) !== p.van) biSua.push(ten || p.ten);
+      if (khoa(p.tt) && vanTayHangHn(it, t, coNgayPl(t), !!opts.moCotNoiBo, coCaPl(t)) !== p.van) biSua.push(ten || p.ten);
       ganTrangThai(it, p.tt, p.dau);
     } else {
       ganTrangThai(it, "dang-lam", { approvedAt: null, approvedBy: null, lyDoTra: null });
@@ -295,21 +302,25 @@ export function apThaoTacHangHn(tables: unknown, loai: ThaoTacHangHn, opt: { rid
  */
 export function loiKhoaHangNoiBoDaDuyet(
   finalTables: unknown, dbTables: unknown,
-  opts: { moCotNoiBo?: boolean; coNgayDb?: (t: Record<string, any>) => boolean; coNgayPl?: (t: Record<string, any>) => boolean } = {},
+  opts: { moCotNoiBo?: boolean; coNgayDb?: (t: Record<string, any>) => boolean; coNgayPl?: (t: Record<string, any>) => boolean;
+    /** Mẫu của bảng có cột SỐ CA không (CSDL / payload) — như coNgay*. Không truyền = có (Số Ca, nếu hàng mang, vào vân tay). */
+    coCaDb?: (t: Record<string, any>) => boolean; coCaPl?: (t: Record<string, any>) => boolean } = {},
 ): (Error & { status: number; code: string }) | null {
   const coNgayDb = opts.coNgayDb ?? (() => true);
   const coNgayPl = opts.coNgayPl ?? coNgayDb;
+  const coCaDb = opts.coCaDb ?? (() => true);
+  const coCaPl = opts.coCaPl ?? coCaDb;
   const LOAI = new Set(["hcm", "khach"]);
   const cuaLoai = (tables: unknown) => (Array.isArray(tables) ? tables : []).filter((x: any) => x && LOAI.has(x.category));
   // Hàng CŨ ghi trước khi sanitize chuẩn hoá số (không có quantity / unitPrice trong JSON): không có số tiền để so —
   // MỞ phần tiền (cùng luật fail-open của chốt duyệt / đã chi cũ, tests/extra-paid-preserved), vẫn khoá phần còn lại.
-  const boTien = (it: Record<string, any>) => ({ ...it, quantity: null, unitPrice: null, days: null, quantityExact: null });
+  const boTien = (it: Record<string, any>) => ({ ...it, quantity: null, unitPrice: null, days: null, shifts: null, quantityExact: null });
   const truoc = new Map<string, { van: string; ten: string; khongTien: boolean }>();
   for (const { t, it, ten } of hangTienHn(cuaLoai(dbTables))) {
     const r = chu(it.rid);
     if (!r || it.approved !== true || truoc.has(r)) continue;
     const khongTien = it.quantity == null && it.unitPrice == null;
-    truoc.set(r, { van: vanTayHangHn(khongTien ? boTien(it) : it, null, coNgayDb(t), !!opts.moCotNoiBo), ten, khongTien });
+    truoc.set(r, { van: vanTayHangHn(khongTien ? boTien(it) : it, null, coNgayDb(t), !!opts.moCotNoiBo, coCaDb(t)), ten, khongTien });
   }
   if (!truoc.size) return null;
   const daThay = new Set<string>();
@@ -319,7 +330,7 @@ export function loiKhoaHangNoiBoDaDuyet(
     if (!r || daThay.has(r)) continue;
     daThay.add(r);
     const p = truoc.get(r);
-    if (p && it.approved === true && vanTayHangHn(p.khongTien ? boTien(it) : it, null, coNgayPl(t), !!opts.moCotNoiBo) !== p.van) biSua.push(ten || p.ten);
+    if (p && it.approved === true && vanTayHangHn(p.khongTien ? boTien(it) : it, null, coNgayPl(t), !!opts.moCotNoiBo, coCaPl(t)) !== p.van) biSua.push(ten || p.ten);
   }
   const biXoa = [...truoc.entries()].filter(([r]) => !daThay.has(r)).map(([, p]) => p.ten);
   if (!biSua.length && !biXoa.length) return null;

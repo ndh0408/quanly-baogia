@@ -30,6 +30,9 @@ import { congThucTongSheet } from "../lib/congThucTong";
 export type GridTableProps = {
   items: ItemK[];
   usesDays: boolean;
+  /** Mẫu CINETOUR (`layout.hasShifts`): cột SỐ CA ngay sau Số Ngày (hoặc Số Lượng), Thành Tiền nhân thêm Số Ca — trống
+   *  / 0 = ×1 y như Số Ngày. Không khai = mẫu không có cột (mọi lưới cũ không đổi một byte). */
+  usesShifts?: boolean;
   showDetail: boolean;
   /** Mẫu TỪNG có cột Chi Tiết (nay ẩn) → sơ đồ địa chỉ ô A1 vẫn chừa 1 cột cho nó, để công thức
    *  đã lưu của báo giá cũ (=F3*E3…) không bị dịch cột. Mặc định = showDetail. */
@@ -119,7 +122,7 @@ const KEEP_SEL = ".excel-table, .tbl-scroll, .fx-bar, .vs-auto, .fx-auto, .grid-
 // Hàng NHÓM/NHÓM CON có ô TÍNH (đơn giá, số lượng…) — không có <input data-f> để bám vào, phải dò
 // theo CLASS cột. Nhờ vậy vùng chọn kéo qua nhóm vẫn liền mạch và công thức nhóm cha =SUM(F2,F5)
 // sáng được ô đơn giá của các nhóm con.
-const CALC_COL_CLASS: Record<string, string> = { unitPrice: ".col-price", quantity: ".col-qty", days: ".col-qty", name: ".col-hangmuc", detail: ".col-detail", unit: ".col-dvt", notes: ".col-notes" };
+const CALC_COL_CLASS: Record<string, string> = { unitPrice: ".col-price", quantity: ".col-qty", days: ".col-qty", shifts: ".col-qty", name: ".col-hangmuc", detail: ".col-detail", unit: ".col-dvt", notes: ".col-notes" };
 
 /** Dò <td> của một cột TRONG MỘT HÀNG đã biết — tách khỏi tdOf để tô vùng khỏi phải tìm lại hàng. */
 export function tdIn(tr: Element | null | undefined, field: string): HTMLElement | null {
@@ -272,7 +275,7 @@ const CAT_DA_XONG = new Set<string>();
 
 function GridTableInner(props: GridTableProps) {
   const { khoaHang, moCotNoiBoKhiKhoa, oDuyet, duyetSig } = props;
-  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, daChi, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
+  const { items, usesDays, usesShifts = false, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, daChi, cotNoiBo, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   const idLyDoKhoaNhom = useId();   // nối ô tích "Thành Tiền nhóm" với dòng giải thích khi bị khoá (nhiều lưới/trang → id riêng)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
@@ -365,10 +368,10 @@ function GridTableInner(props: GridTableProps) {
   // mang theo được "hàng này là nhóm hay mục", dán xuống dựng lại đúng cấu trúc.
   // LƯU Ý: FIELDS chỉ là danh sách cột ĐIỀU HƯỚNG, hoàn toàn tách khỏi ADDR (sơ đồ chữ cái cột) —
   // thêm cột ở đây KHÔNG dịch chữ cái nào nên công thức đã lưu của báo giá cũ vẫn trỏ đúng.
-  const FIELDS = (["_stt", "name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null, cotNoiBo ? "ns" : null].filter(Boolean)) as string[];
+  const FIELDS = (["_stt", "name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, usesShifts ? "shifts" : null, "unitPrice", "notes", internalNote ? "internalNote" : null, cotNoiBo ? "ns" : null].filter(Boolean)) as string[];
   const RO_FIELDS = new Set(["_stt", "_amount"]);   // chọn/copy được, cấm ghi vào model
   const DATA_FIELD_COUNT = FIELDS.length - 1;       // số cột DỮ LIỆU (không tính _stt) — cho nhận dạng khối dán
-  const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
+  const NUMERIC = new Set(["quantity", "unitPrice", "days", "shifts"]);
   // Khối (danh sách trường) đang mang "CÁI HẠNG MỤC" — cột Hạng Mục ĐI KÈM ít nhất một cột tiền (SL / Số
   // ngày / Đơn giá): chép / cắt khối đó là chuyển cả dòng chi phí sang chỗ khác. Ba trường bảng nội bộ
   // (NS · CHỨNG TỪ · LƯU KHO) mô tả chính dòng chi phí ấy (ai ứng, hoá đơn gì, có vào kho không) nên đi
@@ -437,7 +440,7 @@ function GridTableInner(props: GridTableProps) {
         chuCua[i] = items[i].kind === "subsection" ? curSection : -1;
       } else if (rk[i] === "head" || rk[i] === "sub") {
         chuCua[i] = curSection; chuConCua[i] = curSub;
-        const amt = M.lineAmount(items[i], usesDays);
+        const amt = M.lineAmount(items[i], usesDays, usesShifts);
         const parent = curSub >= 0 ? curSub : curSection;
         if (parent >= 0) tong[parent] += amt;
         if (numberSubs && curSub >= 0 && curSection >= 0) tong[curSection] += amt;   // banner: dồn lên nhóm cha
@@ -494,7 +497,7 @@ function GridTableInner(props: GridTableProps) {
 
   // ── A1 addressing + công thức ───────────────────────────────────────────────
   // Sơ đồ chữ cái cột sống ở lib/soDoDiaChi — khối tổng của màn soạn (CongThucTong) viết công thức bằng CHÍNH sơ đồ này.
-  const ADDR = soDoDiaChi({ giuChiTiet: keepDetailSlot, usesDays, internalNote, cotNoiBo: !!cotNoiBo });
+  const ADDR = soDoDiaChi({ giuChiTiet: keepDetailSlot, usesDays, usesShifts, internalNote, cotNoiBo: !!cotNoiBo });
   const colByL: Record<string, { f: string }> = {}; ADDR.forEach((c) => { colByL[c.L] = c; });
   const idxOfL = (L: string) => ADDR.findIndex((c) => c.L === L);
   const letterOf = (f: string) => ADDR.find((c) => c.f === f)?.L || "";
@@ -523,7 +526,7 @@ function GridTableInner(props: GridTableProps) {
       const tong = t.tong[p.row] || 0;
       return p.f === "unitPrice" ? tong : (groupSubtotal ? tong * M.groupMult(items[p.row]) : 0);
     }
-    if (p.f === "_amount") return (laNhom || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays); if (p.f === "_stt") return 0;
+    if (p.f === "_amount") return (laNhom || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays, usesShifts); if (p.f === "_stt") return 0;
     // SỐ LƯỢNG: trả số ĐÃ LÀM TRÒN đúng như ô đang hiển thị (qtyRound 1 số lẻ, hoặc 4 số lẻ với
     // dòng quantityExact nạp từ Excel). Trước đây trả số THÔ nên =E3*G3 nhân 7,4213 trong khi ô
     // hiện 7,4 và Thành Tiền của hàng (lineAmount → qtyForAmount) nhân 7,4 → hai con số lệch nhau.
@@ -532,6 +535,7 @@ function GridTableInner(props: GridTableProps) {
     // và bộ tự kiểm máy chủ (editorCellNum). Đọc 0 thì "=E1*50000" ra 0 trên app, tệp Excel tính lại ra
     // 50.000 nên máy chủ phải ghi số chết thay cho công thức sống (L35).
     if (p.f === "days") return Number(it.days) || 1;
+    if (p.f === "shifts") return Number(it.shifts) || 1;   // SỐ CA trống đọc là 1 — cùng luật Số Ngày ngay trên
     if (NUMERIC.has(p.f)) return Number(it[p.f]) || 0; return M.parseVN((it[p.f] as string) || ""); };
   /** Bộ giải tham chiếu GẮN với hàng đang hỏi — cần `hangGoi` để bắt vòng lặp, và cho truyền sẵn
    *  `tn` để một lượt `recomputeAll` không phải dựng lại bảng tổng cho từng ô. */
@@ -644,15 +648,17 @@ function GridTableInner(props: GridTableProps) {
   };
   const ngayDaKhoiPhucRef = useRef<ItemK[] | null>(null);
   useEffect(() => {
-    if (!usesDays || ngayDaKhoiPhucRef.current === items) return;
+    if ((!usesDays && !usesShifts) || ngayDaKhoiPhucRef.current === items) return;
     ngayDaKhoiPhucRef.current = items;
-    const thieu = items.some((it) => it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info" && it.days == null && !!it.formulas?.days);
+    const thieu = items.some((it) => it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info"
+      && ((usesDays && it.days == null && !!it.formulas?.days) || (usesShifts && it.shifts == null && !!it.formulas?.shifts)));
     if (!thieu) return;
     // Mẫu không-ngày lưu days=null nhưng giữ công thức ngày. Khi mở lại mẫu có-ngày,
     // tính lại trước lần xuất/lưu kế tiếp; nhánh thường không tính lại lúc mở để giữ số đã lưu.
-    const truoc = items.map((it) => it.days);
+    // Số Ca y hệt: mẫu không có cột Số Ca lưu shifts=null (máy chủ ép) nhưng giữ công thức của ô đó.
+    const truoc = items.map((it) => [it.days, it.shifts]);
     recomputeAll(undefined, true);
-    if (items.some((it, i) => it.days !== truoc[i])) onChange();
+    if (items.some((it, i) => it.days !== truoc[i][0] || it.shifts !== truoc[i][1])) onChange();
   });
   /* ── MỞ LƯỚI: CÔNG THỨC ĐÃ LƯU KHÔNG TÍNH ĐƯỢC PHẢI ĐỎ NGAY (soát toàn diện đợt 3) ──────────────
      Cờ đỏ chỉ sống trong phiên (zod máy chủ bỏ `_fxLoi`), còn lúc dựng lưới KHÔNG chạy recomputeAll —
@@ -1106,7 +1112,7 @@ function GridTableInner(props: GridTableProps) {
   // ô số copy giá trị THÔ (US, không gom nghìn) để Excel nhận; công thức copy nguyên "=…".
   const cellRawForCopy = (i: number, f: string) => { const it = items[i] as Record<string, unknown>;
     if (f === "_stt") return sttText[i] || "";
-    if (f === "_amount") return rk[i] === "section" ? String(M.fmtNumCell(sectionSum[i] || 0)) : String(M.fmtNumCell(M.lineAmount(items[i], usesDays))); const fx = (it.formulas as Record<string, string> | undefined)?.[f]; if (fx) return fx; if (NUMERIC.has(f)) { const v = it[f]; return v ? String(v) : ""; } return (it[f] as string) || ""; };
+    if (f === "_amount") return rk[i] === "section" ? String(M.fmtNumCell(sectionSum[i] || 0)) : String(M.fmtNumCell(M.lineAmount(items[i], usesDays, usesShifts))); const fx = (it.formulas as Record<string, string> | undefined)?.[f]; if (fx) return fx; if (NUMERIC.has(f)) { const v = it[f]; return v ? String(v) : ""; } return (it[f] as string) || ""; };
   const onCopyCut = (e: { clipboardData: DataTransfer; preventDefault(): void }, cut: boolean) => {
     flushSoft();
     const sel = selRef.current; const rc = rectOf(sel); if (!rc) return;
@@ -1321,7 +1327,7 @@ function GridTableInner(props: GridTableProps) {
   const xoa = (at: number, n: number) => removeRows(items as unknown as RowLike[], at, n, adjustRefsForRowEdit);
   // Chèn/xoá hàng huỷ chế độ cắt đang chờ (như Excel): toạ độ viền nét đứt đã lệch khỏi hàng nguồn (L7).
   const pushItem = (it: ItemK) => { pushUndo(); cancelCut(); it._k = nextK(); const at = insertIndex(); chen(at, [it]); recomputeAll(); onChange(); focusCell(at, "name"); };
-  const addItem = () => pushItem(M.blankItem(usesDays));
+  const addItem = () => pushItem(M.blankItem(usesDays, usesShifts));
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
@@ -1375,7 +1381,7 @@ function GridTableInner(props: GridTableProps) {
     pushUndo(); cancelCut();
     const at = insertIndex();
     const rows = list.map((en) => {
-      const it = M.blankItem(usesDays) as ItemK; it._k = nextK();
+      const it = M.blankItem(usesDays, usesShifts) as ItemK; it._k = nextK();
       fillItemFromEntry(it as unknown as Record<string, unknown>, en);
       return it;
     });
@@ -1740,7 +1746,7 @@ function GridTableInner(props: GridTableProps) {
       // Công thức trong khối mang địa chỉ Ô THEO FILE EXCEL → TỰ DỊCH sang toạ độ web (verify bằng
       // Thành Tiền của khối); ca không chắc → giữ công thức gốc + cờ _fxWarn (ô ĐỎ để sửa tay).
       retargetPastedFormulas(rebuilt, rows, roles, { webLetter: (role) => letterOf(role) || null, baseRow: startRow });
-      const built = rebuilt.map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
+      const built = rebuilt.map((b) => ({ ...M.blankItem(usesDays, usesShifts), ...b, _k: nextK() } as ItemK));
       // Bảng nội bộ: hàng dựng lại là object MỚI nên NS · CHỨNG TỪ · LƯU KHO của hàng bị thay mất hết, kể cả khi
       // khối dán lại ĐÚNG hạng mục đó để sửa giá. Clipboard ngoài không chở ba trường → xét danh tính như đường
       // dán khối bên dưới: CÙNG tên thì vẫn là hạng mục đó, giữ; khác tên thì về mặc định; hàng nhóm / dòng thông
@@ -1757,7 +1763,7 @@ function GridTableInner(props: GridTableProps) {
         });
       }
       items.splice(startRow, rows.length, ...built);
-      if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
+      if (!items.length) { const nit = M.blankItem(usesDays, usesShifts) as ItemK; nit._k = nextK(); items.push(nit); }
       autoEnableGroupSub(startRow, startRow + built.length - 1);
       recomputeAll(); onChange();
       selRef.current = { anchor: { row: startRow, field: FIELDS[COL_NAME] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
@@ -1773,7 +1779,7 @@ function GridTableInner(props: GridTableProps) {
     // Khối nhiều ô. Dán vào hàng NHÓM → chèn hàng mới phía dưới (không đè nhóm).
     const startKind = items[startRow]?.kind;
     if (startKind === "section" || startKind === "subsection") {
-      chen(startRow + 1, rows.map(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); return nit; }));
+      chen(startRow + 1, rows.map(() => { const nit = M.blankItem(usesDays, usesShifts) as ItemK; nit._k = nextK(); return nit; }));
       // GIỮ cột đang chọn (soát toàn diện L13): bản cũ ép về Hạng Mục, nên chép SL + ĐG rồi dán vào ô SL
       // của nhóm thì số rơi vào Hạng Mục / ĐVT, SL/ĐG = 0. Ô chọn ở cột chỉ đọc (STT/TT) đã được đưa về
       // Hạng Mục ở đầu onPaste; khối nguyên hàng ghép theo tên trường nên không phụ thuộc startCol.
@@ -1837,7 +1843,7 @@ function GridTableInner(props: GridTableProps) {
     // chặn biên theo items.length; nới dần từng hàng thì công thức ở hàng đầu khối trỏ xuống hàng SẮP
     // dán (copy A "=E2*2" + B, dán vào hàng cuối) bị coi là ra ngoài bảng và kẹt "=E2*2" — dù dán xong
     // hàng đó có thật và Excel cho "=E4*2".
-    while (items.length < startRow + rows.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
+    while (items.length < startRow + rows.length) { const nit = M.blankItem(usesDays, usesShifts) as ItemK; nit._k = nextK(); items.push(nit); }
     // Trường đích của cột thứ c trong khối.
     // Khối phủ NGUYÊN HÀNG (bắt đầu từ cột STT) → ghép cột theo TÊN TRƯỜNG, không theo vị trí:
     // sheet nguồn và sheet đích có thể khác mẫu (bên có cột Chi Tiết / Số Ngày, bên không).
@@ -1877,6 +1883,7 @@ function GridTableInner(props: GridTableProps) {
       else if (it.kind === "info" && cells.some((v, c) => { const f = truongDich(c); return !!f && f !== "name" && !RO_FIELDS.has(f) && String(v ?? "").trim() !== ""; })) {
         it.kind = "item";
         if (usesDays && it.days == null) it.days = 1;
+        if (usesShifts && it.shifts == null) it.shifts = 1;
       }
       // Nhãn nhóm người dùng TỰ đặt thì mang theo; nhãn tự động (A/B/1/2) để render tính lại theo vị trí mới.
       if (labels && labels[r]) it.label = labels[r];
@@ -2158,7 +2165,7 @@ function GridTableInner(props: GridTableProps) {
       }
       // Shift+Enter = đi LÊN (Excel). Xuống dòng trong ô nhiều dòng = Alt+Enter (xử lý ở trên).
       if (e.shiftKey) { if (coDoi) onChange(); moveTo(i - 1, f, false); return; }
-      if (i >= items.length - 1) { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); focusCell(i + 1, f); onChange(); }
+      if (i >= items.length - 1) { pushUndo(); const nit = M.blankItem(usesDays, usesShifts) as ItemK; nit._k = nextK(); items.push(nit); focusCell(i + 1, f); onChange(); }
       else { if (coDoi) onChange(); moveTo(i + 1, f, false); }
       return;
     }
@@ -2174,7 +2181,7 @@ function GridTableInner(props: GridTableProps) {
       e.preventDefault(); e.stopPropagation();
       if (e.key === "-") {
         const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1;
-        const xoaNgay = () => { pushUndo(); cancelCut(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); };
+        const xoaNgay = () => { pushUndo(); cancelCut(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays, usesShifts) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); };
         // Nhiều hàng (vd Ctrl+A rồi Ctrl+- định thu nhỏ trang) → hỏi trước, như hộp Delete của Excel.
         // Hộp còn treo mà lưới đã gỡ (rời trình soạn, đổi báo giá/sheet) hay đã nhận mảng items MỚI (nạp
         // lại sau Lưu) thì xác nhận KHÔNG làm gì: closure cũ sẽ xoá hàng trên mảng cũ rồi gọi onChange →
@@ -2182,7 +2189,7 @@ function GridTableInner(props: GridTableProps) {
         if (n > 1) { const itemsLucMo = items; void confirmModal("Xóa nhiều hàng", `Xóa ${n} hàng đang chọn? (Ctrl+Z hoàn tác được)`, { danger: true, confirmText: `Xóa ${n} hàng` }).then((ok) => { if (ok && conGanRef.current && itemsNayRef.current === itemsLucMo) xoaNgay(); }); }
         else xoaNgay();
       }
-      else { pushUndo(); cancelCut(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
+      else { pushUndo(); cancelCut(); const nit = M.blankItem(usesDays, usesShifts) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
       return;
     }
     const uz = undoRedoKey(ctrl, e.shiftKey, e.key);
@@ -2447,7 +2454,7 @@ function GridTableInner(props: GridTableProps) {
     // thành "," thập phân VN. Trước đây liveFormat coi mọi "." là dấu nghìn và XOÁ nó: gõ "2.5" ra 25.
     // Chỉ khi đúng phím vừa gõ là "." (inputType insertText) — xoá một chữ số nằm sau dấu chấm nghìn
     // của "1.500" thì dấu chấm đó vẫn là dấu nghìn. ĐƠN GIÁ không đổi: "250.000" gõ tay là tiền có dấu nghìn.
-    const rawSo = vuaGo === "." && (f === "quantity" || f === "days") && before > 0 && raw[before - 1] === "." && !raw.includes(",")
+    const rawSo = vuaGo === "." && (f === "quantity" || f === "days" || f === "shifts") && before > 0 && raw[before - 1] === "." && !raw.includes(",")
       ? raw.slice(0, before - 1) + "," + raw.slice(before)
       : raw;
     const formatted = M.liveFormat(rawSo);
@@ -2465,7 +2472,7 @@ function GridTableInner(props: GridTableProps) {
     const k = items[i].kind;
     if (k !== "section" && k !== "subsection" && k !== "info") {
       const amtTd = tdOf(i, "_amount");
-      if (amtTd) { amtTd.textContent = M.fmtNumCell(M.lineAmount(items[i], usesDays)); amtTayRef.current.add(i); }
+      if (amtTd) { amtTd.textContent = M.fmtNumCell(M.lineAmount(items[i], usesDays, usesShifts)); amtTayRef.current.add(i); }
     }
     onChangeSoft(true);
   };
@@ -2522,7 +2529,7 @@ function GridTableInner(props: GridTableProps) {
     if (i < 0) return;
     h.bam(el.getAttribute("data-xl") || "", i, el);
   }, []);
-  const numInput = (i: number, f: "quantity" | "unitPrice" | "days") => {
+  const numInput = (i: number, f: "quantity" | "unitPrice" | "days" | "shifts") => {
     const it = items[i]; const fx = it.formulas?.[f]; const val = fmtField(i, f, it[f]);
     // KEY CỐ ĐỊNH (chỉ _k+field): KHÔNG để công thức/giá-trị lật key gây REMOUNT (mất focus khi gõ đè).
     // Hiển thị (kết quả công thức / giá trị sau dán-undo) đồng bộ qua paintCells ở effect (như SPA).
@@ -2596,7 +2603,7 @@ function GridTableInner(props: GridTableProps) {
     if (amtTayRef.current.size) {
       for (const i of amtTayRef.current) {
         const it = items[i]; if (!it || it.kind === "section" || it.kind === "subsection" || it.kind === "info") continue;
-        const td = tdOf(i, "_amount"); const want = M.fmtNumCell(M.lineAmount(it, usesDays));
+        const td = tdOf(i, "_amount"); const want = M.fmtNumCell(M.lineAmount(it, usesDays, usesShifts));
         if (td && td.textContent !== want) td.textContent = want;
       }
       amtTayRef.current.clear();
@@ -2655,6 +2662,7 @@ function GridTableInner(props: GridTableProps) {
       { ideal: 80, floor: 54 },                                  // ĐVT
       { ideal: 90, floor: 62 },                                  // SỐ LƯỢNG
       ...(usesDays ? [{ ideal: 80, floor: 54 }] : []),           // SỐ NGÀY
+      ...(usesShifts ? [{ ideal: 70, floor: 50 }] : []),         // SỐ CA (mẫu CINETOUR)
       { ideal: 130, floor: 92 },                                 // ĐƠN GIÁ — "1.293.500" cần ~88px
       { ideal: 140, floor: 96 },                                 // THÀNH TIỀN
       { ideal: 150, floor: 96 },                                 // GHI CHÚ
@@ -2687,6 +2695,7 @@ function GridTableInner(props: GridTableProps) {
     const dvt = w(fixed[k++]);
     const qty = w(fixed[k++]);
     const days = usesDays ? w(fixed[k++]) : 0;
+    const ca = usesShifts ? w(fixed[k++]) : 0;
     const price = w(fixed[k++]);
     const amount = w(fixed[k++]);
     const notes = w(fixed[k++]);
@@ -2704,6 +2713,7 @@ function GridTableInner(props: GridTableProps) {
       { w: dvt, min: dvt },
       { w: qty, min: qty },
       ...(usesDays ? [{ w: days, min: days }] : []),
+      ...(usesShifts ? [{ w: ca, min: ca }] : []),
       { w: price, min: price },
       { w: amount, min: amount },
       { w: notes, min: notes },
@@ -2715,7 +2725,7 @@ function GridTableInner(props: GridTableProps) {
       ...(editable ? [{ w: act, min: act }] : []),
     ];
     return cols;
-  }, [wrapW, showDetail, usesDays, internalNote, cotNoiBo, showImages, approveCol, payCol, editable]);
+  }, [wrapW, showDetail, usesDays, usesShifts, internalNote, cotNoiBo, showImages, approveCol, payCol, editable]);
   // Hẹp hơn tổng min → .tbl-scroll CUỘN NGANG thay vì bóp méo. Trước đây .excel-table chỉ có
   // min-width bên trong @media (max-width:920px) nên desktop không hề có chốt chặn nào.
   const tableMinW = COLS.reduce((a, c) => a + c.min, 0);
@@ -2752,12 +2762,12 @@ function GridTableInner(props: GridTableProps) {
   // ── derived ───────────────────────────────────────────────────────────────────
   const sectionSum = tinhTongNhom().tong;
   const extraCols = (internalNote ? 1 : 0) + (cotNoiBo ? 3 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
-  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
+  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + (usesShifts ? 1 : 0) + extraCols;
   // Chữ ký dòng cho DongNho: cấu hình cột (đổi là vẽ lại MỌI dòng) + mọi trường dòng hiển thị.
-  const cauHinhSig = [editable, showDetail, usesDays, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, !!daChi, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, duyetSig ?? "", !!moCotNoiBoKhiKhoa].join("|");
+  const cauHinhSig = [editable, showDetail, usesDays, usesShifts, internalNote, !!cotNoiBo, showImages, approveCol, canApprove, payCol, !!daChi, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, duyetSig ?? "", !!moCotNoiBoKhiKhoa].join("|");
   const chuKy = (i: number, them: string) => {
     const it = items[i] as Record<string, unknown>;
-    return [cauHinhSig, i, them, it.kind, it.label, it.name, it.detail, it.unit, it.quantity, it.quantityExact, it.days, it.unitPrice,
+    return [cauHinhSig, i, them, it.kind, it.label, it.name, it.detail, it.unit, it.quantity, it.quantityExact, it.days, it.shifts, it.unitPrice,
       it.notes, it.internalNote, it.ns, it.luuKho, it.chungTu, it.approved, it.approvedAt, it.trangThaiDuyet, it.lyDoTra, khoaI(i), payCol ? JSON.stringify(daChiCua(i)) : "",
       JSON.stringify(it.formulas || null), JSON.stringify(it._fxWarn || null), JSON.stringify(it._fxLoi || null),
       ((it.images as string[] | undefined) || []).map((x) => x.length).join(",")].join("\u0001");
@@ -2780,7 +2790,7 @@ function GridTableInner(props: GridTableProps) {
   // ── XEM CÔNG THỨC ô KHÓA (như Excel) ────────────────────────────────────────
   // Double-click ô khóa (Thành Tiền / Đơn giá nhóm / Thành tiền nhóm / Tổng sheet) → hiện công
   // thức (chỉ đọc) ở thanh fx + sáng ô tham chiếu. Chỉ minh bạch cách tính, không sửa được.
-  const Lq = letterOf("quantity"), Lp = letterOf("unitPrice"), Ld = letterOf("days"), La = letterOf("_amount");
+  const Lq = letterOf("quantity"), Lp = letterOf("unitPrice"), Ld = letterOf("days"), Lc = letterOf("shifts"), La = letterOf("_amount");
   const childAmountRange = (si: number): [number, number] | null => {
     let first: number | null = null, last = 0;
     for (let j = si + 1; j < items.length; j++) {
@@ -2819,7 +2829,9 @@ function GridTableInner(props: GridTableProps) {
       const rng = childAmountRange(i); if (!rng) return;
       addr = `${La}${i + 1}`; formula = `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`;   // Thành tiền nhóm = (Σ con) × SL nhóm
     } else if (it.kind === "item" || it.kind === "sub") {
-      addr = `${La}${i + 1}`; formula = usesDays ? `=${Lq}${i + 1}*${Ld}${i + 1}*${Lp}${i + 1}` : `=${Lq}${i + 1}*${Lp}${i + 1}`;  // SL × ĐG (× Ngày)
+      // SL × [Ngày] × [Ca] × ĐG — đúng thứ tự cột trên lưới và đúng công thức ô Thành Tiền trong tệp Excel.
+      const thuaSo = [Lq, ...(usesDays ? [Ld] : []), ...(usesShifts ? [Lc] : []), Lp];
+      addr = `${La}${i + 1}`; formula = "=" + thuaSo.map((L) => `${L}${i + 1}`).join("*");
     }
     if (formula) toggleCellFormula(td, addr as string, formula);
   };
@@ -2837,7 +2849,7 @@ function GridTableInner(props: GridTableProps) {
   // CÙNG luật với khối tổng của màn soạn (lib/congThucTong): bản cũ liệt kê MỌI hàng nhóm + nhóm con nên mẫu đánh số
   // nhóm con (nhóm cha dồn tổng nhóm con lên) đếm hai lần, và nhóm rỗng cũng bị tô.
   const revealSheetTotal = (td: HTMLElement) => {
-    const ct = congThucTongSheet(items, { groupSubtotal, usesDays, numberSubs, La, Lq });
+    const ct = congThucTongSheet(items, { groupSubtotal, usesDays, usesShifts, numberSubs, La, Lq });
     if (ct.phanTu.length) toggleCellFormula(td, "Tổng", ct.congThuc);
   };
   // ── Cột "Hình ảnh": chèn NHIỀU ảnh/ô, tự NÉN nhỏ (canvas → JPEG ~0.82, cạnh tối đa 1400px) trước
@@ -2955,8 +2967,9 @@ function GridTableInner(props: GridTableProps) {
       <td className="col-dvt">{txtInput(i, "unit")}</td>
       <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
       {usesDays && <td className={fcls(i, "days", "col-qty")} style={{ position: "relative" }}>{numInput(i, "days")}</td>}
+      {usesShifts && <td className={fcls(i, "shifts", "col-qty")} style={{ position: "relative" }}>{numInput(i, "shifts")}</td>}
       <td className={fcls(i, "unitPrice", "col-price")} style={{ position: "relative" }}>{numInput(i, "unitPrice")}</td>
-      <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
+      <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{M.fmtNumCell(M.lineAmount(items[i], usesDays, usesShifts))}</td>
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
       {cotNoiBo && <>
@@ -3039,6 +3052,7 @@ function GridTableInner(props: GridTableProps) {
               <th scope="col">ĐVT</th>
               <th scope="col">SỐ LƯỢNG</th>
               {usesDays && <th scope="col">SỐ NGÀY</th>}
+              {usesShifts && <th scope="col">SỐ CA</th>}
               <th scope="col">ĐƠN GIÁ</th>
               <th scope="col">THÀNH TIỀN</th>
               <th scope="col">GHI CHÚ</th>
@@ -3067,6 +3081,7 @@ function GridTableInner(props: GridTableProps) {
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
                     <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
                     {usesDays && <td className="col-qty" />}
+                    {usesShifts && <td className="col-qty" />}
                     <td className="col-price" title={fxTitle} data-xl="xem-gia-nhom" onDoubleClick={xuLyBam}>{M.fmtNumCell(subAmt)}</td>
                     <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{groupSubtotal ? M.fmtNumCell(subAmt * M.groupMult(it)) : ""}</td>
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
@@ -3108,7 +3123,7 @@ function GridTableInner(props: GridTableProps) {
       <div className="grid-stat hidden" ref={statRef} />
       {fxBar && sheetTotalLine !== false && (
         <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>
-          Tổng sheet: <span style={{ color: "var(--danger)", cursor: "pointer" }} title={fxTitle} onDoubleClick={(e) => revealSheetTotal(e.currentTarget)}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal))}</span>
+          Tổng sheet: <span style={{ color: "var(--danger)", cursor: "pointer" }} title={fxTitle} onDoubleClick={(e) => revealSheetTotal(e.currentTarget)}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal, usesShifts))}</span>
         </div>
       )}
 

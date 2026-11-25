@@ -40,6 +40,8 @@ function slTinhTien(q: Prisma.Decimal.Value | null | undefined, exact: boolean |
  * Per-item amount:
  *   - days null/0  → quantity × unitPrice
  *   - days > 0     → quantity × days × unitPrice
+ *   - shifts > 0   → nhân thêm Số Ca (mẫu CINETOUR); null/0 → ×1, y luật days. Mẫu KHÔNG có cột Số Ca thì đường
+ *                    lưu đã ép shifts = null trước khi tới đây (chuanHoaSoCaTheoMau, src/quoteUtils.ts).
  *
  * Rounding policy: half-up to 0 dp for VAT and total (VND has no fractional units).
  *
@@ -65,6 +67,7 @@ type QuoteTotalsInput = {
       quantityExact?: boolean | null;
       unitPrice?: Prisma.Decimal.Value | null | undefined;
       days?: Prisma.Decimal.Value | null | undefined;
+      shifts?: Prisma.Decimal.Value | null | undefined;
     }[] | null;
   })[] | null;
 };
@@ -90,9 +93,11 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
       const qty = slTinhTien(it.quantity, it.quantityExact);
       const price = D(it.unitPrice);
       const days = it.days != null ? D(it.days) : null;
+      const shifts = it.shifts != null ? D(it.shifts) : null;   // Số Ca (CINETOUR) — trống/0 = ×1 như Số Ngày
       // Thành Tiền 1 dòng làm tròn số nguyên (khớp hiển thị + Excel) RỒI mới nhân hệ số nhóm
       // → dòng cộng lại đúng bằng tổng, không lệch sub-đồng.
-      const base = (days && days.gt(0) ? qty.times(days).times(price) : qty.times(price)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+      const theoNgay = days && days.gt(0) ? qty.times(days) : qty;
+      const base = (shifts && shifts.gt(0) ? theoNgay.times(shifts) : theoNgay).times(price).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
       return acc.plus(base.times(mult));
     }, new Decimal(0)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
     // Giảm giá RIÊNG của sheet, kẹp vào [0, tổng sheet] → "Tổng Cộng" của sheet không bao giờ âm
@@ -146,7 +151,7 @@ export function assertTotalsStorable(
   const TRAN = new Decimal("1e15");
   if (t.total.abs().gte(TRAN) || t.subtotal.abs().gte(TRAN) || t.sheetTotals.some((s) => s.subtotal.abs().gte(TRAN))) {
     throw Object.assign(
-      new Error("Không lưu được: tổng tiền vượt giới hạn lưu trữ (từ 1.000.000.000.000.000 đ trở lên). Kiểm tra lại Số Lượng / Đơn Giá / Số Ngày."),
+      new Error("Không lưu được: tổng tiền vượt giới hạn lưu trữ (từ 1.000.000.000.000.000 đ trở lên). Kiểm tra lại Số Lượng / Đơn Giá / Số Ngày / Số Ca."),
       { status: 400, code: "quote_total_overflow" }
     );
   }
@@ -216,6 +221,7 @@ export function chuanHoaTheoCot(sheets: unknown) {
       if (it.quantity != null && it.quantity !== "") it.quantity = lam(it.quantity, 4);
       if (it.unitPrice != null && it.unitPrice !== "") it.unitPrice = lam(it.unitPrice, 4);
       if (it.days != null && it.days !== "") it.days = lam(it.days, 2);
+      if (it.shifts != null && it.shifts !== "") it.shifts = lam(it.shifts, 2);   // Decimal(10,2) như days
     }
   }
 }

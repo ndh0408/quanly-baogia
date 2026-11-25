@@ -287,7 +287,7 @@ export function HopKhoanChi({ row, mat = false, canPay, canEdit, onDong, onDaLuu
             <dt>Thành tiền</dt>
             <dd>
               <strong>{fmtMoney(row.amount)}</strong>
-              <span className="muted"> ({fmtSoLuong(row.quantity)}{row.unit ? ` ${row.unit}` : ""} × {fmtMoney(row.unitPrice)}{row.days != null && row.days > 0 ? ` × ${fmtSoLuong(row.days)} ngày` : ""}){row.chungTu ? ` · ${NHAN_CHUNG_TU[row.chungTu] ?? row.chungTu}` : ""}</span>
+              <span className="muted"> ({fmtSoLuong(row.quantity)}{row.unit ? ` ${row.unit}` : ""} × {fmtMoney(row.unitPrice)}{row.days != null && row.days > 0 ? ` × ${fmtSoLuong(row.days)} ngày` : ""}{row.shifts != null && row.shifts > 0 ? ` × ${fmtSoLuong(row.shifts)} ca` : ""}){row.chungTu ? ` · ${NHAN_CHUNG_TU[row.chungTu] ?? row.chungTu}` : ""}</span>
             </dd>
             <dt>Duyệt</dt>
             <dd>{row.approvedByName || "—"}{row.approvedAt ? ` · ${fmtDate(row.approvedAt)}` : ""}</dd>

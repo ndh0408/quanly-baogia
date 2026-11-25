@@ -9,6 +9,8 @@ export type ItemKind = "item" | "sub" | "section" | "subsection" | "info";
 export type Item = {
   kind: ItemKind; label?: string; name?: string; detail?: string; unit?: string;
   quantity?: number; quantityExact?: boolean; days?: number | null; unitPrice?: number; notes?: string; internalNote?: string;
+  /** SỐ CA — chỉ mẫu CINETOUR (`layout.hasShifts`). Trống / 0 = ×1, đúng luật Số Ngày (xem lineAmount). */
+  shifts?: number | null;
   approved?: boolean; approvedAt?: string | null; approvedBy?: number | null;
   /** Bảng Hà Nội: trạng thái duyệt TỪNG HÀNG do máy chủ sở hữu (src/hnDuyetHang.ts) + lý do bị trả. */
   trangThaiDuyet?: "dang-lam" | "cho-duyet" | "da-duyet" | "tra-lai"; lyDoTra?: string | null;
@@ -17,7 +19,7 @@ export type Item = {
   images?: string[];   // MẢNG ảnh base64 data-URL (cột "Hình ảnh", chỉ khi sheet.showImages)
 };
 export type Sheet = { id?: number; codeNo?: number | null; templateId?: number; name?: string | null; groupSubtotal?: boolean; showImages?: boolean; discount?: number; order?: number; items: Item[]; extraTables?: unknown[] };
-export type TemplateLayout = { hasDays?: boolean; hasDetail?: boolean; numberSubsections?: boolean };
+export type TemplateLayout = { hasDays?: boolean; hasShifts?: boolean; hasDetail?: boolean; numberSubsections?: boolean };
 export type Template = { id: number; code?: string; name: string; companyId?: number; layout?: TemplateLayout };
 export type Company = { id: number; name: string; shortName?: string; address?: string };
 
@@ -101,8 +103,12 @@ export function nhanLamTronDong(...thuaSo: number[]): number {
 }
 
 // Thành Tiền 1 dòng: mặc định SL làm tròn 1 số; dòng quantityExact dùng tối đa 4 số lẻ theo file Excel.
-export function lineAmount(it: Item, usesDays: boolean) {
+// `usesShifts` (mẫu CINETOUR có cột SỐ CA): nhân thêm Số Ca, trống / 0 = ×1 — CÙNG luật `days || 1` của Số
+// Ngày. Không truyền = mẫu không có cột Số Ca → không nhân, dù hàng còn giữ số ca (đổi mẫu qua lại không mất số).
+// BẢN SAO: src/money.ts (Decimal), src/excel.ts, src/pdf.ts, src/excelImport.ts, src/quoteFormula.ts.
+export function lineAmount(it: Item, usesDays: boolean, usesShifts = false) {
   const q = qtyForAmount(it), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
+  if (usesShifts) { const s = Number(it.shifts) || 1; return usesDays ? nhanLamTronDong(q, d, s, p) : nhanLamTronDong(q, s, p); }
   return usesDays ? nhanLamTronDong(q, d, p) : nhanLamTronDong(q, p);
 }
 /** Hệ số nhân của hàng NHÓM = Số Lượng của nhóm, lấy ĐÚNG con số đang hiển thị trên lưới
@@ -118,12 +124,12 @@ export function lineAmount(it: Item, usesDays: boolean) {
  *  mọi bản trên cùng bảng giá trị. */
 export const groupMult = (it: Pick<Item, "quantity" | "quantityExact">) => { const q = qtyForAmount(it); return q > 0 ? q : 1; };
 // Tổng sheet có hệ số nhóm: section.Số Lượng nhân các dòng dưới nó (tới section kế); section tự nó = 0.
-export function sheetSubtotalGrouped(items: Item[], usesDays: boolean, groupSubtotal?: boolean) {
+export function sheetSubtotalGrouped(items: Item[], usesDays: boolean, groupSubtotal?: boolean, usesShifts = false) {
   let mult = 1, sum = 0;
   for (const it of items || []) {
     if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? groupMult(it) : 1; continue; }
     if (it.kind === "info") continue;
-    sum += lineAmount(it, usesDays) * mult;
+    sum += lineAmount(it, usesDays, usesShifts) * mult;
   }
   return sum;
 }
@@ -139,8 +145,8 @@ export function sheetDiscountOf(gross: number, raw?: number | null) {
   return d > cap ? cap : d;
 }
 /** Khối tổng của MỘT sheet: Cộng (chưa trừ) · Discount · Tổng Cộng (= net, số sheet đóng góp). */
-export function sheetTotals(sheet: Pick<Sheet, "items" | "groupSubtotal" | "discount">, usesDays: boolean) {
-  const gross = roundVnd(sheetSubtotalGrouped(sheet.items || [], usesDays, sheet.groupSubtotal));
+export function sheetTotals(sheet: Pick<Sheet, "items" | "groupSubtotal" | "discount">, usesDays: boolean, usesShifts = false) {
+  const gross = roundVnd(sheetSubtotalGrouped(sheet.items || [], usesDays, sheet.groupSubtotal, usesShifts));
   const discount = sheetDiscountOf(gross, sheet.discount);
   return { gross, discount, net: gross - discount };
 }
@@ -233,8 +239,10 @@ export function computeRowKinds(items: Item[]): RowKind[] {
 export const rowspanOf = (rk: RowKind[], i: number) => { let s = 1, j = i + 1; while (j < rk.length && rk[j] === "sub") { s++; j++; } return s; };
 
 // Factory hàng trống (giống editor.js).
-export const blankItem = (usesDays: boolean): Item => ({ kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
-export const blankSub = (usesDays: boolean): Item => ({ kind: "sub", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
+// Mẫu có cột Số Ca (CINETOUR): hàng mới mang sẵn shifts = 1, y như days = 1 của mẫu có ngày. Mẫu không có
+// cột đó thì KHÔNG đặt khoá `shifts` — hàng của mọi mẫu cũ giữ nguyên hình dạng (snapshot, so vân tay).
+export const blankItem = (usesDays: boolean, usesShifts = false): Item => ({ kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, ...(usesShifts ? { shifts: 1 } : {}), notes: "" });
+export const blankSub = (usesDays: boolean, usesShifts = false): Item => ({ kind: "sub", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, ...(usesShifts ? { shifts: 1 } : {}), notes: "" });
 export const blankInfo = (): Item => ({ kind: "info", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
 export const blankSection = (): Item => ({ kind: "section", label: "", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
 export const blankSubSection = (): Item => ({ kind: "subsection", label: "", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });

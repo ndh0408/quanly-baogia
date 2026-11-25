@@ -13,7 +13,7 @@ import { nextK } from "./gridShared";
 import { toast } from "./ui";
 
 /** Trường của hàng mà khoá giữ nguyên (nội dung + trạng thái duyệt). */
-export const TRUONG_KHOA_HANG = ["kind", "label", "name", "detail", "unit", "quantity", "quantityExact", "unitPrice", "days", "notes", "formulas",
+export const TRUONG_KHOA_HANG = ["kind", "label", "name", "detail", "unit", "quantity", "quantityExact", "unitPrice", "days", "shifts", "notes", "formulas",
   "trangThaiDuyet", "approved", "approvedAt", "approvedBy", "lyDoTra"];
 /** Ba cột theo dõi sau duyệt — mở khi `moCotNoiBo` (khớp máy chủ). */
 export const TRUONG_NOI_BO_HANG = ["ns", "luuKho", "chungTu"];

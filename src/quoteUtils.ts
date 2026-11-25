@@ -173,7 +173,7 @@ export const QUOTE_UPDATE_STATE_SELECT = {
       custStatus: true,  // nhánh chỉ-đổi-VAT tính lại doanh thu chốt trừ trang khách từ chối (MONEY-01)
       items: {
         orderBy: { order: "asc" },
-        select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
+        select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true, shifts: true },
       },
     },
   },
@@ -210,6 +210,9 @@ export function vanTayHn(tables: any): string {
       quantityExact: !!it?.quantityExact,
       unitPrice: Number(it?.unitPrice) || 0,
       days: it?.days != null ? Number(it.days) : null,
+      // Số Ca (mẫu CINETOUR) cũng là số NGƯỜI DÙNG GÕ và đổi tiền — thiếu ở đây thì sửa Số Ca của phần HN đã chốt
+      // "giống hệt CSDL". Chỉ thêm khoá khi hàng CÓ số ca: vân tay của mọi bảng cũ giữ nguyên từng ký tự.
+      ...(it?.shifts != null ? { shifts: Number(it.shifts) } : {}),
       notes: it?.notes ?? null,
       // Ba cột nội bộ (NS · Lưu kho · Chứng từ) cũng là thứ NGƯỜI DÙNG GÕ: thiếu ở đây thì phần HN đã
       // chốt mà ai đó sửa chúng sẽ "giống hệt CSDL" → chotHnTables lặng lẽ bỏ, thay vì báo 409.
@@ -347,6 +350,7 @@ export function presentQuote(q: any, { hnOnly = false, internalOnly = false }: {
         quantity: Number(it.quantity),
         unitPrice: Number(it.unitPrice),
         days: it.days != null ? Number(it.days) : null,
+        shifts: it.shifts != null ? Number(it.shifts) : null,   // Decimal → number như days
       })),
     })),
     ...totalsToJson(totals),
@@ -417,7 +421,8 @@ export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }
       hnStatus: q.hnStatus ?? null,
       hnSheetCount: hanoi.length,
       // Đợt 4: theo mẫu của từng bảng như web (listQuotes gắn `_mauBangNoiBo`); thiếu thì như trước.
-      hnTotal: hanoi.reduce((a: number, t: any) => a + extraTableSum(t, q._mauBangNoiBo ? bangNoiBoCoNgay(t, q.companyId ?? q.company?.id, q._mauBangNoiBo) : undefined), 0),
+      hnTotal: hanoi.reduce((a: number, t: any) => a + extraTableSum(t, q._mauBangNoiBo ? bangNoiBoCoNgay(t, q.companyId ?? q.company?.id, q._mauBangNoiBo) : undefined,
+        q._mauBangNoiBo ? bangNoiBoCoCa(t, q.companyId ?? q.company?.id, q._mauBangNoiBo) : undefined), 0),
       // KHÔNG trả `sheetCount`: đó là số trang của CHỦ báo giá — cùng loại thông tin với tên trang
       // mà bản 2026-09-15 vừa bỏ khỏi màn account Hà Nội. Họ chỉ cần biết phần của chính mình.
       _accountHnRow: true,
@@ -480,6 +485,8 @@ export function sanitizeExtraTables(tables: any, { valid = ["hcm", "khach"], boC
       quantityExact: !!it.quantityExact,
       unitPrice: Number(it.unitPrice) || 0,
       days: it.days != null ? Number(it.days) : null,
+      // Số Ca của bảng dùng mẫu CINETOUR. Chỉ ghi khoá khi có số: bảng cũ không đổi hình dạng JSON.
+      ...(it.shifts != null && it.shifts !== "" && Number.isFinite(Number(it.shifts)) ? { shifts: Number(it.shifts) } : {}),
       notes: it.notes ? String(it.notes).trim() : null,
       // Ba cột riêng của bảng nội bộ (xem itemSchema): thiếu ở đây là Lưu xong mất sạch, vì hàm này
       // dựng lại từng hàng bằng danh sách trường chứ không chép nguyên.
@@ -522,8 +529,10 @@ export function sanitizeHnTables(tables: any) {
  * `false` → KHÔNG nhân days, y như extraTableSum của web (web/src/components/ExtraTables.tsx). Dữ liệu CŨ
  * (bảng mẫu không ngày mà CSDL còn days) từng ra số khác nhau giữa màn soạn (không nhân) với Quản lý dự
  * án / danh sách của account HN (nhân). Không truyền → nhân days > 0 như trước (nơi gọi chưa có mẫu).
+ * `usesShifts`: mẫu của bảng có cột SỐ CA (CINETOUR) không — `bangNoiBoCoCa`. Cùng luật với `usesDays`: `false` →
+ * KHÔNG nhân shifts (bảng đổi sang mẫu thường mà hàng còn giữ số ca); không truyền → nhân shifts > 0.
  */
-export function extraTableSum(t: any, usesDays?: boolean) {
+export function extraTableSum(t: any, usesDays?: boolean, usesShifts?: boolean) {
   const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
   return (t?.items || []).reduce((acc: number, it: any) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;   // nhóm/nhóm con/info không cộng (đơn giá nhóm là tổng tự tính)
@@ -531,12 +540,14 @@ export function extraTableSum(t: any, usesDays?: boolean) {
     const qty = it.quantityExact ? Math.round((Number(it.quantity) || 0) * 10_000) / 10_000 : qtyRound(it.quantity);
     const price = Number(it.unitPrice) || 0;
     const days = usesDays !== false && it.days != null ? Number(it.days) : null;
-    return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);   // Thành Tiền làm tròn từng dòng
+    const shifts = usesShifts !== false && it.shifts != null ? Number(it.shifts) : null;
+    const theoNgay = days && days > 0 ? qty * days : qty;   // cùng thứ tự nhân như trước khi có Số Ca
+    return acc + Math.round((shifts && shifts > 0 ? theoNgay * shifts : theoNgay) * price);   // Thành Tiền làm tròn từng dòng
   }, 0);
 }
 
 /** Một mẫu cột — chỉ những gì luật chọn mẫu của bảng nội bộ / Hà Nội cần. */
-export type MauBangNoiBo = { id: number; companyId: number | null; hasDays: boolean };
+export type MauBangNoiBo = { id: number; companyId: number | null; hasDays: boolean; hasShifts?: boolean };
 
 /**
  * Bảng nội bộ / Hà Nội dùng mẫu CÓ cột Số Ngày không — ĐÚNG luật chọn mẫu của web (HnTables.mauBangHn,
@@ -545,20 +556,30 @@ export type MauBangNoiBo = { id: number; companyId: number | null; hasDays: bool
  * tự /api/meta/templates trả cho web (mẫu active, theo tên — xem dsMauBangNoiBo): lệch thứ tự là lệch
  * "mẫu đầu", lệch luôn con số. Hàm thuần — test không cần CSDL.
  */
-export function bangNoiBoCoNgay(t: any, companyId: number | null | undefined, dsMau: MauBangNoiBo[]): boolean {
+function mauCuaBang(t: any, companyId: number | null | undefined, dsMau: MauBangNoiBo[]): MauBangNoiBo | undefined {
   const cuaCty = dsMau.filter((m) => m.companyId === companyId);
   const ds = cuaCty.length ? cuaCty : dsMau;
   const id = (t?.templateId != null ? Number(t.templateId) : 0) || ds[0]?.id;
-  return !!(dsMau.find((m) => m.id === id) ?? ds[0])?.hasDays;
+  return dsMau.find((m) => m.id === id) ?? ds[0];
+}
+export function bangNoiBoCoNgay(t: any, companyId: number | null | undefined, dsMau: MauBangNoiBo[]): boolean {
+  return !!mauCuaBang(t, companyId, dsMau)?.hasDays;
+}
+/** Bảng nội bộ / Hà Nội dùng mẫu CÓ cột SỐ CA (CINETOUR) không — CÙNG luật chọn mẫu với bangNoiBoCoNgay. */
+export function bangNoiBoCoCa(t: any, companyId: number | null | undefined, dsMau: MauBangNoiBo[]): boolean {
+  return !!mauCuaBang(t, companyId, dsMau)?.hasShifts;
 }
 
 /** Danh sách mẫu cho bangNoiBoCoNgay — cùng truy vấn với metaService.listTemplates (web nạp qua đó). */
 export async function dsMauBangNoiBo(): Promise<MauBangNoiBo[]> {
   const ds = await prisma.quoteTemplate.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, companyId: true, code: true } });
   return ds.map((m) => {
-    let hasDays = false;
-    try { hasDays = !!(getConfig(m.code) as any)?.items?.columns?.days; } catch { /* mẫu chưa có config → metaService cũng trả hasDays: false */ }
-    return { id: m.id, companyId: m.companyId, hasDays };
+    let hasDays = false, hasShifts = false;
+    try {
+      const cols = (getConfig(m.code) as any)?.items?.columns;
+      hasDays = !!cols?.days; hasShifts = !!cols?.shifts;
+    } catch { /* mẫu chưa có config → metaService cũng trả hasDays/hasShifts: false */ }
+    return { id: m.id, companyId: m.companyId, hasDays, hasShifts };
   });
 }
 
@@ -646,16 +667,35 @@ export function chuanHoaSoNgayTheoCoNgay(sheets: any[], coNgay: Map<number, bool
     for (const it of (s?.items || [])) if (it && it.days != null) it.days = null;
   }
 }
+/**
+ * SỐ CA — CÙNG LỚP LỖI, CÙNG CÁCH CHẶN như Số Ngày ngay trên: money.ts nhân `shifts` của TỪNG DÒNG hễ > 0, còn
+ * lưới web / excel.ts chỉ nhân khi mẫu có cột Số Ca. Mẫu không có cột (mọi mẫu trừ CINETOUR) → ép `shifts = null`
+ * trên payload, trước khi tính và trước khi ghi. Người dùng đổi sheet CINETOUR sang mẫu thường đã được màn soạn
+ * hỏi lại nếu có Số Ca ≠ 1 (đó là thứ đổi tiền) — đây là chốt máy chủ cho mọi đường còn lại (PUT thẳng, tab cũ).
+ * Mẫu không tra được → giữ nguyên, không đoán.
+ */
+export function chuanHoaSoCaTheoCoCa(sheets: any[], coCa: Map<number, boolean>) {
+  if (!Array.isArray(sheets)) return;
+  for (const s of sheets) {
+    if (coCa.get(Number(s?.templateId)) !== false) continue;   // có cột Số Ca, hoặc không biết → giữ nguyên
+    for (const it of (s?.items || [])) if (it && it.shifts != null) it.shifts = null;
+  }
+}
 export async function chuanHoaSoNgayTheoMau(sheets: any[]) {
   if (!Array.isArray(sheets) || !sheets.length) return;
   const ids = [...new Set(sheets.map((s: any) => Number(s?.templateId)).filter((n) => Number.isInteger(n) && n > 0))];
   if (!ids.length) return;
   const tpls = await prisma.quoteTemplate.findMany({ where: { id: { in: ids } }, select: { id: true, code: true } });
-  const coNgay = new Map<number, boolean>();
+  const coNgay = new Map<number, boolean>(), coCa = new Map<number, boolean>();
   for (const t of tpls) {
-    try { coNgay.set(t.id, !!(getConfig(t.code) as any)?.items?.columns?.days); } catch { /* mẫu chưa có config → không đoán */ }
+    try {
+      const cols = (getConfig(t.code) as any)?.items?.columns;
+      coNgay.set(t.id, !!cols?.days);
+      coCa.set(t.id, !!cols?.shifts);
+    } catch { /* mẫu chưa có config → không đoán */ }
   }
   chuanHoaSoNgayTheoCoNgay(sheets, coNgay);
+  chuanHoaSoCaTheoCoCa(sheets, coCa);   // cùng một lượt tra mẫu: Số Ca theo cột `shifts` của mẫu
 }
 
 /**
@@ -693,6 +733,7 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Rec
         quantityExact: !!it.quantityExact,
         unitPrice: D(it.unitPrice),
         days: it.days != null ? D(it.days) : null,
+        shifts: it.shifts != null ? D(it.shifts) : null,   // Số Ca (CINETOUR); mẫu khác đã bị ép null ở chuanHoaSoNgayTheoMau
         notes: it.notes ? String(it.notes).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
         internalNote: it.internalNote ? String(it.internalNote).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,   // ghi chú nội bộ — KHÔNG xuất Excel
         formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,

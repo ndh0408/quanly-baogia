@@ -357,7 +357,7 @@ function slLamTron1(n: number) {
 // hoặc mất hẳn. `roles` là vai trò từng cột của khối KHI COI một cột là "_amount". Chỉ nhận khi đa số
 // hàng có số ở cột đó khớp SL × ĐG (× Ngày) — không chắc thì nơi gọi giữ ghép theo vị trí như cũ.
 export function khopCotThanhTien(matrix: string[][], roles: string[], qu: QuyUocSo | null = null): boolean {
-  const iA = roles.indexOf("_amount"), iQ = roles.indexOf("quantity"), iP = roles.indexOf("unitPrice"), iD = roles.indexOf("days");
+  const iA = roles.indexOf("_amount"), iQ = roles.indexOf("quantity"), iP = roles.indexOf("unitPrice"), iD = roles.indexOf("days"), iC = roles.indexOf("shifts");
   if (iA < 0 || iQ < 0 || iP < 0) return false;
   const soDo = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
   const soTien = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
@@ -366,11 +366,12 @@ export function khopCotThanhTien(matrix: string[][], roles: string[], qu: QuyUoc
   for (const row of matrix) {
     const a = String(row[iA] ?? "").trim(), q = String(row[iQ] ?? "").trim(), p = String(row[iP] ?? "").trim();
     const d = iD >= 0 ? String(row[iD] ?? "").trim() : "";
+    const ca = iC >= 0 ? String(row[iC] ?? "").trim() : "";   // Số Ca (mẫu CINETOUR) — thừa số như Số Ngày
     if (!laSo(a)) continue;            // ô trống / chữ / công thức ở cột TT → hàng này không phân định được
     const tt = soTien(a); if (!tt) continue;
     xet++;
-    if (!laSo(q) || !laSo(p) || (d && !laSo(d))) continue;
-    const sl = soDo(q), gia = soTien(p), ngay = d ? soDo(d) || 1 : 1;
+    if (!laSo(q) || !laSo(p) || (d && !laSo(d)) || (ca && !laSo(ca))) continue;
+    const sl = soDo(q), gia = soTien(p), ngay = (d ? soDo(d) || 1 : 1) * (ca ? soDo(ca) || 1 : 1);
     // Thành Tiền của app nhân SL đã làm tròn 1 số lẻ (qtyRound) — nhận cả hai cách tính.
     const sl1 = slLamTron1(sl);
     const lech = Math.max(2, Math.abs(tt) * 0.005);
@@ -381,7 +382,7 @@ export function khopCotThanhTien(matrix: string[][], roles: string[], qu: QuyUoc
 
 export type RebuiltItem = Record<string, unknown> & { kind: string; formulas?: Record<string, string> };
 export function reconstructExportRows(matrix: string[][], roles: string[], numericRoles: Set<string>, numberSubs = false): RebuiltItem[] {
-  const numSet = numericRoles instanceof Set ? numericRoles : new Set(["quantity", "unitPrice", "days"]);
+  const numSet = numericRoles instanceof Set ? numericRoles : new Set(["quantity", "unitPrice", "days", "shifts"]);
   const idx = (role: string) => roles.indexOf(role);
   const sttI = idx("_stt"), nameI = idx("name"), unitI = idx("unit"), qtyI = idx("quantity"), priceI = idx("unitPrice");
   const cell = (row: string[], i: number) => (i >= 0 && i < row.length && row[i] != null ? String(row[i]) : "");
@@ -417,7 +418,7 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
       const v = cell(row, i);
       if (numSet.has(role)) {
         if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
-        else it[role] = (role === "quantity" || role === "days") ? soDo(v) : soTien(v);   // SL/Ngày = số đo → thập phân (khi không suy được quy ước)
+        else it[role] = (role === "quantity" || role === "days" || role === "shifts") ? soDo(v) : soTien(v);   // SL/Ngày/Ca = số đo → thập phân (khi không suy được quy ước)
         // SL phần trăm cần hơn 1 số lẻ ("12,5%" → 0,125) → cờ SL chính xác, như lưới (L15).
         if (role === "quantity" && laPhanTram(v)) { const a = Math.abs(Number(it[role]) || 0); if (slLamTron1(a) !== Math.round(a * 1e4 + 1e-8) / 1e4) it.quantityExact = true; }
       } else if (role === "detail" || role === "notes" || role === "name" || role === "label" || role === "internalNote") it[role] = v;
@@ -439,7 +440,7 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
 // template (vd nguồn KHÔNG ngày, đích CÓ ngày): cột "Đơn Giá" vẫn vào unitPrice, không lệch sang "Số Ngày".
 const HEADER_ROLE: Record<string, string> = {
   "STT": "_stt", "HANG MUC": "name", "CHI TIET": "detail", "DVT": "unit",
-  "SO LUONG": "quantity", "SO NGAY": "days", "DON GIA": "unitPrice",
+  "SO LUONG": "quantity", "SO NGAY": "days", "SO CA": "shifts", "DON GIA": "unitPrice",
   "THANH TIEN": "_amount", "GHI CHU": "notes", "NOTES": "notes", "GHI CHU NOI BO": "internalNote",
 };
 function normHdr(s: string): string {
@@ -542,13 +543,13 @@ function rtEval(input: string): number | null {
 const rtColIdx = (L: string) => { let nn = 0; for (const ch of L.toUpperCase()) nn = nn * 26 + (ch.charCodeAt(0) - 64); return nn - 1; };
 
 export type RetargetOpts = {
-  webLetter: (role: string) => string | null;   // role → chữ cột WEB của lưới đích (quantity/unitPrice/days/_amount)
+  webLetter: (role: string) => string | null;   // role → chữ cột WEB của lưới đích (quantity/unitPrice/days/shifts/_amount)
   baseRow: number;                              // hàng web (0-based) của dòng ĐẦU khối sau khi dán
 };
 export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][], roles: string[], opts: RetargetOpts) {
   const n = built.length;
-  const amtI = roles.indexOf("_amount"), dayI = roles.indexOf("days");
-  const NUMOK = new Set(["quantity", "unitPrice", "days", "_amount"]);
+  const amtI = roles.indexOf("_amount"), dayI = roles.indexOf("days"), caI = roles.indexOf("shifts");
+  const NUMOK = new Set(["quantity", "unitPrice", "days", "shifts", "_amount"]);
   const cellRaw = (k: number, i: number) => (i >= 0 && matrix[k] && matrix[k][i] != null ? String(matrix[k][i]) : "");
   // Giá trị 1 ô của KHỐI theo (role, dòng k) — _amount đọc từ matrix; ô công thức → NaN (chưa biết).
   const valOf = (role: string, k: number): number => {
@@ -635,9 +636,10 @@ export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][],
       const qty = f === "quantity" ? fxVal : valOf("quantity", k);
       const price = f === "unitPrice" ? fxVal : valOf("unitPrice", k);
       const days = dayI >= 0 ? (f === "days" ? fxVal : (valOf("days", k) || 1)) : 1;
+      const ca = caI >= 0 ? (f === "shifts" ? fxVal : (valOf("shifts", k) || 1)) : 1;   // Số Ca trống = 1 như Số Ngày
       if (!isFinite(amt) || amt === 0 || !isFinite(qty) || !isFinite(price)) { if (apply) markWarn(k, f); continue; }
       const qR = slLamTron1(qty);   // SL làm tròn 1 số như app
-      const predicted = Math.round(qR * (isFinite(days) ? days : 1) * price);
+      const predicted = Math.round(qR * (isFinite(days) ? days : 1) * (isFinite(ca) ? ca : 1) * price);
       if (Math.abs(predicted - amt) > Math.max(2, Math.abs(amt) * 0.005)) { if (apply) markWarn(k, f); continue; }
       okCount++;
       // Khoảng cách ref → dòng chứa công thức: tie-break khi dữ liệu TUẦN HOÀN khiến nhiều (X0,R0)

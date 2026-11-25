@@ -47,7 +47,7 @@ export async function keHoachBackfillSubtotal(opts: { quoteIds?: number[] } = {}
         sheets: {
           select: {
             id: true, templateId: true, subtotal: true, groupSubtotal: true, discount: true, custStatus: true,
-            items: { orderBy: { order: "asc" }, select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } },
+            items: { orderBy: { order: "asc" }, select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true, shifts: true } },
           },
         },
       },

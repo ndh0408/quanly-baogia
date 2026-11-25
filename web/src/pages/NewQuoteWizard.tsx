@@ -17,6 +17,7 @@ const tplDesc = (t: EditorTemplate) => {
   const p: string[] = [];
   if (t.layout?.hasDetail) p.push("có cột Chi Tiết");
   if (t.layout?.hasDays) p.push("có Số Ngày");
+  if (t.layout?.hasShifts) p.push("có Số Ca");   // CINETOUR
   if (t.layout?.numberSubsections) p.push("nhóm con đánh số");
   return p.join(" · ");
 };

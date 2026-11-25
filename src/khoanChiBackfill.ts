@@ -18,7 +18,7 @@
 //   · Nằm trong src/ nên được biên dịch vào dist/ và CHẠY ĐƯỢC TRONG IMAGE PRODUCTION — xem src/tools/backfillKhoanChi.ts.
 import { prisma } from "./db.js";
 import { audit } from "./audit.js";
-import { dsMauBangNoiBo, bangNoiBoCoNgay, type MauBangNoiBo } from "./quoteUtils.js";
+import { dsMauBangNoiBo, bangNoiBoCoNgay, bangNoiBoCoCa, type MauBangNoiBo } from "./quoteUtils.js";
 import { randomUUID } from "node:crypto";
 import { hangCuaPhia, khoaKhoanChi, hatGiongJson, coDauVetJsonCu, bangCuaSheets, sapTheoThuTu, laPhiaKhoanChi, PHIA_KHOAN_CHI, type PhiaKhoanChi } from "./khoanChi.js";
 import { bangCuaPhia, gieoKhoan, docKhoanChiTheoBaoGia } from "./services/inputInvoiceService.js";
@@ -127,7 +127,8 @@ export async function apDungKhoanChi(kh: KeHoachKhoanChi): Promise<number> {
           daXet.add(rid);
           if (!can.has(rid) || !coDauVetJsonCu(h.it)) continue;
           const coNgay = bangNoiBoCoNgay(h.t, q.companyId, dsMau as MauBangNoiBo[]);
-          const g = await gieoKhoan(tx, { quoteId, side, rid, hang: h, coNgay, nguon: "json-cu", actorId: null, actorName: null });
+          const coCa = bangNoiBoCoCa(h.t, q.companyId, dsMau as MauBangNoiBo[]);
+          const g = await gieoKhoan(tx, { quoteId, side, rid, hang: h, coNgay, coCa, nguon: "json-cu", actorId: null, actorName: null });
           if (g.taoMoi) out.push({ side, rid, id: g.id });
         }
       }

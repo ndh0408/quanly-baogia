@@ -18,7 +18,7 @@
 // ── CÁCH VÁ ─────────────────────────────────────────────────────────────────
 // Mở rộng `extraTableHasData` sang notes/internalNote/unit/label/images/formulas/approved/paid,
 // và đưa CẢ HAI đường xoá (Bảng nội bộ + bảng Hà Nội) qua cùng một lõi `removeTableFromList`.
-// KHÔNG tính `days`: `M.blankItem(true)` đặt sẵn days = 1 (shared/quote-math.ts:125) nên bảng mới
+// KHÔNG tính `days`: `M.blankItem(true)` đặt sẵn days = 1 (`blankItem`, shared/quote-math.ts) nên bảng mới
 // tinh của mẫu có cột Số Ngày sẽ bị coi là "có dữ liệu" và hỏi vô cớ.
 //
 // ── 2026-10-06: BẢNG CÓ HÀNG ĐÃ CHI THÌ CHẶN HẲN, KHÔNG HỎI ─────────────────────
