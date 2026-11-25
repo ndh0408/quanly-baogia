@@ -166,6 +166,28 @@ describe("Tổng quan trên điện thoại", () => {
   });
 });
 
+describe("Phân quyền — cột vai trò rộng đều, nút Lưu mọi cột cùng một hàng", () => {
+  // Đo 1280×720 trước sửa: cột vai trò 128/143/159/119/158px (bảng tự co theo chữ), cột Nhân sự gấp "1 theo vai trò · 0 tùy chỉnh"
+  // thành 3 dòng → nút Lưu thấp hơn các cột khác 8px. Sau sửa: 142px × 5, đáy nút cùng một hàng (sáng + tối, 1280 / 1920 / 390px).
+  it("màn rộng: table-layout fixed + cột Quyền có bề rộng → phần còn lại chia ĐỀU cho các cột vai trò", () => {
+    const rong = khoiMedia("not all and (max-width: 920px)");
+    expect(rong).toMatch(/\.perm-matrix\s*\{\s*table-layout:\s*fixed/);
+    expect(rong).toMatch(/\.perm-matrix thead th:first-child\s*\{\s*width:\s*\d+%/);
+    expect(luat(".perm-matrix"), "chia đều ở cấp đầu sẽ làm bảng điện thoại (khối cuộn, chữ một dòng) tự nới cột Quyền").not.toMatch(/table-layout/);
+  });
+  it("hàng nút / nhãn 'khóa' dồn xuống ĐÁY ô tiêu đề (không phụ thuộc chữ phía trên gấp mấy dòng)", () => {
+    expect(luat(".perm-matrix thead th")).toMatch(/height:\s*1px/);
+    const dau = luat(".perm-matrix .role-head");
+    expect(dau).toMatch(/display:\s*flex/);
+    expect(dau).toMatch(/height:\s*100%/);
+    expect(luat(".perm-matrix .role-head > .rh-nut")).toMatch(/margin-top:\s*auto/);
+    // Lề trên inline (marginTop) thắng margin-top: auto của CSS → hàng nút phải mang lớp, không mang lề inline.
+    const tsx = doc("./pages/Permissions.tsx");
+    expect((tsx.match(/className="rh-nut"/g) || []).length, "cả nhánh nút Lưu lẫn nhánh 'khóa'").toBe(2);
+    expect(tsx).not.toMatch(/marginTop:\s*4/);
+  });
+});
+
 describe("Nhật ký hoạt động + hộp Tổng báo giá", () => {
   it("ô chọn hoạt động có trần bề rộng (tự rộng ~527px theo nhãn dài nhất → hàng lọc vỡ đôi ở 1280px)", () => {
     expect(luat(".toolbar select.au-loc")).toMatch(/max-width:\s*\d+px/);

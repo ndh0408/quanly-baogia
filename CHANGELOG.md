@@ -12,12 +12,13 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1109 commit**, từ 2026-05-29 tới 2026-11-25.
+**1110 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
 ## 2026-11-25
 
+- `cdf804a` fix(giao diện): ô công thức dài nổi hẳn lên khi chọn + soát hiển thị 1280×720 / mobile / tối
 - `0e07fae` docs(CHANGELOG): sinh lại
 - `351b13a` fix(image): thêm sàn musl-utils >= 1.2.6-r3 (cùng CVE-2026-107891 — gói riêng không tự nâng theo musl)
 - `72ca88c` docs(CHANGELOG): sinh lại

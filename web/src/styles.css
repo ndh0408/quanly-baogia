@@ -3378,6 +3378,33 @@ button.qn-text:hover {
 .perm-matrix tbody tr:not(.perm-group-row):hover td {
   background: var(--surface-hover);
 }
+/* Cột vai trò RỘNG ĐỀU + nút Lưu mọi cột CÙNG MỘT HÀNG. Bảng tự co theo chữ nên năm cột vai trò rộng 119–159px (đo 1280×720):
+   cột hẹp nhất (Nhân sự) gấp dòng "1 theo vai trò · 0 tùy chỉnh" thành 3 dòng → nút Lưu của nó thấp hơn các cột khác 8px.
+   table-layout: fixed chia đều phần sau cột Quyền; ô tiêu đề cao 1px là mẹo để .role-head `height: 100%` bám đúng chiều cao hàng
+   tiêu đề, rồi .rh-nut `margin-top: auto` dồn nút / nhãn "khóa" xuống đáy. Chia đều CHỈ ở màn rộng: ≤920px bảng thành khối cuộn
+   ngang chữ một dòng (public/style.css), ở đó 26% làm bảng tự nới cho cột Quyền đủ 26% — đo 390px: cột Quyền 433px, bảng dài thêm. */
+@media not all and (max-width: 920px) {
+  .perm-matrix {
+    table-layout: fixed;
+  }
+  .perm-matrix thead th:first-child {
+    width: 26%;
+  }
+}
+.perm-matrix thead th {
+  height: 1px;
+}
+.perm-matrix .role-head {
+  display: flex;
+  height: 100%;
+}
+.perm-matrix .role-head > .rh-nut {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin-top: auto;
+  padding-top: 4px;
+}
 
 /* Thông báo: feed giới hạn bề rộng đọc + chevron báo "bấm được" + meta dễ đọc hơn */
 .notif {
