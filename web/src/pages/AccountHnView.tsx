@@ -214,11 +214,12 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   const defTplId = tplList[0]?.id;
   const tplOf = (id?: number) => mauBangHn({ templateId: id }, templates, q.companyId);
   const usesDaysOf = (id?: number) => !!tplOf(id)?.layout?.hasDays;
+  const usesShiftsOf = (id?: number) => !!tplOf(id)?.layout?.hasShifts;   // Số Ca (CINETOUR) — như Số Ngày
   const addrDetailOf = (id?: number) => !!(tplOf(id)?.layout?.reserveDetail ?? tplOf(id)?.layout?.hasDetail);
   const newSheetTemplateId = (code?: string | null) => (code ? templates.find((x) => x.code === code)?.id : undefined) ?? hnTables[0]?.templateId ?? (mauMacDinhMoi(templates, q.companyId)?.id || defTplId);   // bảng mới: mẫu đầu theo thứ tự hiển thị
 
   // L64: chỉ nhân Số Ngày khi mẫu của bảng CÓ ngày — cùng luật với tổng đầu khối của HnTables.
-  const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never, usesDaysOf(t.templateId)), 0);
+  const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never, usesDaysOf(t.templateId), usesShiftsOf(t.templateId)), 0);
 
   // NẠP TỪ EXCEL — dùng CHUNG modal với trình soạn báo giá (xem trước từng tab rồi mới nạp).
   // Bảng HN có đúng hình dạng { name, templateId, groupSubtotal, items } mà modal cần, nên truyền
@@ -268,10 +269,10 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       // máy chủ nay cũng tính theo mẫu từ đợt 4 — quoteUtils.bangNoiBoCoNgay). Việc dọn này trước đây làm ngay
       // LÚC VẼ (HnTables) nên đổi mẫu qua lại là mất số Ngày.
       const goi = hnTables.map((t) => {
-        const coNgay = usesDaysOf(t.templateId);
+        const coNgay = usesDaysOf(t.templateId), coCa = usesShiftsOf(t.templateId);
         return {
           name: t.name, templateId: t.templateId, groupSubtotal: !!t.groupSubtotal,
-          items: (t.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; delete (o as ItemK)._k; return o; }),
+          items: (t.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; if (!coCa && o.shifts != null) o.shifts = null; delete (o as ItemK)._k; return o; }),
         };
       });
       await api.saveHn(q.id, goi, q.updatedAt, q.hnRev);
@@ -380,6 +381,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
           sheets={hnTables as never}
           templates={templates}
           usesDaysOf={usesDaysOf}
+          usesShiftsOf={usesShiftsOf}
           addrDetailOf={addrDetailOf}
           newSheetTemplateId={newSheetTemplateId}
           khongCoTongTien

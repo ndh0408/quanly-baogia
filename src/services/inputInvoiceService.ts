@@ -25,7 +25,7 @@ import { emitChange } from "../sse.js";
 import { decodeDataUrl, sniffImage, sha256, MAX_PROOF_BYTES } from "../paymentProof.js";
 import { PAYMENT_PROOF_DATA_URL_RE } from "../validators.js";
 import { bangNoiBoTheoSheet, bangHnTheoBaoGia } from "../bangNoiBoSql.js";
-import { dsMauBangNoiBo, bangNoiBoCoNgay, type MauBangNoiBo } from "../quoteUtils.js";
+import { dsMauBangNoiBo, bangNoiBoCoNgay, bangNoiBoCoCa, type MauBangNoiBo } from "../quoteUtils.js";
 import { daDuyetHangHn } from "../hnDuyetHang.js";
 import {
   khoaKhoanChi,
@@ -317,11 +317,11 @@ async function tenNguoi(db: Pick<TxClient, "user">, id: number | null | undefine
  */
 export async function gieoKhoan(
   tx: TxClient,
-  p: { quoteId: number; side: PhiaKhoanChi; rid: string; hang: DongBang | null; coNgay: boolean; nguon: "trang" | "json-cu"; actorId: number | null; actorName: string | null },
+  p: { quoteId: number; side: PhiaKhoanChi; rid: string; hang: DongBang | null; coNgay: boolean; coCa?: boolean; nguon: "trang" | "json-cu"; actorId: number | null; actorName: string | null },
 ): Promise<{ id: number; taoMoi: boolean }> {
   const h = hatGiongJson(p.hang?.it);
   const paidByName = h.paid ? await tenNguoi(tx, h.paidById) : null;
-  const rowSnapshot = p.hang ? chupHang(p.hang, p.coNgay, p.side) : {};
+  const rowSnapshot = p.hang ? chupHang(p.hang, p.coNgay, p.side, !!p.coCa) : {};
   const n = await tx.inputInvoiceEntry.createMany({
     data: [{
       quoteId: p.quoteId, side: p.side, rid: p.rid,
@@ -420,6 +420,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
     // cũ chưa có trạng thái riêng suy từ CẢ PHẦN đã duyệt — src/hnDuyetHang.ts).
     const duDieuKien = !!hang && (side === "hn" ? daDuyetHangHn(hang.it, q) : hang.it.approved === true);
     const coNgay = hang ? bangNoiBoCoNgay(hang.t, q.companyId, dsMau as MauBangNoiBo[]) : false;
+    const coCa = hang ? bangNoiBoCoCa(hang.t, q.companyId, dsMau as MauBangNoiBo[]) : false;   // Số Ca (mẫu CINETOUR)
 
     const [daCo] = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM "InputInvoiceEntry" WHERE "quoteId" = ${quoteId} AND side = ${side} AND rid = ${rid}`;
     if (!hang && !daCo) throw loiCoMa(404, "khong-thay-hang", "Không tìm thấy dòng này trong báo giá (có thể vừa bị xoá hoặc đổi) — hãy tải lại trang.");
@@ -432,7 +433,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
     // (4) Chưa có khoản → gieo (từ cờ JSON cũ nếu có). Hai người cùng gieo: ON CONFLICT DO NOTHING, rồi xếp hàng ở (5).
     let nguonTruoc = "bang";
     if (!daCo) {
-      const g = await gieoKhoan(tx, { quoteId, side, rid, hang, coNgay, nguon: "trang", actorId: uid, actorName: toi });
+      const g = await gieoKhoan(tx, { quoteId, side, rid, hang, coNgay, coCa, nguon: "trang", actorId: uid, actorName: toi });
       // Nhật ký "trước": khoản vừa gieo từ cờ JSON cũ = nguồn json-cu; gieo trắng (chưa có dữ liệu kế toán nào) = khong.
       if (g.taoMoi) nguonTruoc = coDauVetJsonCu(hang?.it) ? "json-cu" : "khong";
     }
@@ -473,7 +474,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
         doiTich = true;
       }
       // Tích mới, hoặc tích lại khoản đã chi = "xác nhận số tiền hiện tại": chụp lại hàng làm bằng chứng số đã chi.
-      data.paidSnapshot = chupHang(hang, coNgay, side) as Prisma.InputJsonValue;
+      data.paidSnapshot = chupHang(hang, coNgay, side, coCa) as Prisma.InputJsonValue;
     } else if (b.paid === false && e.paid) {
       Object.assign(data, { paid: false, paidAt: null, paidById: null, paidByName: null, paidMethod: null, paidSnapshot: Prisma.DbNull });
       await rutAnh(proofSau, "bo-danh-dau");
@@ -533,7 +534,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
 
     if (b.invoiceDate !== undefined) data.invoiceDate = b.invoiceDate ? ngayTuChuoi(b.invoiceDate) : null;
     if (b.accountingNote !== undefined) data.accountingNote = b.accountingNote ? b.accountingNote : null;
-    if (hang) data.rowSnapshot = chupHang(hang, coNgay, side) as Prisma.InputJsonValue;
+    if (hang) data.rowSnapshot = chupHang(hang, coNgay, side, coCa) as Prisma.InputJsonValue;
     Object.assign(data, { updatedById: uid, updatedByName: toi, version: { increment: 1 } });
 
     const sau = (await tx.inputInvoiceEntry.update({ where: { id: e.id }, data, select: CHON_KHOAN })) as KhoanChiNap;
@@ -541,7 +542,7 @@ export async function ghiKhoanChi(req: Request): Promise<{ row: KhoanChiDto }> {
     return {
       dto: dtoKhoanChi({
         quoteId, side, rid, entry: sau, anh, itJson: hang?.it ?? null,
-        tienHienTai: hang ? chupHang(hang, coNgay, side).amount : null,
+        tienHienTai: hang ? chupHang(hang, coNgay, side, coCa).amount : null,
       }),
       doiTich,
       doiVat: vatSau !== (e.currentVatProofId ?? null),

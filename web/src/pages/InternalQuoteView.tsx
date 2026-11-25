@@ -24,9 +24,12 @@ const isRow = (it: any) => it && !["section", "subsection", "info"].includes(it.
 // `coNgay` (đợt 4, L64): chỉ nhân Số Ngày khi mẫu của bảng CÓ cột đó — như màn soạn và tổng máy chủ
 // (quoteUtils.extraTableSum + bangNoiBoCoNgay). Bảng mẫu không ngày mà CSDL còn days cũ từng hiện ở đây
 // gấp days lần con số trên màn soạn.
-const rowTotal = (it: any, coNgay: boolean) => {
+// `coCa`: mẫu của bảng có cột SỐ CA (CINETOUR) — cùng luật với Số Ngày (khớp ExtraTables.extraTableSum).
+const rowTotal = (it: any, coNgay: boolean, coCa = false) => {
   const qty = M.qtyForAmount(it), price = Number(it.unitPrice) || 0, days = coNgay && it.days != null ? Number(it.days) : null;
-  return Math.round(days && days > 0 ? qty * days * price : qty * price);
+  const ca = coCa && it.shifts != null ? Number(it.shifts) : null;
+  const theoNgay = days && days > 0 ? qty * days : qty;
+  return Math.round((ca && ca > 0 ? theoNgay * ca : theoNgay) * price);
 };
 
 // Ba cột NS · CHỨNG TỪ · LƯU KHO của bảng nội bộ (4e24308) — màn này là nơi tài khoản chi phí ĐỐI CHIẾU
@@ -52,6 +55,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
   if (error || !data || mau.error) return <div className="err">⚠ {errMsg(error || mau.error, "Không tải được.")} <button className="btn btn-sm" onClick={() => { void refetch(); void mau.refetch(); }}>Thử lại</button></div>;
   const q = data as Record<string, any>;
   const coNgay = (t: any) => !!mauBangHn(t, mau.data || [], q.companyId)?.layout?.hasDays;
+  const coCa = (t: any) => !!mauBangHn(t, mau.data || [], q.companyId)?.layout?.hasShifts;
   // internalSheets = bản server đã lược (tài khoản chi phí thật). Khi XEM THỬ (admin), data đầy đủ → lấy từ sheets.extraTables.
   const sheets: any[] = q.internalSheets || (q.sheets || []).map((s: any) => ({ sheetId: s.id, sheetName: s.name || null, order: s.order, tables: Array.isArray(s.extraTables) ? s.extraTables : [] }));
   // Bảng HÀ NỘI ở CẤP BÁO GIÁ — không thuộc trang nào. Thiếu dòng này thì tài khoản chi phí mất sạch
@@ -78,7 +82,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
         <div className="empty">Báo giá này chưa có bảng nội bộ.</div>
       ) : tables.map(({ s, t }, ti) => {
         const rows = (t.items || []).filter(isRow);
-        const ngay = coNgay(t);
+        const ngay = coNgay(t), ca = coCa(t);
         return (
           <div key={`${s.hn ? "hn" : s.sheetId}-${ti}`} className="list-wrap" style={{ marginBottom: 18 }}>
             <h3 style={{ margin: "4px 0 8px" }}><span className={`extra-cat-badge cat-${t.category}`}>{catLabel(t.category)}</span>{t.name ? ` — ${t.name}` : ""} {s.sheetName ? <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>({s.sheetName})</span> : null}</h3>
@@ -91,7 +95,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
                       <td>{it.name || dash}</td>
                       <td className="num">{M.fmtNumCell(it.quantity, !!it.quantityExact)}</td>
                       <td className="num">{M.fmtMoney(Number(it.unitPrice) || 0)}</td>
-                      <td className="num">{M.fmtMoney(rowTotal(it, ngay))}</td>
+                      <td className="num">{M.fmtMoney(rowTotal(it, ngay, ca))}</td>
                       <td className="col-ns" style={{ whiteSpace: "pre-line", minWidth: 120 }}>{typeof it.ns === "string" && it.ns.trim() ? it.ns : dash}</td>
                       <td className="col-chung-tu">{nhanChungTu(it.chungTu) ?? dash}</td>
                       <td className="col-luu-kho">{it.luuKho ? <span role="img" aria-label="Có lưu kho" title="Có lưu kho">✓</span> : dash}</td>
@@ -108,7 +112,7 @@ export function InternalQuoteView({ quoteId }: { quoteId: number; me: Me }) {
                 <tfoot>
                   <tr>
                     <td colSpan={3} style={{ textAlign: "right", fontWeight: 600 }}>Tổng</td>
-                    <td className="num" style={{ fontWeight: 600 }}>{M.fmtMoney(extraTableSum(t, ngay))}</td>
+                    <td className="num" style={{ fontWeight: 600 }}>{M.fmtMoney(extraTableSum(t, ngay, ca))}</td>
                     <td colSpan={SO_COT - 4} />
                   </tr>
                 </tfoot>

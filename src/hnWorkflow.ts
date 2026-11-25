@@ -13,7 +13,7 @@ import { prisma } from "./db.js";
 import { notify } from "./notifications.js";
 import { audit } from "./audit.js";
 import { canOnQuote, can, laAccountPhu, PERMISSIONS as P } from "./permissions.js";
-import { QUOTE_INCLUDE, sanitizeHnTables, hnRevCua, dsMauBangNoiBo, bangNoiBoCoNgay } from "./quoteUtils.js";
+import { QUOTE_INCLUDE, sanitizeHnTables, hnRevCua, dsMauBangNoiBo, bangNoiBoCoNgay, bangNoiBoCoCa } from "./quoteUtils.js";
 import { reconcileExtraPayments } from "./services/quoteService.js";
 import { emitChange } from "./sse.js";
 import { reconcileTrangThaiHn, vatChatHoaHn, apThaoTacHangHn, tomTatHn, hangTienHn, type ThaoTacHangHn } from "./hnDuyetHang.js";
@@ -124,6 +124,7 @@ export async function saveHn(req: Request) {
   const mienChotTien = can(req.session, P.INVOICE_INPUT_PAY);
   const dsMau = await dsMauBangNoiBo();   // luật cột Số Ngày theo mẫu — để so tiền hàng đã khoá đúng như máy tính tiền
   const coNgay = (t: Record<string, any>) => bangNoiBoCoNgay(t, existing.companyId, dsMau);
+  const coCa = (t: Record<string, any>) => bangNoiBoCoCa(t, existing.companyId, dsMau);
 
   await prisma.$transaction(async (tx) => {
     // KHOÁ RỒI MỚI ĐỌC. Cột jsonb vẫn là read-modify-write nguyên khối, nên bỏ khoá QuoteSheet mà
@@ -182,7 +183,7 @@ export async function saveHn(req: Request) {
     const mat = hangDaChiBiMat("hn", hnDb, payload, daChi);
     if (mat.length) throw loiHangDaChi(mat);
     // Trạng thái duyệt từng hàng do server sở hữu: lấy lại theo rid; hàng đã gửi / đã duyệt mà bị sửa / xoá → 409.
-    reconcileTrangThaiHn(boc[0].extraTables, hnDb, tuoi, { khoaChoDuyet: true, coNgayDb: coNgay });
+    reconcileTrangThaiHn(boc[0].extraTables, hnDb, tuoi, { khoaChoDuyet: true, coNgayDb: coNgay, coCaDb: coCa });
 
     const moi = sanitizeHnTables(boc[0].extraTables);
     // `hnStatus` = TÓM TẮT các hàng (mọi hàng vừa mang trạng thái riêng). Hàng bị trả vẫn "bị trả" tới khi gửi lại.

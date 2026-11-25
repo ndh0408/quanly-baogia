@@ -544,6 +544,126 @@ TEMPLATE_CONFIGS.clofull_conngay = {
   },
 };
 
+// ===== CINETOUR — bốn mẫu có cột SỐ CA (chủ repo 2026-11-25) =====
+// Mỗi công ty HAI mẫu, bê nguyên bố cục mẫu thường của chính công ty đó và THÊM ĐÚNG MỘT cột "SỐ CA":
+//   Không ngày: Thành Tiền = SL × Số Ca × Đơn Giá          (Số Ca đứng ngay sau SỐ LƯỢNG)
+//   Có ngày:    Thành Tiền = SL × Số Ngày × Số Ca × Đơn Giá (Số Ca đứng ngay sau SỐ NGÀY)
+// VỊ TRÍ CỘT: Số Ca là một THỪA SỐ của Thành Tiền như Số Ngày, nên đứng trong dải thừa số liền nhau
+// SL → [Số Ngày] → Số Ca, ngay trước ĐƠN GIÁ — đọc trái sang phải là đọc đúng phép nhân, và lưới web / sơ đồ chữ
+// cột (web/src/lib/soDoDiaChi.ts, buildFormulaContext ở src/quoteFormula.ts) xếp cùng một thứ tự.
+// Số Ca trống / 0 = ×1 — y luật Số Ngày (`days || 1`): ô Số Ca trong tệp ghi 1, Thành Tiền không bao giờ về 0 vì
+// quên điền ca. Cờ `layout.hasShifts` (metaService) suy từ `columns.shifts` dưới đây — KHÔNG có cột thì mẫu không
+// nhân Số Ca, và máy chủ ép `shifts = null` trước khi tính/ghi (quoteUtils.chuanHoaSoCaTheoMau).
+// Bốn tệp mẫu dựng lại được, script tự soi đầu ra:  node scripts/dung-mau-cinetour.mjs
+
+/** Khối tổng của mẫu: hộp nhãn `nhanTu:nhanDen` (hai cột ngay trước cột tiền), số ở cột `tien`. Giữ nhãn + rowOffset
+ *  của mẫu gốc (`goc`), chỉ đổi toạ độ — mẫu CINETOUR có ngày dài thêm một cột nên khối tổng dịch theo. */
+function khoiTongTai(goc: any, nhanTu: string, nhanDen: string, tien: string) {
+  const nhan = [[nhanTu, nhanDen]];
+  return {
+    subtotal: { ...goc.subtotal, labelCells: nhan, valueCell: tien,
+      formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(${tien}${first}:${tien}${last})` },
+    vat: { ...goc.vat, labelCells: nhan, valueCell: tien,
+      formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `${tien}${subtotalRow}*${vatPct}%` },
+    discount: { ...goc.discount, labelCells: nhan, valueCell: tien },
+    total: { ...goc.total, labelCells: nhan, valueCell: tien,
+      formula: ({ subtotalRow, vatRow, discountRow }: { subtotalRow: number; vatRow: number; discountRow: number | null }) =>
+        discountRow ? `${tien}${subtotalRow}+${tien}${vatRow}-${tien}${discountRow}` : `${tien}${subtotalRow}+${tien}${vatRow}` },
+  };
+}
+
+// ── GN CINETOUR (không ngày) — 8 cột, CÙNG khung với GN có ngày (`unibenfood`), ô "SỐ NGÀY" đổi nhãn thành "SỐ CA" ──
+//   B     C          D     E          F       G        H            I
+//   STT   Hạng Mục   ĐVT   SỐ LƯỢNG   SỐ CA   ĐƠN GIÁ  THÀNH TIỀN   GHI CHÚ
+// Bản GN không ngày giấu cột Chi Tiết (gộp C:D), nên "không ngày + Số Ca" nhìn ra đúng khung tám cột của bản có
+// ngày: dùng chung nền đó thì mọi tuỳ biến của GN (khối tổng, chân trang, xoá nhãn "Ms.") đi theo spread.
+// KHÔNG chừa khe Chi Tiết trong sơ đồ chữ cột: mẫu mới, không có công thức cũ nào trỏ theo khe đó.
+TEMPLATE_CONFIGS.gn_cinetour = {
+  ...TEMPLATE_CONFIGS.unibenfood,
+  filePath: "templates/GN_Cinetour_KhongNgay.xlsx",
+  sheetName: "GN CINETOUR",
+  displayName: "GN CINETOUR (không ngày)",
+  items: {
+    ...TEMPLATE_CONFIGS.unibenfood.items,
+    columns: { stt: "B", name: "C", unit: "D", quantity: "E", shifts: "F", unitPrice: "G", amount: "H", notes: "I" },
+    amountFormula: (r: number) => `G${r}*E${r}*F${r}`,   // Đơn Giá × SL × Số Ca
+  },
+};
+
+// ── GN CINETOUR (có ngày) — 9 cột: chèn "SỐ CA" vào sau "SỐ NGÀY" của GN có ngày; từ cột G trở đi dịch một cột ──
+//   B     C          D     E          F         G       H        I            J
+//   STT   Hạng Mục   ĐVT   SỐ LƯỢNG   SỐ NGÀY   SỐ CA   ĐƠN GIÁ  THÀNH TIỀN   GHI CHÚ
+// Khai lại mọi toạ độ ngang dịch theo: khối tổng (hộp nhãn G:H, tiền ở I — tệp mẫu gộp đúng G:H, xem script dựng),
+// dòng Ghi chú + chân trang kéo tới J, ô ghi chú lạc của mẫu Marico J16 → K16 (J nay là cột GHI CHÚ thật).
+TEMPLATE_CONFIGS.gn_cinetour_conngay = {
+  ...TEMPLATE_CONFIGS.unibenfood,
+  filePath: "templates/GN_Cinetour_CoNgay.xlsx",
+  sheetName: "GN CINETOUR",
+  displayName: "GN CINETOUR (có ngày)",
+  cleanup: {
+    ...TEMPLATE_CONFIGS.unibenfood.cleanup,
+    // Khai lại, KHÔNG kế thừa "J16": ở mẫu chín cột J là cột GHI CHÚ của người dùng. Ô ghi chú lạc của mẫu Marico
+    // trôi sang K16 (script dựng đã dọn — giữ ở đây làm lớp chắn thứ hai); B3/E3 là nhãn "Ms." như mọi mẫu GN.
+    extraCellsToClear: ["K16", "B3", "E3"],
+  },
+  items: {
+    ...TEMPLATE_CONFIGS.unibenfood.items,
+    columns: { stt: "B", name: "C", unit: "D", quantity: "E", days: "F", shifts: "G", unitPrice: "H", amount: "I", notes: "J" },
+    amountFormula: (r: number) => `H${r}*E${r}*F${r}*G${r}`,   // Đơn Giá × SL × Số Ngày × Số Ca
+  },
+  totals: khoiTongTai(TEMPLATE_CONFIGS.unibenfood.totals, "G", "H", "I"),
+  palette: {
+    ...TEMPLATE_CONFIGS.unibenfood.palette,
+    note: { ...TEMPLATE_CONFIGS.unibenfood.palette.note, colTo: "J" },
+    footer: {
+      ...TEMPLATE_CONFIGS.unibenfood.palette.footer,
+      // Cân đối như bản 8 cột: lời chào chiếm phần trái, "Ý Kiến Khách Hàng" ba cột cuối (Đơn Giá → Ghi Chú).
+      left: { ...TEMPLATE_CONFIGS.unibenfood.palette.footer.left, from: "B", to: "G" },
+      customer: { ...TEMPLATE_CONFIGS.unibenfood.palette.footer.customer, from: "H", to: "J" },
+    },
+  },
+};
+
+// ── CLF CINETOUR (không ngày) — 9 cột, CÙNG khung với CLF có ngày (`clofull_conngay`), "SỐ NGÀY" đổi nhãn "SỐ CA" ──
+//   B     C          D          E     F           G       H         I             J
+//   STT   Hạng Mục   Chi Tiết   ĐVT   SỐ LƯỢNG    SỐ CA   ĐƠN GIÁ   THÀNH TIỀN    Ghi Chú
+// Colorfull giữ cột Chi Tiết (xem `clofull_decor`), nên thêm Số Ca là bảng dài thêm một cột thật — đúng khung chín
+// cột mà bản có ngày đã dựng. Mọi toạ độ (khối "Kính gửi" B3:J3, ngày H17, tên người ký H22…) kế thừa từ đó.
+TEMPLATE_CONFIGS.clofull_cinetour = {
+  ...TEMPLATE_CONFIGS.clofull_conngay,
+  filePath: "templates/CLF_Cinetour_KhongNgay.xlsx",
+  sheetName: "CLF CINETOUR",
+  displayName: "CLF CINETOUR (không ngày)",
+  items: {
+    ...TEMPLATE_CONFIGS.clofull_conngay.items,
+    columns: { stt: "B", name: "C", detail: "D", unit: "E", quantity: "F", shifts: "G", unitPrice: "H", amount: "I", notes: "J" },
+    amountFormula: (r: number) => `H${r}*F${r}*G${r}`,   // Đơn Giá × SL × Số Ca
+  },
+};
+
+// ── CLF CINETOUR (có ngày) — 10 cột: chèn "SỐ CA" vào sau "SỐ NGÀY" của CLF có ngày; từ cột H trở đi dịch một cột ──
+//   B     C          D          E     F           G          H       I         J             K
+//   STT   Hạng Mục   Chi Tiết   ĐVT   SỐ LƯỢNG    SỐ NGÀY    SỐ CA   ĐƠN GIÁ   THÀNH TIỀN    Ghi Chú
+// Khai lại như `clofull_conngay` đã làm với bản không ngày: ngày chân trang H17 → I17, khối "Kính gửi" B3:K3, tên
+// người ký nhúng cứng H22 → I22, hai ô chú thích K5/K8 → L5/L8 (K là cột Ghi Chú thật), khối tổng H:I / J.
+TEMPLATE_CONFIGS.clofull_cinetour_conngay = {
+  ...TEMPLATE_CONFIGS.clofull_conngay,
+  filePath: "templates/CLF_Cinetour_CoNgay.xlsx",
+  sheetName: "CLF CINETOUR",
+  displayName: "CLF CINETOUR (có ngày)",
+  cells: { ...TEMPLATE_CONFIGS.clofull_conngay.cells, date: "I17" },
+  headerMerges: ["B3:K3"],
+  cleanup: { ...TEMPLATE_CONFIGS.clofull_conngay.cleanup, extraCellsToClear: ["L5", "L8", "I22", "C3"] },
+  items: {
+    ...TEMPLATE_CONFIGS.clofull_conngay.items,
+    columns: { stt: "B", name: "C", detail: "D", unit: "E", quantity: "F", days: "G", shifts: "H", unitPrice: "I", amount: "J", notes: "K" },
+    amountFormula: (r: number) => `I${r}*F${r}*G${r}*H${r}`,   // Đơn Giá × SL × Số Ngày × Số Ca
+    // Như bản có ngày, chỉ khác cột Thành Tiền nay là J.
+    columnWidths: { B: 7, C: 34, D: 32.36328125, J: 18 },
+  },
+  totals: khoiTongTai(TEMPLATE_CONFIGS.clofull_conngay.totals, "H", "I", "J"),
+};
+
 
 export function getConfig(code: string) {
   const c = TEMPLATE_CONFIGS[code];

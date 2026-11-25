@@ -115,7 +115,20 @@ async function main() {
       filePath: "templates/GN_KhongNgay.xlsx",
     },
   });
-  console.log(`✓ Templates GN: 3`);
+  // GN CINETOUR (không ngày / có ngày): thêm cột SỐ CA — Thành Tiền = SL × [Số Ngày] × Số Ca × Đơn Giá.
+  // Bố cục ở templateConfigs.ts; tệp mẫu dựng lại: node scripts/dung-mau-cinetour.mjs. Production nhận qua
+  // migration 20261125090100_cinetour_templates (deploy không chạy seed).
+  for (const [code, name, filePath] of [
+    ["gn_cinetour", "GN CINETOUR (không ngày)", "templates/GN_Cinetour_KhongNgay.xlsx"],
+    ["gn_cinetour_conngay", "GN CINETOUR (có ngày)", "templates/GN_Cinetour_CoNgay.xlsx"],
+  ]) {
+    await prisma.quoteTemplate.upsert({
+      where: { code },
+      create: { code, name, companyId: giaNguyen.id, filePath },
+      update: { name, companyId: giaNguyen.id, filePath },
+    });
+  }
+  console.log(`✓ Templates GN: 5`);
 
   // === Clofull company + its no-date template (new CLF.xls form) ===
   const clofull = await prisma.company.upsert({
@@ -180,7 +193,18 @@ async function main() {
       filePath: "templates/CLF_CoNgay.xlsx",
     },
   });
-  console.log(`✓ Template CLF: 3`);
+  // CLF CINETOUR (không ngày / có ngày) — như hai mẫu GN CINETOUR ở trên.
+  for (const [code, name, filePath] of [
+    ["clofull_cinetour", "CLF CINETOUR (không ngày)", "templates/CLF_Cinetour_KhongNgay.xlsx"],
+    ["clofull_cinetour_conngay", "CLF CINETOUR (có ngày)", "templates/CLF_Cinetour_CoNgay.xlsx"],
+  ]) {
+    await prisma.quoteTemplate.upsert({
+      where: { code },
+      create: { code, name, companyId: clofull.id, filePath },
+      update: { name, companyId: clofull.id, filePath },
+    });
+  }
+  console.log(`✓ Template CLF: 5`);
 
   // === Default notification channel preferences ===
   await prisma.setting.upsert({

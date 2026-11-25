@@ -81,6 +81,12 @@ everything from `0_init` directly.
   "InputInvoiceEntry";` (ghi sẵn ở đầu `migration.sql`) — và phải gỡ luôn dòng của migration này
   trong `_prisma_migrations`, nếu không lượt `migrate deploy` sau tưởng nó đã áp và bản mới chạy thiếu
   bảng. Có dữ liệu thì **KHÔNG lùi schema**: lùi ảnh (`deploy.sh rollback`) là đủ.
+- `20261125090000_quote_item_shifts` — cột SỐ CA của mẫu CINETOUR: `QuoteItem.shifts DECIMAL(10,2)` NULL được, không
+  DEFAULT (cùng kiểu với `days`). **Thuần thêm cột** — NULL = ×1 nên tiền mọi báo giá đang có không đổi; bản app CŨ
+  chạy tiếp được (không biết cột). Lùi schema chỉ khi chưa hạng mục nào mang số ca.
+- `20261125090100_cinetour_templates` — bốn mẫu CINETOUR (`gn_cinetour`, `gn_cinetour_conngay`, `clofull_cinetour`,
+  `clofull_cinetour_conngay`): `INSERT … ON CONFLICT (code) DO NOTHING`, tra công ty theo MÃ (`gia_nguyen`, `clofull`).
+  Chạy lại không nhân đôi; CSDL chưa seed thì không chèn gì. Tệp mẫu dựng bằng `node scripts/dung-mau-cinetour.mjs`.
 
 ### Drift ĐƯỢC PHÉP — danh sách ĐÍCH DANH, do NOT drop
 

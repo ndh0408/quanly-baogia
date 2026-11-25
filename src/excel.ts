@@ -28,6 +28,13 @@ function qtyExact(x: any) {
   return n < 0 ? -t : t;
 }
 const qtyForAmount = (it: any) => it?.quantityExact ? qtyExact(it.quantity) : qtyRound(it?.quantity);
+/** Thành Tiền 1 dòng theo cột CỦA MẪU: SL × [Số Ngày] × [Số Ca] × Đơn Giá. Số Ngày / Số Ca trống (0, null) = 1 — đúng
+ *  số ghi vào ô đó của tệp, và đúng lineAmount (shared/quote-math.ts). Nhân CHÍNH XÁC rồi mới làm tròn (XLSX-06). */
+function thanhTienDong(it: any, cols: Record<string, string | undefined>) {
+  const qty = qtyForAmount(it), price = Number(it.unitPrice) || 0;
+  const ngay = cols.days ? [Number(it.days) || 1] : [], ca = cols.shifts ? [Number(it.shifts) || 1] : [];
+  return nhanLamTronDong(qty, ...ngay, ...ca, price);
+}
 
 // Template .xlsx files never change at runtime — read each from disk ONCE and
 // cache the bytes in RAM. Every export then loads from the cached Buffer instead
@@ -1040,9 +1047,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         if (items[i] && items[i].kind === "subsection") { curSub = i; sectionSum[i] = 0; }
         else { curSection = i; curSub = -1; sectionSum[i] = 0; }
       } else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i]) {
-        const it = items[i];
-        const qty = qtyForAmount(it), days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-        const amt = cols.days ? nhanLamTronDong(qty, days, price) : nhanLamTronDong(qty, price);   // chính xác — XLSX-06
+        const amt = thanhTienDong(items[i], cols);   // chính xác — XLSX-06
         const parent = curSub >= 0 ? curSub : curSection;
         if (parent >= 0) sectionSum[parent] += amt;
         if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
@@ -1203,6 +1208,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       }
       if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
+      if (cols.shifts) ws.getCell(`${cols.shifts}${r}`).value = null;   // hàng nhóm không có Số Ca (như Số Ngày)
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
       const o = oTienNhom(i);   // Đơn Giá / Thành Tiền nhóm: công thức sống hoặc số — xem oTienNhom
       const { gq, gmult, looseSum, subRows } = o;
@@ -1251,7 +1257,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // Program-info line: free text in the Hạng Mục cell, no STT / qty / price / amount.
       if (cols.stt) ws.getCell(`${cols.stt}${r}`).value = null;
       if (cols.name) { setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(ws.getCell(`${cols.name}${r}`)); }
-      for (const key of ["detail", "unit", "quantity", "days", "unitPrice", "amount"]) {
+      for (const key of ["detail", "unit", "quantity", "days", "shifts", "unitPrice", "amount"]) {
         if (cols[key]) ws.getCell(`${cols[key]}${r}`).value = null;
       }
       if (cols.notes) { setCell(ws, `${cols.notes}${r}`, it.notes || ""); ensureWrap(ws.getCell(`${cols.notes}${r}`)); }
@@ -1266,15 +1272,12 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       const qty = qtyForAmount(it);
       const days = Number(it.days) || 1;
       const price = Number(it.unitPrice) || 0;
-      let amt;
       // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng). Nhân CHÍNH XÁC rồi mới làm
       // tròn (XLSX-06): double cho 15 × 4,1 = 61,4999… → 61 trong khi số đã lưu (Decimal) là 62.
-      if (cols.days) {
-        amt = nhanLamTronDong(qty, days, price);
-        putNum(it, r, "days", cols.days, days);
-      } else {
-        amt = nhanLamTronDong(qty, price);
-      }
+      const amt = thanhTienDong(it, cols);
+      if (cols.days) putNum(it, r, "days", cols.days, days);
+      // Số Ca trống ghi 1 — cùng lý do với Số Ngày: ô 0 thì Excel tính lại Thành Tiền ra 0 đồng.
+      if (cols.shifts) putNum(it, r, "shifts", cols.shifts, Number(it.shifts) || 1);
       subtotal += amt * mult;
       // STT + Hạng Mục: only the group head writes them; sub-rows leave them blank,
       // then get covered by the vertical merge applied after this loop.

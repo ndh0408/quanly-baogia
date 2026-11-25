@@ -340,6 +340,8 @@ export type AnhChupHang = {
   quantity: number;
   unitPrice: number;
   days: number | null;
+  /** Số Ca (mẫu CINETOUR) — CHỈ có khoá khi bảng có cột Số Ca và hàng mang số: ảnh chụp của mọi hàng khác y như trước. */
+  shifts?: number;
   amount: number;
   category: string | null;
   tableName: string | null;
@@ -350,7 +352,7 @@ export type AnhChupHang = {
  * nhất: để còn hiện được khi hàng đã rời báo giá). Tiền qua ĐÚNG `extraTableSum` (làm tròn từng dòng, quantityExact,
  * days theo mẫu của bảng) — một phép tính thứ hai là cách có hai con số cho cùng một khoản chi.
  */
-export function chupHang(p: { it: Record<string, any>; ten: string; t: Record<string, any> }, coNgay: boolean, side: string): AnhChupHang {
+export function chupHang(p: { it: Record<string, any>; ten: string; t: Record<string, any> }, coNgay: boolean, side: string, coCa = false): AnhChupHang {
   const { it, ten, t } = p;
   return {
     name: ten || "",
@@ -358,8 +360,9 @@ export function chupHang(p: { it: Record<string, any>; ten: string; t: Record<st
     quantity: Number(it.quantity) || 0,
     unitPrice: Number(it.unitPrice) || 0,
     days: coNgay && it.days != null ? Number(it.days) : null,
+    ...(coCa && it.shifts != null && Number.isFinite(Number(it.shifts)) ? { shifts: Number(it.shifts) } : {}),
     // Một dòng, `category` bỏ trống → không lọc "chỉ hàng đã duyệt" (người gọi tự quyết hàng nào được chụp).
-    amount: extraTableSum({ items: [it] }, coNgay),
+    amount: extraTableSum({ items: [it] }, coNgay, coCa),
     category: side === "hn" ? "hanoi" : chu(t.category),
     tableName: chu(t.name),
   };
@@ -646,6 +649,7 @@ export function docAnhChup(v: unknown): AnhChupHang | null {
     quantity: Number(v.quantity) || 0,
     unitPrice: Number(v.unitPrice) || 0,
     days: v.days != null && Number.isFinite(Number(v.days)) ? Number(v.days) : null,
+    ...(v.shifts != null && Number.isFinite(Number(v.shifts)) ? { shifts: Number(v.shifts) } : {}),
     amount: Number(v.amount) || 0,
     category: chu(v.category),
     tableName: chu(v.tableName),

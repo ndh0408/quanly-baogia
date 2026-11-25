@@ -35,6 +35,8 @@ export type ImportedItem = {
   quantityExact?: boolean;
   unitPrice: number;
   days?: number | null;
+  /** SỐ CA (mẫu CINETOUR) — trống/0 = ×1 như Số Ngày. */
+  shifts?: number | null;
   notes?: string;
   internalNote?: string;
   /** Công thức dạng canonical "{field:row}" — web đổi sang chữ cột lưới đích (lib/importApply.ts). */
@@ -59,6 +61,8 @@ export type ImportedSheet = {
   templateName?: string | null;
   templateWhy?: string;
   hasDays: boolean;
+  /** Bảng có cột SỐ CA (mẫu CINETOUR) — cùng vai với hasDays. */
+  hasShifts: boolean;
   numberSubs: boolean;
   groupSubtotal: boolean;
   showImages: boolean;
@@ -91,6 +95,7 @@ const HEADER_ROLE: Record<string, string> = {
   "DVT": "unit", "DON VI": "unit", "DON VI TINH": "unit", "UNIT": "unit",
   "SO LUONG": "quantity", "SL": "quantity", "QTY": "quantity", "QUANTITY": "quantity",
   "SO NGAY": "days", "NGAY": "days", "DAYS": "days",
+  "SO CA": "shifts", "CA": "shifts", "SHIFT": "shifts", "SHIFTS": "shifts",
   "DON GIA": "unitPrice", "GIA": "unitPrice", "UNIT PRICE": "unitPrice", "PRICE": "unitPrice",
   "THANH TIEN": "_amount", "AMOUNT": "_amount",
   "GHI CHU": "notes", "NOTES": "notes", "NOTE": "notes", "REMARK": "notes",
@@ -439,14 +444,14 @@ function fillOf(cell: Cell | null): string {
   return (f && f.pattern === "solid" && f.fgColor?.argb) ? String(f.fgColor.argb).toUpperCase() : "";
 }
 
-function markedTemplate(ws: ExcelJS.Worksheet, hasDays: boolean): string | null {
+function markedTemplate(ws: ExcelJS.Worksheet, hasDays: boolean, hasShifts = false): string | null {
   const raw = cellText(ws.getCell("A1").value).trim();
   if (!raw.startsWith(TEMPLATE_MARKER_PREFIX)) return null;
   const code = raw.slice(TEMPLATE_MARKER_PREFIX.length).trim();
   const cfg = TEMPLATE_CONFIGS[code];
   if (!cfg) return null;
   // Marker chỉ được tin khi cấu trúc cốt lõi vẫn khớp; file bị sửa/chắp sheet sẽ quay về heuristic.
-  return !!cfg.items?.columns?.days === hasDays ? code : null;
+  return !!cfg.items?.columns?.days === hasDays && !!cfg.items?.columns?.shifts === hasShifts ? code : null;
 }
 
 // ===== Dò HÀNG TIÊU ĐỀ =====
@@ -479,7 +484,7 @@ function findHeaderRow(ws: ExcelJS.Worksheet): HeaderHit | null {
 // ===== Đọc 1 sheet =====
 function emptySheet(index: number, name: string): ImportedSheet {
   return {
-    index, name, hasDays: false, numberSubs: false, groupSubtotal: false, showImages: false,
+    index, name, hasDays: false, hasShifts: false, numberSubs: false, groupSubtotal: false, showImages: false,
     items: [], warnings: [],
     stats: { rows: 0, items: 0, sections: 0, subsections: 0, subs: 0, infos: 0, formulas: 0, formulasDropped: 0 },
   };
@@ -516,9 +521,10 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
   base.headerRow = hit.row;
   base.hasDays = colOf.days != null;
+  base.hasShifts = colOf.shifts != null;
   base.showImages = colOf._images != null;
   base.columns = Object.fromEntries(Object.entries(colOf).map(([role, c]) => [role, colLetter(c)]));
-  const markerCode = markedTemplate(ws, base.hasDays);
+  const markerCode = markedTemplate(ws, base.hasDays, base.hasShifts);
   // Dấu mã mẫu nhúng ở ô A1 = bằng chứng file do CHÍNH app xuất ra. Dùng ở bocTienToThuTu().
   base.fromApp = !!markerCode;
   const appBannerCell = markerCode ? TEMPLATE_CONFIGS[markerCode]?.cells?.infoBannerCell : null;
@@ -585,7 +591,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // Hết bảng khi gặp dòng TỔNG CỘNG / VAT / THÀNH TIỀN / chân trang. Dòng có ĐVT + Số Lượng thì
     // vẫn là hạng mục thật (tên hạng mục có thể chứa chữ "Tổng …").
     const looksItem = !isBlank(cellAt(r, "unit")) && !isBlank(cellAt(r, "quantity"));
-    const labelCells = [stt, textAt(r, "quantity"), textAt(r, "unitPrice"), textAt(r, "days")];
+    const labelCells = [stt, textAt(r, "quantity"), textAt(r, "unitPrice"), textAt(r, "days"), textAt(r, "shifts")];
     const hitTotals = labelCells.some((t) => t && (RE_TOTALS.test(normHdr(t)) || RE_FOOTER.test(normHdr(t))));
     if (hitTotals && !looksItem) { stopRow = r; break; }
     if (name && (RE_FOOTER.test(normHdr(name)) || RE_TOTALS.test(normHdr(name))) && !looksItem && isBlank(cellAt(r, "unitPrice"))) { stopRow = r; break; }
@@ -622,10 +628,10 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   };
   const bangChuSo: string[][] = [];
   for (const r of bodyRows) {
-    const hang = (["quantity", "days", "unitPrice", "_amount"] as const).map((role) => chuSo(cellAt(r, role)));
+    const hang = (["quantity", "days", "shifts", "unitPrice", "_amount"] as const).map((role) => chuSo(cellAt(r, role)));
     if (hang.some(Boolean)) bangChuSo.push(hang);
   }
-  const qu = suyQuyUocSo(bangChuSo, (c) => c >= 2);
+  const qu = suyQuyUocSo(bangChuSo, (c) => c >= 3);   // hai cột cuối (Đơn Giá, Thành Tiền) là cột tiền
 
   // Dòng có đủ ĐVT + SL + Đơn Giá THƯỜNG — hình dạng hạng mục. "Không thường" = Đơn Giá gom các ô ở
   // dòng BÊN DƯỚI, tính cả cột ĐƠN GIÁ chứ không chỉ Thành Tiền: nhóm CHÍNH bản BANNER có nhóm con được
@@ -748,18 +754,19 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     it.quantity = numOf(cellAt(r, "quantity"), true, qu);
     it.unitPrice = isGroup ? 0 : numOf(cellAt(r, "unitPrice"), false, qu);
     if (colOf.days) it.days = isGroup ? null : (numOf(cellAt(r, "days"), true, qu) || null);
-    if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; it.days = null; }
+    if (colOf.shifts) it.shifts = isGroup ? null : (numOf(cellAt(r, "shifts"), true, qu) || null);   // Số Ca: số đo, trống = ×1
+    if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; it.days = null; if (colOf.shifts) it.shifts = null; }
 
     // Ô SỐ mà lại là NGÀY THÁNG (khách gõ nhầm ô) → numOf trả 0, phải nói rõ để không âm thầm mất tiền.
     // Số Ngày và SL của NHÓM về 0 / trống thì app tính ×1 — câu báo nói đúng con số app dùng, như cảnh báo ô
     // CHỮ bên dưới (soát toàn diện đợt 5; trước đây mọi ô đều ghi "đã để 0").
-    const deLaiO = (role: string) => (role === "days" || (isGroup && role === "quantity") ? "đã bỏ trống (tính như 1)" : "đã để 0");
-    for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"]] as const) {
+    const deLaiO = (role: string) => (role === "days" || role === "shifts" || (isGroup && role === "quantity") ? "đã bỏ trống (tính như 1)" : "đã để 0");
+    for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"], ["shifts", "Số Ca"]] as const) {
       if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — ${deLaiO(role)}, cần nhập lại`);
     }
     // Ô số đang LỖI trong Excel → numOf đọc thành 0. Nói rõ, đừng để lẫn với ô trống (XLSX-08).
     if (kind !== "info") {
-      for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"], ["_amount", "Thành Tiền"]] as const) {
+      for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"], ["shifts", "Số Ca"], ["_amount", "Thành Tiền"]] as const) {
         if (isGroup && role !== "quantity") continue;   // nhóm: Đơn Giá/Thành Tiền do app tự tính lại
         const loi = colOf[role] ? errOf(cellAt(r, role)) : null;
         if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — ${deLaiO(role)}, cần nhập lại`);
@@ -768,7 +775,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       // không có cột Thành Tiền thì không cảnh báo nào khác bắt được. Nhóm: như trên, chỉ xét SL.
       // SL của NHÓM và Số Ngày trống / 0 thì app tính ×1 (groupMult = max(1, SL || 1); ngày trống = ×1) —
       // câu báo phải nói đúng con số app dùng, không phải "đã để 0" (phản biện đợt 4).
-      for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0]] as const) {
+      for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0], ["shifts", "Số Ca", it.shifts ?? 0]] as const) {
         if (isGroup && role !== "quantity") continue;
         const t = colOf[role] ? chuSo(cellAt(r, role)) : "";
         if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, ${deLaiO(role)}, cần nhập lại`);
@@ -781,7 +788,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // KHÔNG tự ý sửa số của khách.
     if ((kind === "item" || kind === "sub") && hasAmt) {
       const amt = numOf(cellAt(r, "_amount"), false, qu);
-      const factor = (colOf.days ? (Number(it.days) || 1) : 1) * it.unitPrice;
+      const factor = (colOf.days ? (Number(it.days) || 1) : 1) * (colOf.shifts ? (Number(it.shifts) || 1) : 1) * it.unitPrice;
       const rounded = Math.round(qtyRound(it.quantity) * factor);
       const exact = Math.round(qtyExact(it.quantity) * factor);
       const tolerance = Math.max(2, Math.abs(amt) * 0.005);
@@ -818,7 +825,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     fieldOfCol: (L: string) => {
       const role = roleOfCol.get(colIndex(L));
       // Chỉ cho tham chiếu ô SỐ (gồm cột Thành Tiền) — ref ô chữ vô nghĩa với công thức.
-      return role && ["quantity", "unitPrice", "days", "_amount"].includes(role) ? role : null;
+      return role && ["quantity", "unitPrice", "days", "shifts", "_amount"].includes(role) ? role : null;
     },
     rowToEditor: (r: number) => (rowToIdx.has(r) ? rowToIdx.get(r)! + 1 : null),
   };
@@ -829,11 +836,12 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const it = x.it;
     if (field === "_amount") {
       if (x.kind === "section" || x.kind === "subsection") return NaN;   // tổng nhóm: app tự tính
-      return nhanLamTronDong(qtyForAmount(it), colOf.days ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);   // chính xác — XLSX-06
+      return nhanLamTronDong(qtyForAmount(it), colOf.days ? (Number(it.days) || 1) : 1, colOf.shifts ? (Number(it.shifts) || 1) : 1, Number(it.unitPrice) || 0);   // chính xác — XLSX-06
     }
     if (field === "quantity") return qtyForAmount(it);
     if (field === "unitPrice") return Number(it.unitPrice) || 0;
     if (field === "days") return Number(it.days) || 0;
+    if (field === "shifts") return Number(it.shifts) || 0;   // số trong ô, như Số Ngày
     return NaN;
   };
   /** Tính giá trị công thức canonical (thay {field:row} bằng số) — dùng để tự kiểm. */
@@ -854,7 +862,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     if (bad) return null;
     return evalEditorFormula(s);
   };
-  const FIELD_VN: Record<string, string> = { quantity: "Số Lượng", unitPrice: "Đơn Giá", days: "Số Ngày" };
+  const FIELD_VN: Record<string, string> = { quantity: "Số Lượng", unitPrice: "Đơn Giá", days: "Số Ngày", shifts: "Số Ca" };
 
   // File ngoài thường cho một dòng phí tham chiếu Đơn Giá nhóm (vd `=G12*13/100`). Web không
   // lưu số tổng nhóm trong item, nên bung ref đó thành chính công thức SUM con của nhóm trước khi
@@ -886,7 +894,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const fields = isGroup
       ? [{ field: "quantity", round1: true }]
       : [{ field: "quantity", round1: true }, { field: "unitPrice", round1: false },
-         ...(colOf.days ? [{ field: "days", round1: false }] : [])];
+         ...(colOf.days ? [{ field: "days", round1: false }] : []),
+         ...(colOf.shifts ? [{ field: "shifts", round1: false }] : [])];
     for (const f of fields) {
       const cell = cellAt(x.row, f.field);
       const raw = fxOf(cell);
@@ -924,6 +933,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
         if (f.field === "quantity") x.it.quantity = appQtyRoundWrapper && got != null ? got : resolved;
         else if (f.field === "unitPrice") x.it.unitPrice = resolved;
         else if (f.field === "days") x.it.days = resolved;
+        else if (f.field === "shifts") x.it.shifts = resolved;
       }
     }
   }
@@ -1041,7 +1051,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const t = cellText(o.value).trim();
     return /^[\d\s.,()%₫đ$-]*$/i.test(t) ? "" : t;   // trống hoặc là SỐ (dữ liệu) → không phải tiêu đề con
   };
-  for (const [role, vn] of [["quantity", "Số Lượng"], ["days", "Số Ngày"], ["unitPrice", "Đơn Giá"], ["_amount", "Thành Tiền"]] as const) {
+  for (const [role, vn] of [["quantity", "Số Lượng"], ["days", "Số Ngày"], ["shifts", "Số Ca"], ["unitPrice", "Đơn Giá"], ["_amount", "Thành Tiền"]] as const) {
     const c = colOf[role];
     if (!c) continue;
     const ben = ws.getCell(hit.row, c + 1), m = ben.isMerged ? ben.master : null;
@@ -1084,9 +1094,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 }
 
 /** Tổng tiền của sheet theo đúng cách app tính (mục con cộng vào nhóm; nhóm ×SL khi bật). */
-export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "groupSubtotal">): number {
+export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "groupSubtotal"> & { hasShifts?: boolean }): number {
   // Nhân CHÍNH XÁC rồi làm tròn — khớp src/money.ts (XLSX-06). Double lệch 1đ ở giá không chia hết 10.
-  const line = (it: ImportedItem) => nhanLamTronDong(qtyForAmount(it), s.hasDays ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);
+  const line = (it: ImportedItem) => nhanLamTronDong(qtyForAmount(it), s.hasDays ? (Number(it.days) || 1) : 1, s.hasShifts ? (Number(it.shifts) || 1) : 1, Number(it.unitPrice) || 0);
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
   let total = 0, mult = 1, seen = false;
   for (const it of s.items) {
@@ -1113,6 +1123,8 @@ function guessTemplate(ws: ExcelJS.Worksheet, s: ImportedSheet, markerCode?: str
     const why: string[] = [];
     let score = 0;
     if (!!cols.days === s.hasDays) { score += 3; why.push(s.hasDays ? "có cột Số Ngày" : "không có cột Số Ngày"); } else score -= 8;
+    // Cột SỐ CA (CINETOUR) — khác biệt CẤU TRÚC như Số Ngày: lệch là nạp mất / bịa thừa số của Thành Tiền.
+    if (!!cols.shifts === !!s.hasShifts) { score += 3; if (s.hasShifts) why.push("có cột Số Ca"); } else score -= 8;
     if (!!cfg.items?.numberSubsections === s.numberSubs) { score += 2; if (s.numberSubs) why.push("nhóm con đánh số"); } else score -= 3;
     // CỘT CHI TIẾT — dấu hiệu DUY NHẤT tách nhóm mẫu Colorfull khỏi nhóm mẫu Gia Nguyễn.
     //

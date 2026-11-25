@@ -36,6 +36,7 @@ import {
   sanitizeHnTables,
   extraTableSum,
   bangNoiBoCoNgay,
+  bangNoiBoCoCa,
   dsMauBangNoiBo,
   phangThanhVien } from "../quoteUtils.js";
 import { reconcileTrangThaiHn, tomTatHn, loiKhoaHangNoiBoDaDuyet, type PhanHn } from "../hnDuyetHang.js";
@@ -93,7 +94,8 @@ async function loadAuthorizedQuote(req: Request, action: string = "read") {
 function soTienHang(it: any): string | null {
   const q = it?.quantity, dg = it?.unitPrice;
   if ((q === undefined || q === null) && (dg === undefined || dg === null)) return null;
-  return `${Number(q) || 0}|${Number(dg) || 0}|${it?.days != null ? Number(it.days) : ""}`;
+  // Số Ca (mẫu CINETOUR) đổi là tiền đổi. Chỉ nối khi hàng CÓ số ca — vân tay của mọi hàng cũ giữ nguyên.
+  return `${Number(q) || 0}|${Number(dg) || 0}|${it?.days != null ? Number(it.days) : ""}${it?.shifts != null ? `|ca${Number(it.shifts)}` : ""}`;
 }
 
 export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], isAdmin: boolean, approverId: number) {
@@ -705,6 +707,7 @@ async function ghiVungNoiBoDuocGiao(tx: TxClient, id: number, ptSheets: any[], c
   const loiKhoa = loiKhoaHangNoiBoDaDuyet(bangCuaSheets(toWrite), bangCuaSheets(sheetsDb), {
     moCotNoiBo: can(req.session, P.QUOTE_INTERNAL_APPROVE),
     coNgayDb: (t) => bangNoiBoCoNgay(t, ctyId, dsMau),
+    coCaDb: (t) => bangNoiBoCoCa(t, ctyId, dsMau),
   });
   if (loiKhoa) throw loiKhoa;
 
@@ -843,6 +846,8 @@ export async function updateQuote(req: Request) {
       moCotNoiBo: can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing),
       coNgayDb: (t) => bangNoiBoCoNgay(t, existing.companyId, dsMauHn),
       coNgayPl: (t) => bangNoiBoCoNgay(t, data.companyId ?? existing.companyId, dsMauHn),
+      coCaDb: (t) => bangNoiBoCoCa(t, existing.companyId, dsMauHn),
+      coCaPl: (t) => bangNoiBoCoCa(t, data.companyId ?? existing.companyId, dsMauHn),
     });
     data.hnTables = sanitizeHnTables(bocHn[0].extraTables);
     // `hnStatus` nay chỉ là TÓM TẮT của các hàng (mọi hàng vừa mang trạng thái riêng — xem src/hnDuyetHang.ts).
@@ -1022,6 +1027,8 @@ export async function updateQuote(req: Request) {
         moCotNoiBo: !laAccountPhu(req.session, existing) || can(req.session, P.QUOTE_INTERNAL_APPROVE),
         coNgayDb: (t) => bangNoiBoCoNgay(t, existing.companyId, dsMauHn),
         coNgayPl: (t) => bangNoiBoCoNgay(t, data.companyId ?? existing.companyId, dsMauHn),
+        coCaDb: (t) => bangNoiBoCoCa(t, existing.companyId, dsMauHn),
+        coCaPl: (t) => bangNoiBoCoCa(t, data.companyId ?? existing.companyId, dsMauHn),
       });
       if (loiKhoaSheet) throw loiKhoaSheet;
       // Bảng Hà Nội (nếu payload có): chốt + reconcile trên bản Quote vừa khoá — TRƯỚC khi xoá trang.
@@ -1093,7 +1100,7 @@ export async function updateQuote(req: Request) {
           orderBy: { order: "asc" },
           select: {
             id: true, name: true, groupSubtotal: true, discount: true, custStatus: true,
-            items: { orderBy: { order: "asc" }, select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } },
+            items: { orderBy: { order: "asc" }, select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true, shifts: true } },
           },
         });
         const t = computeQuoteTotals({ vatPercent: data.vatPercent, sheets: sheetsTuoi as any });
@@ -1510,7 +1517,7 @@ export async function listProjects(req: Request) {
   // Đợt 4 (L64 phía máy chủ): tổng hcm / hanoi / khach tính theo MẪU của từng bảng, y như màn soạn —
   // bảng mẫu không ngày mà CSDL còn days cũ không còn bị nhân ngày ở đây (xem bangNoiBoCoNgay).
   const dsMau = quotes.length ? await dsMauBangNoiBo() : [];
-  const tongBang = (t: any, companyId: number) => extraTableSum(t, bangNoiBoCoNgay(t, companyId, dsMau));
+  const tongBang = (t: any, companyId: number) => extraTableSum(t, bangNoiBoCoNgay(t, companyId, dsMau), bangNoiBoCoCa(t, companyId, dsMau));
   const bangTheoSheet = new Map<number, any[]>();
   if (quotes.length) {
     for (const r of await bangNoiBoTheoSheet(quotes.map((q: any) => q.id))) {
@@ -2314,6 +2321,7 @@ export async function duplicateQuote(req: Request) {
             quantityExact: !!it.quantityExact,
             unitPrice: it.unitPrice,
             days: it.days,
+            shifts: it.shifts ?? null,   // Số Ca (CINETOUR) — bản sao giữ đúng tiền của bản gốc
             notes: it.notes,
             internalNote: it.internalNote,
             formulas: it.formulas ?? undefined,

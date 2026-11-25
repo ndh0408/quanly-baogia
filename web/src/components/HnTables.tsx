@@ -9,6 +9,7 @@ import { KhoiSheet } from "./KhoiSheet";
 import type { DaChiTheoRid } from "../lib/daChiHang";
 import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
 import { useGiuHangKhoa } from "../lib/giuHangKhoa";
+import { hoiDoiMauBoSoCa } from "../lib/soCa";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
 //
@@ -148,7 +149,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
   if (ai < 0) ai = 0;
   const t = tables[ai] || null;
   const tpl = t ? tplOf(t) : null;
-  const usesDays = !!tpl?.layout?.hasDays, showDetail = !!tpl?.layout?.hasDetail, numberSubs = !!tpl?.layout?.numberSubsections;
+  const usesDays = !!tpl?.layout?.hasDays, usesShifts = !!tpl?.layout?.hasShifts, showDetail = !!tpl?.layout?.hasDetail, numberSubs = !!tpl?.layout?.numberSubsections;
   const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);
   /* ── MỘT CON SỐ MỘT CHỖ ───────────────────────────────────────────────────────────────────
      Bản trước in CÙNG một số tiền ở BA nơi: "Tổng:" trên đầu khối, "Tổng sheet:" do GridTable tự
@@ -164,7 +165,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
          mắt đang nhìn, không tốn thêm khối nào.
      Dòng của GridTable tắt ở cả hai ca (`sheetTotalLine={false}`). */
   const ID_LUOI = "hn";
-  const tongBang = tables.map((x) => extraTableSum(x as ExtraTable, !!tplOf(x)?.layout?.hasDays));
+  const tongBang = tables.map((x) => extraTableSum(x as ExtraTable, !!tplOf(x)?.layout?.hasDays, !!tplOf(x)?.layout?.hasShifts));
   const tong = tongBang.reduce((a, b) => a + b, 0);
   const hienTongTab = tables.length > 1;
 
@@ -265,7 +266,13 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
             <input name="tenSheet" key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${ai + 1}`}"`} aria-label="Tên sheet Hà Nội" disabled={!editable || bangCoHangKhoa(t)} title={bangCoHangKhoa(t) ? "Sheet có hàng đã duyệt — tên sheet đi theo khoản chi nên bị khoá" : undefined} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; danhDau(); }} />
             {editable && !bangCoHangKhoa(t) && (
               <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu:
-                <select name="templateId" value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>
+                <select name="templateId" value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => {
+                  // Bỏ cột Số Ca (CINETOUR → mẫu thường) là đổi tiền các hàng có Số Ca ≠ 1 → hỏi trước (lib/soCa).
+                  const id = Number(e.target.value), moi = templates.find((x) => x.id === id);
+                  const doiMau = () => { t.templateId = id; onChange(); };
+                  const hoi = hoiDoiMauBoSoCa(t.items, usesShifts, !!moi?.layout?.hasShifts, moi?.name || "mới");
+                  if (hoi) void hoi.then((dongY) => { if (dongY) doiMau(); }); else doiMau();
+                }}>
                   {sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </select>
               </label>
@@ -273,7 +280,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, o
           </div>
           <GridTable key={`hn-${ai}-${t.templateId}-${t._k}-${vKhoa}`} items={t.items} fxBar
             clfTheme={!!tplOf(t)?.code?.startsWith("clofull")}   // bảng phụ của báo giá Colorfull phải cùng màu với lưới chính và với tệp Excel
-            usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
+            usesDays={usesDays} usesShifts={usesShifts} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
             editable={editable} internalNote={false} cotNoiBo
             approveCol canApprove={!!canApprove} payCol daChi={daChi}
             khoaHang={(it) => khoa(it as HangHn)} moCotNoiBoKhiKhoa={moCotNoiBo}

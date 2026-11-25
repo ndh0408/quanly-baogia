@@ -303,6 +303,8 @@ const itemSchema = z.object({
   quantityExact: z.boolean().optional().default(false),
   unitPrice: z.coerce.number({ error: "Đơn giá phải là số" }).gte(-1e12, "Đơn giá không hợp lệ").lte(1e12, "Đơn giá không hợp lệ").default(0),
   days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").max(9_999_999, "Số ngày quá lớn").optional().nullable(),
+  // SỐ CA (mẫu CINETOUR) — cùng ràng buộc với Số Ngày (cùng cột Decimal(10,2), cùng luật trống = ×1).
+  shifts: z.coerce.number({ error: "Số ca phải là số" }).nonnegative("Số ca không được âm").max(9_999_999, "Số ca quá lớn").optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   internalNote: z.string().max(2000).optional().nullable(),   // ghi chú nội bộ — KHÔNG xuất Excel
   // BA CỘT CHỈ CỦA BẢNG NỘI BỘ (Chi phí HCM · Phí khách hàng · Hà Nội), người dùng yêu cầu 2026-09-25:

@@ -55,6 +55,7 @@ export const KHOA_DONG = [
   "quantityExact",
   "unitPrice",
   "days",
+  "shifts",   // Số Ca (mẫu CINETOUR) — buildSheetsCreate đặt khoá này cho MỌI dòng
   "notes",
   "internalNote",
   "formulas",
@@ -132,6 +133,7 @@ function bangDong(moi: Record<string, unknown>, cu: Record<string, unknown>): bo
     !!moi.quantityExact === !!cu.quantityExact &&
     bangSo(moi.unitPrice, cu.unitPrice) &&
     bangSo(moi.days, cu.days) &&
+    bangSo(moi.shifts, cu.shifts) &&
     bangChuoi(moi.notes, cu.notes) &&
     bangChuoi(moi.internalNote, cu.internalNote) &&
     chuanJson(moi.formulas ?? null) === chuanJson(cu.formulas ?? null) &&

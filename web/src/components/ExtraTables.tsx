@@ -8,6 +8,7 @@ import { KhoiSheet } from "./KhoiSheet";
 import type { DaChiTheoRid } from "../lib/daChiHang";
 import { sapMauHienThi, mauMacDinhMoi } from "../lib/thuTuMau";
 import { useGiuHangKhoa } from "../lib/giuHangKhoa";
+import { hoiDoiMauBoSoCa } from "../lib/soCa";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -29,14 +30,18 @@ type Sheet = { id?: number; extraTables?: ExtraTable[]; _activeExtra?: number; t
 // Đợt 4: mọi nơi hiện tổng đều truyền theo mẫu — kể cả InternalQuoteView và máy chủ (quoteUtils
 // extraTableSum + bangNoiBoCoNgay, cùng luật chọn mẫu với mauBangHn) — để dữ liệu CŨ còn days ở bảng mẫu
 // không ngày ra MỘT con số trên màn soạn, trang chi phí nội bộ và Quản lý dự án.
-export function extraTableSum(t: ExtraTable, usesDays?: boolean): number {
+// `usesShifts` (mẫu CINETOUR có cột SỐ CA): cùng luật với `usesDays` — `false` → không nhân Số Ca, không truyền → nhân
+// shifts > 0. Khớp máy chủ (quoteUtils.extraTableSum + bangNoiBoCoCa).
+export function extraTableSum(t: ExtraTable, usesDays?: boolean, usesShifts?: boolean): number {
   const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
   return (t?.items || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
     if (approvedOnly && !it.approved) return acc;
     const qty = M.qtyForAmount(it), price = Number(it.unitPrice) || 0;
     const days = usesDays !== false && it.days != null ? Number(it.days) : null;
-    return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);
+    const shifts = usesShifts !== false && it.shifts != null ? Number(it.shifts) : null;
+    const theoNgay = days && days > 0 ? qty * days : qty;   // cùng thứ tự nhân như trước khi có Số Ca
+    return acc + Math.round((shifts && shifts > 0 ? theoNgay * shifts : theoNgay) * price);
   }, 0);
 }
 
@@ -48,7 +53,7 @@ export function extraTableSum(t: ExtraTable, usesDays?: boolean): number {
 // trong khi cờ duyệt/thanh toán (có chứng từ đính kèm) mới là thứ không dựng lại được.
 //
 // KHÔNG tính `days`: `M.blankItem(usesDays)` đặt sẵn days = 1 cho mẫu có cột Số Ngày
-// (shared/quote-math.ts:125) → tính vào thì bảng mới tinh cũng bị hỏi vô cớ.
+// (`blankItem` ở shared/quote-math.ts — mẫu CINETOUR thì cả shifts = 1) → tính vào thì bảng mới tinh cũng bị hỏi vô cớ.
 export function extraTableHasData(t: ExtraTable | null | undefined): boolean {
   return (t?.items || []).some((it) => {
     const r = it as unknown as Record<string, unknown>;
@@ -184,7 +189,8 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   // SPA) — đổi mẫu qua lại là mất số Ngày vĩnh viễn, và mở bảng còn days cũ là bị coi "đã sửa". Tổng chỉ
   // nhân ngày khi mẫu CÓ ngày (`coNgay`), còn save() của QuoteEditor gửi days: null cho mẫu không ngày.
   const coNgay = (x: ExtraTable) => !!tplOf(x)?.layout?.hasDays;
-  const catTotal = (cat: string) => tables.reduce((a, x) => a + (x?.category === cat ? extraTableSum(x, coNgay(x)) : 0), 0);
+  const coCa = (x: ExtraTable) => !!tplOf(x)?.layout?.hasShifts;   // Số Ca (CINETOUR) — cùng luật với Số Ngày
+  const catTotal = (cat: string) => tables.reduce((a, x) => a + (x?.category === cat ? extraTableSum(x, coNgay(x), coCa(x)) : 0), 0);
   const idLuoi = (cat: string) => `extra:${cat}`;
 
   let active = Number.isInteger(sheet._activeExtra) ? (sheet._activeExtra as number) : 0;
@@ -193,7 +199,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   sheet._activeExtra = active;
   const t = tables[active] || null;
   const tpl = t ? tplOf(t) : null;
-  const showDetail = !!tpl?.layout?.hasDetail, usesDays = !!tpl?.layout?.hasDays, numberSubs = !!tpl?.layout?.numberSubsections;
+  const showDetail = !!tpl?.layout?.hasDetail, usesDays = !!tpl?.layout?.hasDays, usesShifts = !!tpl?.layout?.hasShifts, numberSubs = !!tpl?.layout?.numberSubsections;
   const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);   // giữ chỗ địa chỉ ô (xem QuoteEditor)
 
   const addTable = (cat: string) => {
@@ -236,7 +242,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                   if (dangMo && thanhChung?.dangLam === idLuoi(cat)) thanhChung.datDangLam("chinh", "Báo giá chính");
                   setMo((m) => ({ ...m, [cat]: !dangMo }));
                 }}
-                cacSheet={idxs.map((i, n) => ({ ten: tables[i].name || `Bảng ${n + 1}`, tong: extraTableSum(tables[i], coNgay(tables[i])) }))}
+                cacSheet={idxs.map((i, n) => ({ ten: tables[i].name || `Bảng ${n + 1}`, tong: extraTableSum(tables[i], coNgay(tables[i]), coCa(tables[i])) }))}
                 giaiThich="Sheet đầy đủ như báo giá (mẫu · công thức · nhóm · copy/dán) nhưng KHÔNG xuất Excel. Tổng của loại này đổ riêng sang Quản lý dự án."
                 nutThem={suaDuoc(cat) ? <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button> : null}
               >
@@ -259,7 +265,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                             muốn biết sheet nào góp bao nhiêu thì phải bấm qua từng tab rồi tự cộng
                             nhẩm. Người dùng báo: "mỗi cái chưa có tổng các sheet như báo giá".
                             Một sheet thì không in: "Tổng:" của loại ngay trên đã đúng bằng nó. */}
-                        {idxs.length > 1 && <span className="sheet-tab-tong" title="Tổng của sheet này">{M.fmtMoney(extraTableSum(tables[i], coNgay(tables[i])))}</span>}
+                        {idxs.length > 1 && <span className="sheet-tab-tong" title="Tổng của sheet này">{M.fmtMoney(extraTableSum(tables[i], coNgay(tables[i]), coCa(tables[i])))}</span>}
                         {/* onKeyDown chặn nổi bọt: nếu không, Enter trên nút xoá còn kích hoạt luôn
                             handler của tab cha ở trên → vừa xoá vừa đổi sheet trong một nhịp phím. */}
                         {suaDuoc(cat) && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
@@ -276,7 +282,13 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                     <div className="extra-table-head">
                       <span className={`extra-here cat-${cat}`}>📍 Đang ở: {label}</span>
                       <input name="tenSheet" className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${active + 1}`}"`} disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} />
-                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select name="templateId" value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select name="templateId" value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => {
+                        // Bỏ cột Số Ca (CINETOUR → mẫu thường) là đổi tiền các hàng có Số Ca ≠ 1 → hỏi trước (lib/soCa).
+                        const id = Number(e.target.value), moi = templates.find((x) => x.id === id);
+                        const doiMau = () => { t.templateId = id; onChange(); };
+                        const hoi = hoiDoiMauBoSoCa(t.items, usesShifts, !!moi?.layout?.hasShifts, moi?.name || "mới");
+                        if (hoi) void hoi.then((dongY) => { if (dongY) doiMau(); }); else doiMau();
+                      }}>{sapMauHienThi(tplList).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
                       {/* "Chuyển loại" chỉ liệt kê loại người này ĐƯỢC PHÉP sửa — không thì họ kéo
                           bảng sang loại ngoài phạm vi rồi sửa ở đó (server sẽ 409, nhưng để họ gõ
                           xong mới báo là kiểu tệ nhất). */}
@@ -292,7 +304,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                       dock={thanhChung ? thanhChung.dock : undefined}
                       anThanhThem={!!thanhChung && thanhChung.dangLam !== idLuoi(cat)}
                       onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}
-                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false} cotNoiBo
+                      usesDays={usesDays} usesShifts={usesShifts} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false} cotNoiBo
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
                       /* KHOÁ HÀNG ĐÃ DUYỆT (2026-10-06, như bảng HN): ô tắt, không xoá được — kể cả với người có quyền duyệt.
                          Bỏ tích Duyệt là mở lại ngay; máy chủ chặn bản CSDL đã duyệt (409 'hang-hcm-da-khoa'). */

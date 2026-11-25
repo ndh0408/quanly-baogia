@@ -185,6 +185,7 @@ export type InputInvoiceRow = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "sid
   category: "hcm" | "khach" | "hanoi"; tableName: string | null;
   rid: string | null; name: string; detail: string | null; unit: string | null;
   quantity: number; unitPrice: number; days: number | null; amount: number;
+  shifts?: number;   // Số Ca — chỉ có khi bảng dùng mẫu CINETOUR và hàng mang số (máy chủ src/inputInvoices.ts)
   ns: string | null; chungTu: "VAT" | "HDNS" | "TM" | null; luuKho: boolean;
   approvedAt: string | null; approvedByName: string | null;
   trangThaiHang: TrangThaiHangDauVao;
@@ -232,7 +233,7 @@ export type ProjectQuote = {
 export type EditorCompany = { id: number; name: string; shortName?: string; address?: string };
 // layout.hasDetail = CÓ hiện trường Chi Tiết · reserveDetail chỉ là khe địa chỉ công thức cũ,
 // không đồng nghĩa còn một cột Chi Tiết trên UI hay file Excel.
-export type EditorTemplate = { id: number; code?: string; name: string; companyId?: number; layout?: { hasDays?: boolean; hasDetail?: boolean; reserveDetail?: boolean; numberSubsections?: boolean } };
+export type EditorTemplate = { id: number; code?: string; name: string; companyId?: number; layout?: { hasDays?: boolean; hasShifts?: boolean; hasDetail?: boolean; reserveDetail?: boolean; numberSubsections?: boolean } };
 // PHẠM VI của "account phụ" trên MỘT báo giá. Ba khoá cuối trùng tên category của bảng nội bộ
 // (QuoteSheet.extraTables[].category) — cố ý, để không phải giữ một bảng ánh xạ thứ hai.
 export type QuoteScope = "main" | "hcm" | "hanoi" | "khach";
@@ -255,7 +256,7 @@ export type QuoteVersion = { id: string; versionNo: number; total: number; creat
 export type ImportedItem = {
   kind: "item" | "sub" | "section" | "subsection" | "info";
   label?: string; name: string; detail?: string; unit?: string;
-  quantity: number; quantityExact?: boolean; unitPrice: number; days?: number | null; notes?: string; internalNote?: string;
+  quantity: number; quantityExact?: boolean; unitPrice: number; days?: number | null; shifts?: number | null; notes?: string; internalNote?: string;
   formulas?: Record<string, string>;
   row: number;            // hàng trong file Excel (để đối chiếu)
   warn?: string[];        // cảnh báo riêng dòng đó
@@ -265,7 +266,7 @@ export type ImportedSheet = {
   headerRow?: number; firstRow?: number; lastRow?: number;
   columns?: Record<string, string>;              // field → chữ cột trong FILE
   templateCode?: string | null; templateName?: string | null; templateWhy?: string;
-  hasDays: boolean; numberSubs: boolean; groupSubtotal: boolean; showImages: boolean;
+  hasDays: boolean; hasShifts?: boolean; numberSubs: boolean; groupSubtotal: boolean; showImages: boolean;
   items: ImportedItem[];
   totals?: { subtotal?: number | null; vatPercent?: number | null; vat?: number | null; discount?: number | null; total?: number | null };
   fromApp?: boolean;              // file do CHÍNH app xuất ra (có mã mẫu nhúng ở ô A1)

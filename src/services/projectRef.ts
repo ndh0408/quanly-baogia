@@ -160,7 +160,7 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
         where: { sheetId: { in: lo } },
         // THỨ TỰ QUAN TRỌNG: dòng "section" đặt hệ số nhóm cho các dòng ĐỨNG SAU nó trong cùng sheet.
         orderBy: [{ sheetId: "asc" }, { order: "asc" }],
-        select: { sheetId: true, kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
+        select: { sheetId: true, kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true, shifts: true },
       });
       const theoSheet = new Map<number, any[]>();
       // Gieo TRỌN tập sheet của lô: sheet không có dòng nào vẫn phải ra 0 một cách tường minh,

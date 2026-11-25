@@ -7,7 +7,7 @@
 //
 // HAI hệ toạ độ KHÁC nhau phải khớp:
 //   • Cột:  editor đánh A,B,C… theo thứ tự HIỂN THỊ (_stt=A, name=B, [detail], unit,
-//           quantity, [days], unitPrice, _amount, notes) — KHÁC cột Excel của template
+//           quantity, [days], [shifts], unitPrice, _amount, notes) — KHÁC cột Excel của template
 //           (vd GN: quantity=F, unitPrice=G, amount=H). Dịch qua TÊN FIELD trung gian.
 //   • Hàng: editor ref dùng (chỉ số item + 1); Excel dùng hàng thật (firstRow + slot),
 //           có chèn hàng nhóm ở giữa. Dịch qua slotRows.
@@ -540,6 +540,7 @@ type EditorItem = {
   quantityExact?: boolean | null;
   unitPrice?: number | string | null;
   days?: number | string | null;
+  shifts?: number | string | null;
   formulas?: Record<string, string | undefined>;
 };
 
@@ -575,13 +576,15 @@ export function buildFormulaContext(
   },
 ) {
   const usesDays = !!cols.days;
+  const usesShifts = !!cols.shifts;   // mẫu CINETOUR: cột SỐ CA — cùng luật Số Ngày (trống = 1)
 
-  // Sơ đồ cột EDITOR (khớp ADDR_COLS): _stt, name, [detail], unit, quantity, [days],
+  // Sơ đồ cột EDITOR (khớp web/src/lib/soDoDiaChi.ts): _stt, name, [detail], unit, quantity, [days], [shifts],
   // unitPrice, _amount, notes. (internalNote là cột CUỐI, không xuất → không lệch chữ.)
   const editorFields = ["_stt", "name"];
   if (cols.detail) editorFields.push("detail");
   editorFields.push("unit", "quantity");
   if (usesDays) editorFields.push("days");
+  if (usesShifts) editorFields.push("shifts");
   editorFields.push("unitPrice", "_amount", "notes");
 
   const colToField: Record<string, string> = {};
@@ -594,7 +597,7 @@ export function buildFormulaContext(
   // web cho chọn ô Thành Tiền (vd "=G3*E3", "=SUM(H3:H8)") nên Excel phải xuất được y hệt.
   // VÒNG LẶP (formula ở SL/ĐG trỏ vào Thành Tiền của CHÍNH nó, trực tiếp hay gián tiếp) được
   // chặn bằng ĐỒ THỊ PHỤ THUỘC (hasCycle bên dưới) — chỉ chặn đúng công thức tạo vòng.
-  const allowedRef = new Set(["quantity", "unitPrice", "days", "_amount"]);
+  const allowedRef = new Set(["quantity", "unitPrice", "days", "shifts", "_amount"]);
 
   const ctx: FormulaContext = {
     colToField, fieldToCol, allowedRef,
@@ -624,7 +627,8 @@ export function buildFormulaContext(
     const q = it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity), p = Number(it.unitPrice) || 0;
     // Nhân CHÍNH XÁC như lưới web (shared/quote-math.ts lineAmount) — double cho 4,1 × 15 = 61 trong
     // khi web hiện 62, công thức tham chiếu ô đó lệch tự kiểm và bị hạ về số chết (soát chéo excel#11).
-    return usesDays ? nhanLamTronDong(q, Number(it.days) || 1, p) : nhanLamTronDong(q, p);
+    const ngay = usesDays ? [Number(it.days) || 1] : [], ca = usesShifts ? [Number(it.shifts) || 1] : [];
+    return nhanLamTronDong(q, ...ngay, ...ca, p);
   };
 
   // ===== Ô TỔNG NHÓM — ĐÚNG NGHĨA LƯỚI WEB (GridTable.tsx: tinhTongNhom + cellNum) =====
@@ -702,6 +706,7 @@ export function buildFormulaContext(
     // được ghi sống; Excel (fullCalcOnLoad) tính lại trên ô Số Ngày = 1 ra 50.000 → tệp khác app (L35).
     // Lưới web (GridTable cellNum) còn đọc 0 → tự kiểm lệch → ghi SỐ, tệp vẫn khớp app.
     if (field === "days") return Number(it.days) || 1;
+    if (field === "shifts") return Number(it.shifts) || 1;   // Số Ca trống: 1, đúng số excel.ts ghi vào ô
     if (field === "unitPrice") return Number(it.unitPrice) || 0;
     return 0;   // _stt / cột chữ: không nằm trong công thức xuất được (allowedRef đã chặn)
   };
@@ -768,6 +773,7 @@ export function buildFormulaContext(
     if (field === "_amount") {
       base = [{ row, field: "quantity" }, { row, field: "unitPrice" }];
       if (usesDays) base.push({ row, field: "days" });
+      if (usesShifts) base.push({ row, field: "shifts" });
     } else {
       const raw = items[row]?.formulas?.[field];
       base = raw ? refsInFormula(raw) : [];
@@ -783,6 +789,7 @@ export function buildFormulaContext(
       for (const j of thanhVien.get(row) || []) {
         base.push({ row: j, field: "quantity" }, { row: j, field: "unitPrice" });
         if (usesDays) base.push({ row: j, field: "days" });
+        if (usesShifts) base.push({ row: j, field: "shifts" });
       }
     }
     return base;
@@ -838,7 +845,7 @@ export function buildFormulaContext(
     let kq = false;
     const it = items[row];
     const raw = it?.formulas?.[field];
-    if (it && raw && (field === "quantity" || field === "unitPrice" || (usesDays && field === "days"))) {
+    if (it && raw && (field === "quantity" || field === "unitPrice" || (usesDays && field === "days") || (usesShifts && field === "shifts"))) {
       const refs = refsInFormula(String(raw));
       if (refs && laThuan(refs) && translateFormula(raw, ctx)) {
         const luu = evalBudget;
@@ -849,7 +856,7 @@ export function buildFormulaContext(
         // Số Ngày trống đọc là 1; Đơn Giá số lưu.
         const soLuu = field === "quantity"
           ? [Number(it.quantity) || 0, ...(it.quantityExact ? [] : [qtyRound1(it.quantity)])]
-          : field === "days" ? [Number(it.days) || 1] : [Number(it.unitPrice) || 0];
+          : field === "days" ? [Number(it.days) || 1] : field === "shifts" ? [Number(it.shifts) || 1] : [Number(it.unitPrice) || 0];
         kq = check != null && isFinite(check) && soLuu.some((t) => !lechTuKiem(check, t));
       }
     }

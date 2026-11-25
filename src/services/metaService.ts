@@ -22,10 +22,12 @@ function templateLayout(code: string) {
       hasDetail: !!cols.detail && !items.removeDetail,
       reserveDetail: !!cols.detail,
       hasDays: !!cols.days,
+      // Mẫu CINETOUR: cột SỐ CA — lưới hiện cột, Thành Tiền nhân thêm Số Ca (shared/quote-math.ts lineAmount).
+      hasShifts: !!cols.shifts,
       numberSubsections: !!items.numberSubsections,
     };
   } catch {
-    return { hasDetail: false, reserveDetail: false, hasDays: false, numberSubsections: false };
+    return { hasDetail: false, reserveDetail: false, hasDays: false, hasShifts: false, numberSubsections: false };
   }
 }
 // Nhận BẤT KỲ hình dạng nào có `code` — vì projection đã thu hẹp, không còn là QuoteTemplate đầy đủ.

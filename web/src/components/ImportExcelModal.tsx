@@ -21,11 +21,13 @@ const tenVaiHang = (ten: string[]) => ten.slice(0, 3).map((t) => `“${t.slice(0
  *  phép AccountHnView cộng "Tổng tất cả … sheet Hà Nội" (bảng HN không có `category` nên không lọc hàng đã duyệt). Cộng như lưới
  *  (M.sheetSubtotalGrouped) thì lệch nó: 0,7 × 163.845 ra 114.692 mà bảng HN hiện 114.691; Số Ngày −1 ra −50.000 mà bảng HN cộng
  *  +50.000. Lưới báo giá: undefined → doiChieuNhapExcel cộng bằng M.sheetSubtotalGrouped theo cờ. */
-const tongBangCua = (tongKhongNhanNhom: boolean | undefined, usesDays: boolean) => tongKhongNhanNhom
-  ? (hang: M.Item[]) => extraTableSum({ category: "hn", items: hang }, usesDays)
+const tongBangCua = (tongKhongNhanNhom: boolean | undefined, usesDays: boolean, usesShifts = false) => tongKhongNhanNhom
+  ? (hang: M.Item[]) => extraTableSum({ category: "hn", items: hang }, usesDays, usesShifts)
   : undefined;
 /** targetIndex = NEW_SHEET → tạo THÊM sheet mới trong báo giá (file nhiều sheet hơn báo giá). */
 export const NEW_SHEET = NEW_IMPORT_SHEET;
+/** Mặc định của `usesShiftsOf` — hằng ở mức module để không đổi danh tính mỗi lượt vẽ (nằm trong deps của useMemo). */
+const khongCoSoCa = () => false;
 type SheetPlan = { targetIndex: number; mode: TargetMode };
 
 export type ImportApplyPayload = {
@@ -42,7 +44,7 @@ export type ImportApplyPayload = {
 };
 
 export function ImportExcelModal({
-  quoteId, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId, onApply, onClose, khongCoTongTien, thayGiuCoNhomCuaDich, tongKhongNhanNhom,
+  quoteId, sheets, templates, usesDaysOf, usesShiftsOf = khongCoSoCa, addrDetailOf, newSheetTemplateId, onApply, onClose, khongCoTongTien, thayGiuCoNhomCuaDich, tongKhongNhanNhom,
 }: {
   quoteId?: number;
   /** Các sheet ĐANG CÓ trong báo giá (để chọn nạp vào đâu + đối chiếu trước/sau). `extraTables`: bảng nội bộ của trang
@@ -50,6 +52,8 @@ export function ImportExcelModal({
   sheets: { name?: string | null; templateId?: number; groupSubtotal?: boolean; items: M.Item[]; extraTables?: unknown }[];
   templates: EditorTemplate[];
   usesDaysOf: (templateId?: number) => boolean;
+  /** Mẫu có cột SỐ CA (CINETOUR) không — như usesDaysOf. Không truyền = không mẫu nào có. */
+  usesShiftsOf?: (templateId?: number) => boolean;
   addrDetailOf: (templateId?: number) => boolean;
   /** Mẫu sẽ dùng cho SHEET MỚI, suy từ mẫu app đoán được của file (không đoán ra thì lấy mẫu sheet đang mở). */
   newSheetTemplateId: (fileTemplateCode?: string | null) => number | undefined;
@@ -122,18 +126,19 @@ export function ImportExcelModal({
     const target = isNew ? null : sheets[plan.targetIndex];
     const targetTemplate = templates.find((t) => t.id === tplId);
     const usesDays = usesDaysOf(tplId);
+    const usesShifts = usesShiftsOf(tplId);
     const addrDetail = addrDetailOf(tplId);
     // Mẫu đích có HIỆN cột Chi Tiết không. KHÁC `addrDetail` (chỉ là "có chừa khe địa chỉ"): mẫu GN
     // chừa khe mà ẩn cột, mẫu Colorfull thì hiện. Quyết định cả việc NẠP nội dung cột đó lẫn việc
     // bảng đối chiếu có nhìn thấy nó hay không.
     const showDetail = !!targetTemplate?.layout?.hasDetail;
-    const gridFields = addrFields({ usesDays, addrDetail });
+    const gridFields = addrFields({ usesDays, usesShifts, addrDetail });
     const columnMoves = Object.entries(fs.columns || {}).map(([role, source]) => ({
       role, source, target: letterOfField(gridFields, role),
     })).filter((x) => x.target && (showDetail || x.role !== "detail"));
     const before = target?.items || [];
     const baseRow = plan.mode === "append" ? before.length : 0;
-    const conv = toGridItems(fs.items, { usesDays, addrDetail, showDetail, baseRow });
+    const conv = toGridItems(fs.items, { usesDays, usesShifts, addrDetail, showDetail, baseRow });
     // Chế độ Thay: ảnh / liên kết sản phẩm / ghi chú nội bộ (bảng HN: cả rid + trạng thái duyệt – thanh
     // toán) của dòng khớp đi theo sang (L48) — PHẢI gọi y như nhánh nạp thật trong `apply` để bảng
     // đối chiếu nói đúng thứ sẽ xảy ra.
@@ -141,15 +146,15 @@ export function ImportExcelModal({
     const after = plan.mode === "append" ? [...before, ...conv.items] : (giu?.items ?? conv.items);
     const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0, noiBoMat = giu?.noiBoMat ?? 0, tienDaTraDoi = giu?.tienDaTraDoi ?? [];
     const daChiMat = giu?.daChiMat ?? [];
-    const tongBang = tongBangCua(tongKhongNhanNhom, usesDays);
-    const beforeTotal = tongBang ? tongBang(before) : M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
+    const tongBang = tongBangCua(tongKhongNhanNhom, usesDays, usesShifts);
+    const beforeTotal = tongBang ? tongBang(before) : M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal, usesShifts);
     // Cờ "Hiện Thành Tiền nhóm" SAU nạp: theo đường nạp, và TỰ BẬT khi bảng kết quả còn nhóm SL > 1 (nhập Số Lượng nhóm mà
     // tổng không nhân hệ số là xuất Excel ra sai tiền). Hai tổng dưới đây tính theo cờ HIỆU LỰC đó (`nhanSauNap` — bảng Hà Nội
     // thì không bao giờ nhân, cộng bằng extraTableSum), không theo cờ trong file. Sheet đang chọn "Bỏ qua" chỉ để xem, không nạp
     // → không có gì được bật, tổng theo cờ của file (xem doiChieuNhapExcel). Chế độ Nối: "sau nạp" của thẻ đối chiếu là phần
     // tổng sheet THẬT SỰ tăng thêm (= afterTotal − beforeTotal), kèm hai nguyên nhân chỉ Nối mới có — hàng nối vào rơi vào nhóm
     // cuối của sheet, và cờ vừa bật làm đổi tổng các hàng sẵn có.
-    const tien = doiChieuNhapExcel({ fs, mode: plan.mode, target, hangSauNap: after, hangNap: conv.items, usesDays, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom, tongBang });
+    const tien = doiChieuNhapExcel({ fs, mode: plan.mode, target, hangSauNap: after, hangNap: conv.items, usesDays, usesShifts, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom, tongBang });
     const afterTotal = tien.tongSauNap;
     const { importedTotal, tongHangTep, fileTotal, moneyMismatch, lechThat, lechSauNap, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nhanSauNap, tuBat: tuBatNhom, nguonNhom } = tien;
     const moneyDelta = fileTotal == null ? null : importedTotal - fileTotal;
@@ -159,7 +164,7 @@ export function ImportExcelModal({
       const k = plan.mode === "append" ? i - before.length : i;
       return k >= 0 ? fs.items[k]?.warn : undefined;
     };
-    const rows = diffItems(before, after, usesDays, warnOf, showDetail);
+    const rows = diffItems(before, after, usesDays, warnOf, showDetail, usesShifts);
     // CHI TIẾT SẼ RƠI BAO NHIÊU DÒNG — tính theo MẪU ĐÍCH người dùng vừa chọn, không theo mẫu mà
     // máy chủ ĐOÁN cho file. Máy chủ cũng có một cảnh báo cùng ý (src/excelImport.ts) nhưng nó chỉ
     // biết mẫu của FILE: nạp một file Colorfull vào sheet GN thì Chi Tiết vẫn rơi mà cảnh báo kia
@@ -171,7 +176,7 @@ export function ImportExcelModal({
       before, after, beforeTotal, afterTotal, importedTotal, tongHangTep, fileTotal, moneyDelta, moneyMismatch, lechThat, lechSauNap, lechDoHeSoNhom, lechDoCoTep, nhomCuoiNhan, hangSanCoDoi, nhanSauNap, tuBatNhom, nguonNhom,
       formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat, daChiMat, noiBoMat, tienDaTraDoi,
     };
-  }, [usable, plans, active, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId, thayGiuCoNhomCuaDich, tongKhongNhanNhom]);
+  }, [usable, plans, active, sheets, templates, usesDaysOf, usesShiftsOf, addrDetailOf, newSheetTemplateId, thayGiuCoNhomCuaDich, tongKhongNhanNhom]);
 
   const previewRows = view ? (showSame ? view.rows : view.rows.filter((r) => r.kind !== "same")) : [];
 
@@ -218,12 +223,13 @@ export function ImportExcelModal({
       const tplId = isNew ? newSheetTemplateId(fs.templateCode) : sheets[plan.targetIndex]?.templateId;
       const target = isNew ? null : sheets[plan.targetIndex];
       const usesDays = usesDaysOf(tplId);
+      const usesShifts = usesShiftsOf(tplId);
       const addrDetail = addrDetailOf(tplId);
       // Phải khớp ĐÚNG với nhánh xem-trước ở trên: xem trước một kiểu mà nạp thật một kiểu là
       // biến bảng đối chiếu thành lời hứa suông.
       const showDetail = !!templates.find((t) => t.id === tplId)?.layout?.hasDetail;
       const baseRow = !isNew && plan.mode === "append" ? (target?.items || []).length : 0;
-      const conv = toGridItems(fs.items, { usesDays, addrDetail, showDetail, baseRow });
+      const conv = toGridItems(fs.items, { usesDays, usesShifts, addrDetail, showDetail, baseRow });
       // Thay toàn bộ: dòng khớp giữ ảnh (+ productId, ghi chú nội bộ khi tệp không có cột đó; bảng HN:
       // rid + cờ duyệt / đã chi) — tệp Excel không chở được chúng. Ảnh của dòng bị xoá thật thì
       // đếm để NÓI RA ở hộp xác nhận (L48).
@@ -258,7 +264,7 @@ export function ImportExcelModal({
         const hangNap = out[out.length - 1].items;
         const tien = doiChieuNhapExcel({
           fs, mode: plan.mode, target, hangSauNap: plan.mode === "append" ? [...(target?.items || []), ...hangNap] : hangNap,
-          hangNap: conv.items, usesDays, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom, tongBang: tongBangCua(tongKhongNhanNhom, usesDays),
+          hangNap: conv.items, usesDays, usesShifts, thayGiuCoCuaDich: thayGiuCoNhomCuaDich, tongKhongNhanNhom, tongBang: tongBangCua(tongKhongNhanNhom, usesDays, usesShifts),
         });
         // Lệch thật. Hiếm gặp: Nối mà hàng vào nhóm cuối bù đúng phần đọc thiếu — "sau nạp" trùng Excel, chỉ các hàng của file lệch.
         if (tien.lechThat) { if (tien.lechSauNap) moneyRisk++; else tepTuLechRisk++; }
@@ -601,7 +607,7 @@ export function ImportExcelModal({
 
 const COL_VN: Record<string, string> = {
   _stt: "STT", name: "Hạng mục", detail: "Chi tiết", unit: "ĐVT", quantity: "Số lượng",
-  days: "Số ngày", unitPrice: "Đơn giá", _amount: "Thành tiền", notes: "Ghi chú",
+  days: "Số ngày", shifts: "Số ca", unitPrice: "Đơn giá", _amount: "Thành tiền", notes: "Ghi chú",
   internalNote: "Ghi chú nội bộ", _images: "Hình ảnh",
 };
 const CHANGE_VN: Record<string, string> = { same: "Không đổi", changed: "Sẽ sửa", added: "Sẽ thêm", removed: "Sẽ xóa" };
@@ -610,7 +616,7 @@ function fmtVal(field: string, v: unknown, exact = false) {
   if (v == null || v === "") return "—";
   if (field === "quantityExact") return v ? "Giữ số chính xác theo Excel" : "Làm tròn 1 số lẻ";
   if (field === "images") return `${Number(v) || 0} ảnh`;
-  if (field === "quantity" || field === "days") return M.fmtNumCell(Number(v), field === "quantity" && exact);
+  if (field === "quantity" || field === "days" || field === "shifts") return M.fmtNumCell(Number(v), field === "quantity" && exact);
   if (field === "unitPrice") return M.fmtMoney(Number(v));
   return String(v);
 }
@@ -621,6 +627,7 @@ function ItemPreview({ item }: { item?: M.Item }) {
   if (item.unit) parts.push(`ĐVT ${item.unit}`);
   if (Number(item.quantity)) parts.push(`SL ${M.fmtNumCell(item.quantity, !!item.quantityExact)}`);
   if (item.days != null && Number(item.days) !== 1) parts.push(`${M.fmtNumCell(item.days)} ngày`);
+  if (item.shifts != null && Number(item.shifts) > 0 && Number(item.shifts) !== 1) parts.push(`${M.fmtNumCell(item.shifts)} ca`);
   if (Number(item.unitPrice) && item.kind !== "section" && item.kind !== "subsection") parts.push(`Đơn giá ${M.fmtMoney(item.unitPrice)}`);
   const formulas = Object.entries(item.formulas || {});
   return <>
