@@ -12,13 +12,16 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1114 commit**, từ 2026-05-29 tới 2026-11-25.
+**1117 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
 ## 2026-11-25
 
+- `f9864ad` fix(phân quyền): cột vai trò rộng đều, nút Lưu mọi cột cùng một hàng
+- `ce8fdb4` docs(CHANGELOG): sinh lại
 - `10aae29` test(xc-incremental): mượn mã mẫu riêng khi CSDL đã giữ hết mã có config
+- `cdf804a` fix(giao diện): ô công thức dài nổi hẳn lên khi chọn + soát hiển thị 1280×720 / mobile / tối
 - `e8837e2` docs(CHANGELOG): sinh lại
 - `8bd9ceb` docs(ráp tich-hop-1125): số tệp test sau ráp (backend 389, web 190 tệp / 2111 bài) + ba tham chiếu src/money.ts:N trôi
 - `eea917d` chore(bundle web): nâng trần 900.000 → 940.000 byte (chủ repo đồng ý) — bản ráp đo 906.530
