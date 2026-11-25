@@ -136,12 +136,14 @@ export function PermissionsPage({ me }: { me: Me }) {
                     <span>{r.label}{r.overridden && <span className="rh-pill" title="Đang khác mặc định gốc" style={{ marginLeft: 4 }}>tùy chỉnh</span>}</span>
                     <span className="rh-pill">{r.key}</span>
                     <span className="muted" style={{ fontSize: 11 }} title="Người theo vai trò này / người cùng vai trò nhưng quyền Tùy chỉnh (không bị bảng này ảnh hưởng)">{demVaiTro(r.key).theo} theo vai trò · {demVaiTro(r.key).tuyChinh} tùy chỉnh</span>
+                    {/* .rh-nut (styles.css) dồn hàng nút / nhãn khoá xuống ĐÁY ô tiêu đề → nút Lưu mọi cột cùng một hàng dù chữ
+                        phía trên xuống dòng nhiều ít khác nhau. Lề trên đặt bằng CSS, không inline (inline thắng margin-top: auto). */}
                     {editableSet.has(r.key) ? (
-                      <div style={{ display: "flex", gap: 4, marginTop: 4, justifyContent: "center" }}>
+                      <div className="rh-nut">
                         <button className="btn btn-sm" disabled={!isDirty(r.key) || busyRole === r.key} onClick={() => save(r.key)}>{busyRole === r.key ? "Đang lưu…" : "Lưu"}</button>
                         {r.overridden && <button className="btn btn-sm" disabled={busyRole === r.key} onClick={() => reset(r.key)} title="Đặt lại về mặc định" aria-label="Đặt lại về mặc định">↺</button>}
                       </div>
-                    ) : <div className="rh-pill" style={{ marginTop: 4, opacity: 0.7 }}>khóa</div>}
+                    ) : <div className="rh-nut"><span className="rh-pill" style={{ opacity: 0.7 }}>khóa</span></div>}
                   </div>
                 </th>
               ))}

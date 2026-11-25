@@ -2075,10 +2075,13 @@ button.qn-text:hover {
    ============================================================ */
 
 /* Thẻ thống kê đầu trang (Hóa đơn / Quản lý dự án / Nhân sự…) — 1 pattern duy nhất */
+/* LƯỚI chứ không flex-wrap: Hóa đơn đầu ra có 6 thẻ (min 160px) — ở 1280×720 khung 962px chỉ vừa 5, thẻ thứ 6 rơi xuống hàng
+   một mình và `flex: 1` kéo nó DÀI HẾT bề ngang (một thẻ "Số hóa đơn" 960px). Lưới auto-fit: thẻ rơi dòng giữ đúng bề rộng cột,
+   thẻ ít hơn số cột thì vẫn giãn đều như cũ (cột trống bị gộp). */
 .stat-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
-  flex-wrap: wrap;
   margin: 8px 0 16px;
 }
 .stat-card {
@@ -2148,7 +2151,17 @@ button.qn-text:hover {
 .inv-filter-row.toolbar {
   margin: 0;
   padding: 8px 10px;
-  flex-wrap: nowrap;
+  /* XUỐNG DÒNG khi chật, không ép một hàng: đo 1280×720 menu mở (khung 962px) — Hóa đơn đầu ra hàng 2 bóp nút "Xóa tất cả"
+     thành 3 dòng chữ dọc, Hóa đơn đầu vào hàng 2 dài hơn khung và .inv-filters (overflow: hidden) CẮT MẤT ô "Đến ngày" cùng
+     nút "Xóa tất cả". Màn đủ rộng thì vẫn một hàng như cũ. */
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+/* Nút xoá lọc cuối hàng: không co / không gãy chữ, xuống dòng thì vẫn đứng mép phải. */
+.inv-filter-row > .btn-ghost {
+  flex: none;
+  white-space: nowrap;
+  margin-left: auto;
 }
 .inv-filter-main {
   border-bottom: 1px solid var(--border);
@@ -3139,11 +3152,14 @@ button.qn-text:hover {
   max-width: 110px;
   left: 150px;
 }
+/* Mã sản xuất 140 → 168px: mã đã CHIA hóa đơn mang thêm đuôi "_01/_02" — "FP_A26_001_01" chữ đậm 14px rộng 121px, mà ô 140px
+   trừ đệm 28px + vạch khoá 2px chỉ còn 110px → mọi mã chia bị cắt thành "FP_A26_00…", mất đúng phần phân biệt hai hóa đơn (đo
+   2026-11-25, Chromium, 1280×720). 168px chừa 138px. Mốc left của cột 4/5 dời theo (+28px). */
 .inv-table th:nth-child(3),
 .inv-table td:nth-child(3) {
-  width: 140px;
-  min-width: 140px;
-  max-width: 140px;
+  width: 168px;
+  min-width: 168px;
+  max-width: 168px;
   left: 260px;
 }
 .inv-table th:nth-child(4),
@@ -3151,14 +3167,23 @@ button.qn-text:hover {
   width: 240px;
   min-width: 240px;
   max-width: 240px;
-  left: 400px;
+  left: 428px;
 }
 .inv-table th:nth-child(5),
 .inv-table td:nth-child(5) {
   width: 132px;
   min-width: 132px;
   max-width: 132px;
-  left: 640px;
+  left: 668px;
+}
+/* DÒNG CON hạng mục (báo giá nhiều sheet gom một hóa đơn): hàng chỉ có MỘT ô — ô Hạng mục — nên nó khớp `td:nth-child(1)` của
+   cột Khách hàng: dính `left: 0`, rộng 150px. Lăn ngang là ô trôi về mép trái, đè lên cột Khách hàng / Mã KH (đo 1280×720).
+   Cho nó cư xử như cột 4 thật: cùng bề rộng, cùng mốc dính; ở tầng ≤1699.98px cột 4 không khoá thì nó cũng không. */
+.inv-table tr.inv-hm-dong td.inv-hm {
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+  left: 428px;
 }
 .inv-table th:nth-child(-n + 5),
 .inv-table td:nth-child(-n + 5) {
@@ -3203,6 +3228,10 @@ button.qn-text:hover {
   }
   .inv-table td:nth-child(4),
   .inv-table td:nth-child(5) {
+    z-index: auto;
+  }
+  .inv-table tr.inv-hm-dong td.inv-hm {
+    left: auto;
     z-index: auto;
   }
   .inv-table thead th:nth-child(4),
@@ -3349,6 +3378,33 @@ button.qn-text:hover {
 .perm-matrix tbody tr:not(.perm-group-row):hover td {
   background: var(--surface-hover);
 }
+/* Cột vai trò RỘNG ĐỀU + nút Lưu mọi cột CÙNG MỘT HÀNG. Bảng tự co theo chữ nên năm cột vai trò rộng 119–159px (đo 1280×720):
+   cột hẹp nhất (Nhân sự) gấp dòng "1 theo vai trò · 0 tùy chỉnh" thành 3 dòng → nút Lưu của nó thấp hơn các cột khác 8px.
+   table-layout: fixed chia đều phần sau cột Quyền; ô tiêu đề cao 1px là mẹo để .role-head `height: 100%` bám đúng chiều cao hàng
+   tiêu đề, rồi .rh-nut `margin-top: auto` dồn nút / nhãn "khóa" xuống đáy. Chia đều CHỈ ở màn rộng: ≤920px bảng thành khối cuộn
+   ngang chữ một dòng (public/style.css), ở đó 26% làm bảng tự nới cho cột Quyền đủ 26% — đo 390px: cột Quyền 433px, bảng dài thêm. */
+@media not all and (max-width: 920px) {
+  .perm-matrix {
+    table-layout: fixed;
+  }
+  .perm-matrix thead th:first-child {
+    width: 26%;
+  }
+}
+.perm-matrix thead th {
+  height: 1px;
+}
+.perm-matrix .role-head {
+  display: flex;
+  height: 100%;
+}
+.perm-matrix .role-head > .rh-nut {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin-top: auto;
+  padding-top: 4px;
+}
 
 /* Thông báo: feed giới hạn bề rộng đọc + chevron báo "bấm được" + meta dễ đọc hơn */
 .notif {
@@ -3440,15 +3496,25 @@ button.qn-text:hover {
     grid-column: 1 / -1;
   }
 }
+/* Điện thoại: dải chip kỳ chiếm TRỌN một hàng, 5 chip chia đều và không gãy chữ; "Làm mới" xuống hàng dưới, sát phải. Bản trước ép
+   chip + nút vào một hàng cuộn ngang: ở 390px mỗi chip gãy đôi ("30 / ngày", "↻ Làm / mới") và lộ thanh cuộn dày dưới dải chip. */
 @media (max-width: 560px) {
   .seg {
+    flex: 1 1 100%;
     flex-wrap: nowrap;
-    overflow-x: auto;
     max-width: 100%;
   }
+  .seg-btn {
+    flex: 1 1 auto;
+    padding: 5px 4px;
+    white-space: nowrap;
+  }
   .dash-controls {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .dash-controls > .btn {
+    white-space: nowrap;
   }
 }
 @media (max-width: 820px) {
@@ -4836,6 +4902,13 @@ button.qn-text:hover {
 .excel-table.grid-fixed td {
   overflow-wrap: break-word;
 }
+/* Tiêu đề cột: đệm ngang 8 → 4px. Ở mức SÀN của cột (GridTable COLS — 1280×720 menu mở, bảng nội bộ nhiều cột) đệm 8px +
+   viền 2px chỉ chừa 20px cho "STT" (cần 25px) và 44px cho "LƯỢNG" (cần 49px), nên break-word ở trên gãy chữ GIỮA TỪ:
+   "ST/T", "SỐ LƯỢN/G". Đệm 4px chừa 28px / 52px — vừa cả hai ở mức sàn; ô dữ liệu giữ đệm 8px. */
+.excel-table.grid-fixed thead th {
+  padding-left: 4px;
+  padding-right: 4px;
+}
 
 /* LỚP PHỦ ĐĂNG NHẬP LẠI (SessionLostOverlay) — dùng lại <Login> nguyên vẹn bên trong .modal.
    .modal đã có nền/viền/bo/đổ bóng rồi, nên .login-card phải BỎ bộ chrome của chính nó, kẻo
@@ -5115,6 +5188,20 @@ button.qn-text:hover {
   box-shadow:
     inset 0 0 0 2px #1769d6,
     2px 2px 6px rgba(0, 0, 0, 0.18);
+}
+/* Ô nới ở trạng thái CHỌN (chưa vào sửa): input mang thêm `[readonly].cell-lock`, mà luật nền trong suốt
+   của trạng thái đó (`.excel-table td input[readonly].cell-lock`, độ ưu tiên 0,3,2) thắng nền ở trên (0,2,2)
+   → hộp nới trong suốt: gạch dọc ranh cột, dấu ƒ và ô vuông kéo của ô gốc lộ xuyên qua giữa chữ công thức
+   (chủ repo 2026-11-25, ô SL nhóm "=sum(E7:E8)": "bị cái gạch sau che"). Nền phải đặc ở MỌI trạng thái. */
+.excel-table td input[readonly].cell-lock.cell-grow {
+  background: #fffbe8;
+}
+/* Ô vuông kéo của ô đang nới: dời ra góc phải-dưới HỘP NỚI (bề rộng do fitCell ghi vào --o-noi) và nổi trên
+   hộp — ở góc ô gốc nó vừa bị hộp đè (không kéo được) vừa ló 3px dưới khung như một vết bẩn. */
+.excel-table td:has(> input.cell-grow) > .fill-handle {
+  right: auto;
+  left: calc(var(--o-noi, 100%) - 6px);
+  z-index: 7;
 }
 
 /* GAP1-03: TÊN NHÓM và chữ STT (A/B/C) — chữ to nhất của hàng nhóm — vẫn rơi về luật chung
@@ -5918,4 +6005,17 @@ button.qn-text:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: top;
+}
+
+/* Nhật ký hoạt động: ô chọn "Tất cả hoạt động" tự rộng theo nhãn DÀI NHẤT trong danh sách (~527px) → ở 1280×720 hàng lọc vỡ đôi,
+   "Từ" một hàng còn "Đến" rơi xuống hàng dưới. Chặn bề rộng; nhãn đang chọn dài hơn thì trình duyệt tự cắt. Điện thoại (≤520px)
+   thanh công cụ thành cột, ô chọn giãn hết bề ngang như mọi ô khác. 260px: cả hàng (2 ô chọn + 2 ô ngày + "Xóa lọc") vừa khung
+   962px của 1280×720 menu mở. */
+.toolbar select.au-loc {
+  max-width: 260px;
+}
+@media (max-width: 520px) {
+  .toolbar select.au-loc {
+    max-width: none;
+  }
 }

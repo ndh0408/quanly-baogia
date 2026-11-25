@@ -81,4 +81,33 @@ describe("Ô nhập nới rộng khi chữ dài hơn ô", () => {
     act(() => { q.value = "=1.2*2.4*19+2.35*1.15"; q.dispatchEvent(new Event("input", { bubbles: true })); });
     expect(q.classList.contains("cell-grow")).toBe(true);
   });
+
+  // Chủ repo 2026-11-25 (ảnh ô SL nhóm "=sum(E7:E8)"): ô vuông kéo của ô gốc nằm giữa cạnh dưới hộp nới, bị
+  // hộp đè. fitCell ghi bề rộng hộp vào --o-noi của td để CSS dời ô vuông ra góc hộp; co lại thì phải gỡ.
+  it("ô nới ghi bề rộng vào biến --o-noi của td (CSS dời ô vuông kéo theo); rời ô thì gỡ", () => {
+    moLuoi([mk({ name: "Nhóm", quantity: 2, unitPrice: 0, formulas: { quantity: "=sum(E7:E8)+E5*2" } })]);
+    const q = o(0, "quantity");
+    const td = q.closest("td") as HTMLElement;
+    doCuon = 140;
+    act(() => { q.focus(); });
+    expect(td.style.getPropertyValue("--o-noi"), "ô đã nới mà td không biết bề rộng hộp").toBe(q.style.width);
+    act(() => { q.blur(); });
+    expect(td.style.getPropertyValue("--o-noi"), "rời ô mà biến bề rộng còn treo trên td").toBe("");
+  });
+
+  it("gõ dài ra rồi Esc huỷ → hộp co về theo chữ lúc vào ô (không giữ bề rộng của chữ gõ dở)", () => {
+    moLuoi([mk({ name: "X", quantity: 3, unitPrice: 0 })]);
+    const q = o(0, "quantity");
+    act(() => { q.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, detail: 1 })); });
+    act(() => { q.focus(); });
+    act(() => { q.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "F2" })); });
+    doCuon = 200;
+    act(() => { q.value = "=1.2*2.4*19+2.35*1.15"; q.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(q.classList.contains("cell-grow")).toBe(true);
+    doCuon = 40;   // chữ lúc vào ô ("3") vừa ô
+    act(() => { q.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })); });
+    expect(q.value).toBe("3");
+    expect(q.classList.contains("cell-grow"), "Esc trả chữ cũ mà hộp vẫn nới").toBe(false);
+    expect(q.style.width).toBe("");
+  });
 });

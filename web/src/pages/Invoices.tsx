@@ -341,10 +341,12 @@ export function InvoicesPage({ me }: { me: Me }) {
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); e.stopPropagation(); setEditKey(ck(r, field)); } }}>{content}</td>
   );
 
-  const textCell = (r: Row, field: keyof Row, w = 110) => {
+  // `cls` = lớp thêm cho ô ĐANG XEM (vd "nowrap" cho mã: số HĐ / PO kiểu "HD-2026-0170" bị cột co tới min-content gãy ở mọi
+  // dấu gạch thành 3 dòng "HD-/2026-/0170" — đo 1280×720).
+  const textCell = (r: Row, field: keyof Row, w = 110, cls = "") => {
     const v = (r[field] as string) || "";
-    if (!editable(r, field as string)) return <td className={missCls(r[field])}>{v || dash}</td>;
-    if (editKey !== ck(r, field as string)) return viewTd(r, field as string, v || dash);
+    if (!editable(r, field as string)) return <td className={[missCls(r[field]), cls].filter(Boolean).join(" ") || undefined}>{v || dash}</td>;
+    if (editKey !== ck(r, field as string)) return viewTd(r, field as string, v || dash, cls);
     return <td className={missCls(r[field])}><input autoComplete="off" name={String(field)} autoFocus defaultValue={v} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
       onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, field as string, e.target.value.trim() || null); }} /></td>;
   };
@@ -507,7 +509,7 @@ export function InvoicesPage({ me }: { me: Me }) {
                       const truocHm = [
                         <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || tieuDeHienThi(r.q)}</strong></td>,
                         <td>{r.q.customerCode || dash}</td>,
-                        <td className="nowrap" title={`Chia / làm lại hóa đơn: báo chủ báo giá${r.q.createdBy?.displayName ? ` ${r.q.createdBy.displayName}` : ""}`}>
+                        <td className="nowrap" title={`${r.code} — chia / làm lại hóa đơn: báo chủ báo giá${r.q.createdBy?.displayName ? ` ${r.q.createdBy.displayName}` : ""}`}>
                           <strong>{r.code}</strong>
                           {r.sheetNames.length > 1 && <div className="muted inv-chia-sheets">{r.sheetNames.length} sheet</div>}
                         </td>,
@@ -519,9 +521,9 @@ export function InvoicesPage({ me }: { me: Me }) {
                           {oHangMuc(0)}
                           {[
                             <td>{done ? <span className="status approved">Hoàn tất</span> : <span className="status pending">Chưa đủ</span>}</td>,
-                            textCell(r, "poNumber", 90),
+                            textCell(r, "poNumber", 90, "nowrap"),
                             selectCell(r, "invoiceCompany", COMPANIES, defaultCty(r.q)),
-                            textCell(r, "invoiceNo", 90),
+                            textCell(r, "invoiceNo", 90, "nowrap"),
                             dateCell(r, "invoiceDate"),
                             <td className="num">{fmtMoney(r.subtotal)}</td>,
                             <td className="num"><strong>{fmtMoney(r.amount)}</strong></td>,
