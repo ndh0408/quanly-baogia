@@ -80,7 +80,10 @@ if (dinhDau.length) {
 // "Thành Tiền nhóm" + thẻ đối chiếu nhập Excel, Hóa đơn đầu vào + HĐ VAT, cột Thanh toán chỉ xem +
 // hộp xem chứng từ, dán ảnh vào ô Hình ảnh, name/autoComplete cho mọi ô nhập. Trần mới vẫn dưới
 // xa bản dev (984.802 lúc đo, nay còn lớn hơn) nên vẫn bắt được bản dev.
-const TRAN = 900_000;
+// 2026-11-25: 900.000 → 940.000 (chủ repo đồng ý nâng). Đo được 906.530 byte sau khi ráp mẫu CINETOUR + cột Số Ca, mã
+// dự án cấp lúc khách chốt (nhãn NHÁP), hệ số nhóm nhận SL < 1 + cộng tổng nhóm chính xác; trần = số đo + ~3%, làm tròn
+// lên bội 10.000. Bản dev đo cùng ngày (cùng cây, bỏ chốt NODE_ENV) là 1.317.271 byte — trần vẫn dưới xa.
+const TRAN = 940_000;
 if (tong > TRAN) xau(`tổng ${tong.toLocaleString("vi-VN")} byte > trần ${TRAN.toLocaleString("vi-VN")} byte`);
 else ok(`tổng dưới trần ${TRAN.toLocaleString("vi-VN")} byte`);
 
