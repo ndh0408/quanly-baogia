@@ -149,17 +149,19 @@ export function NewQuoteWizard({ me }: { me: Me }) {
             <h2>Thông tin báo giá</h2>
             <p className="hint">Khách hàng, người gửi, VAT, ngày.</p>
             <div className="form-grid">
-              <label style={{ gridColumn: "1/-1" }}>Tiêu đề báo giá <span className="req">*</span><input autoComplete="off" name="title" value={info.title} placeholder="VD: Décor Premiere Phim Thỏ Ơi" onChange={(e) => set("title", e.target.value)} /></label>
+              {/* Nhãn + dấu * (+ ghi chú) bọc chung một <span>: nhãn của .form-grid là flex CỘT, để rời thì dấu * thành một hàng
+                  riêng dưới chữ và đẩy ô nhập lệch 16px so với ô cùng hàng (đo 1280×720). Cùng cách Users.tsx / Customers.tsx. */}
+              <label style={{ gridColumn: "1/-1" }}><span>Tiêu đề báo giá <span className="req">*</span></span><input autoComplete="off" name="title" value={info.title} placeholder="VD: Décor Premiere Phim Thỏ Ơi" onChange={(e) => set("title", e.target.value)} /></label>
               {/* Tiêu đề đầy đủ thường quá dài và đầy dấu để làm TÊN TỆP. Ô này là bản gọn do người
                   dùng tự đặt; bỏ trống thì tên file lùi về tiêu đề chính. */}
-              <label style={{ gridColumn: "1/-1" }}>Tiêu đề rút gọn <em className="unit">(tuỳ chọn — dùng đặt tên file tải về)</em>
+              <label style={{ gridColumn: "1/-1" }}><span>Tiêu đề rút gọn <em className="unit">(tuỳ chọn — dùng đặt tên file tải về)</em></span>
                 <input autoComplete="off" name="shortTitle" value={info.shortTitle} maxLength={120} placeholder="VD: Decor Premiere" onChange={(e) => set("shortTitle", e.target.value)} /></label>
-              <label style={{ gridColumn: "1/-1" }}>Mã khách hàng <span className="req">*</span>
+              <label style={{ gridColumn: "1/-1" }}><span>Mã khách hàng <span className="req">*</span></span>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input name="customer" value={customer ? `${customer.code} — ${customer.name}` : ""} placeholder="Chưa chọn — bấm nút bên phải" readOnly style={{ flex: 1 }} />
                   <button type="button" className="btn btn-sm btn-primary" onClick={() => setPickOpen(true)}>Chọn khách hàng</button>
                 </div></label>
-              <label>Khách hàng (To) <span className="req">*</span><input autoComplete="off" name="toCompany" value={info.toCompany} onChange={(e) => set("toCompany", e.target.value)} /></label>
+              <label><span>Khách hàng (To) <span className="req">*</span></span><input autoComplete="off" name="toCompany" value={info.toCompany} onChange={(e) => set("toCompany", e.target.value)} /></label>
               <label>Người liên hệ KH<input autoComplete="off" name="toContact" value={info.toContact} onChange={(e) => set("toContact", e.target.value)} /></label>
               <label style={{ gridColumn: "1/-1" }}>Người gửi — chọn nhanh
                 <select name="sender" defaultValue="__me" onChange={(e) => onSender(e.target.value)}>

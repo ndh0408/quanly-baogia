@@ -204,7 +204,7 @@ export function AuditPage() {
       <h1>Nhật ký hoạt động</h1>
       <p className="muted page-sub">Lịch sử ai đã làm gì trong hệ thống.</p>
       <div className="toolbar">
-        <select name="action" aria-label="Lọc theo hoạt động" value={action} onChange={(e) => setAction(e.target.value)}>
+        <select name="action" className="au-loc" aria-label="Lọc theo hoạt động" value={action} onChange={(e) => setAction(e.target.value)}>
           <option value="">Tất cả hoạt động</option>
           {ACTION_GROUPS.map(([g, opts]) => (
             <optgroup key={g} label={g}>

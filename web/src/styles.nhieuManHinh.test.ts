@@ -58,8 +58,21 @@ describe("Hóa đơn đầu ra — số cột đóng băng theo bề rộng khun
     expect(hep).toMatch(/\.inv-table th:nth-child\(-n \+ 3\),\s*\.inv-table td:nth-child\(-n \+ 3\)\s*\{\s*left:\s*auto/);
     expect(hep).toMatch(/\.inv-table td:nth-child\(-n \+ 3\)\s*\{\s*z-index:\s*auto/);
     expect(vua + hep, "không được tắt sticky — tiêu đề cột phải còn dính đầu khung").not.toMatch(/position:\s*static/);
-    // Tầng rộng (cấp đầu) vẫn khoá đủ 5 cột: mốc left cộng dồn 0/150/260/400/640.
-    expect(luat(".inv-table td:nth-child(5)")).toMatch(/left:\s*640px/);
+    // Tầng rộng (cấp đầu) vẫn khoá đủ 5 cột: mốc left cộng dồn 0/150/260/428/668 (Mã sản xuất 168px từ 2026-11-25 — bản trước
+    // 140px cắt mất đuôi "_01/_02" của mã đã chia hóa đơn).
+    expect(luat(".inv-table td:nth-child(3)")).toMatch(/width:\s*168px/);
+    expect(luat(".inv-table td:nth-child(4)")).toMatch(/left:\s*428px/);
+    expect(luat(".inv-table td:nth-child(5)")).toMatch(/left:\s*668px/);
+  });
+
+  // Dòng con hạng mục chỉ có MỘT ô nên khớp `td:nth-child(1)` (cột Khách hàng: dính left 0, rộng 150px) — lăn ngang là ô trôi về
+  // mép trái đè lên Khách hàng / Mã KH (đo 1280×720, 2026-11-25). Nó phải theo cột 4: cùng mốc, và mở khoá cùng tầng với cột 4.
+  it("dòng con hạng mục (báo giá nhiều sheet gom một hóa đơn) theo cột 4, không dính mép trái như cột 1", () => {
+    const con = luat(".inv-table tr.inv-hm-dong td.inv-hm");
+    expect(con).toMatch(/left:\s*428px/);
+    expect(con).toMatch(/max-width:\s*240px/);
+    const vua = khoiMedia("(max-width: 1699.98px)");
+    expect(vua).toMatch(/\.inv-table tr\.inv-hm-dong td\.inv-hm\s*\{\s*left:\s*auto;\s*z-index:\s*auto/);
   });
 });
 

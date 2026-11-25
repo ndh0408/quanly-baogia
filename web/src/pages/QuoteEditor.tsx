@@ -1577,7 +1577,8 @@ Lý do (không bắt buộc):`,
 
         {q.showTotals !== false && (
           <div className="quote-summary">
-            <h3 style={{ margin: "18px 0 6px" }}>Tổng báo giá ({sheets.length} sheet)</h3>
+            {/* Lề trên 0: hộp .quote-summary đã có đệm 16px — lề 18px cũ cộng vào thành chữ cách mép trên 35px, gấp đôi mép trái. */}
+            <h3 style={{ margin: "0 0 6px" }}>Tổng báo giá ({sheets.length} sheet)</h3>
             {/* clf-theme: cùng quy tắc với sheet "Tổng Báo Giá" của tệp Excel (src/excel.ts `isClf`) —
                 có MỘT sheet Colorfull là cả bảng theo màu Colorfull. */}
             <table className={`summary-table${sheets.some((s) => templates.find((x) => x.id === s.templateId)?.code?.startsWith("clofull")) ? " clf-theme" : ""}`}>

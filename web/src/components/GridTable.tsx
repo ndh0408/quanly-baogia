@@ -832,12 +832,22 @@ function GridTableInner(props: GridTableProps) {
   // Chỉ <input>: <textarea> đã tự cao lên theo chữ (autoGrow).
   const fitCell = (el: HTMLInputElement | HTMLTextAreaElement | null, on = true) => {
     if (!el || el.tagName !== "INPUT") return;
-    el.style.width = ""; el.classList.remove("cell-grow");
+    const td = el.closest("td") as HTMLElement | null;
+    el.style.width = ""; el.classList.remove("cell-grow"); td?.style.removeProperty("--o-noi");
     if (!on || el.scrollWidth <= el.clientWidth + 1) return;
     const tbl = el.closest("table");
-    const mep = tbl ? tbl.getBoundingClientRect().right - el.getBoundingClientRect().left - 2 : 0;
-    // Chưa dàn trang (mép đo ra ≤ bề rộng ô) thì bỏ qua mức chặn, kẻo ra bề rộng âm.
-    const max = mep > el.clientWidth ? mep : Infinity;
+    // Mép phải để nới tới: ưu tiên mép NHÌN THẤY của khung cuộn (bảng rộng hơn khung — màn hẹp): nới quá mép khung thì
+    // đuôi công thức bị khung cắt, phải cuộn ngang mới đọc hết (đo ở 390px). Ô đã chạm mép khung (chỗ trống nhìn thấy
+    // không hơn chính ô) thì lùi về mép BẢNG như trước. Chưa dàn trang (mép đo ra ≤ bề rộng ô) thì bỏ mức chặn, kẻo
+    // ra bề rộng âm.
+    const cuon = el.closest(".tbl-scroll");
+    const tblR = tbl ? tbl.getBoundingClientRect().right : 0;
+    const thayR = Math.min(tblR, cuon ? cuon.getBoundingClientRect().right : Infinity);
+    const chan = (trai: number, toiThieu: number) => {
+      if (!tbl) return Infinity;
+      const thay = thayR - trai - 2; if (thay > toiThieu) return thay;
+      const bang = tblR - trai - 2; return bang > toiThieu ? bang : Infinity;
+    };
     // Ô nới PHỦ TRỌN Ô từ mép trái, cao bằng ô, viền nối liền viền ô đang chọn (CSS `.cell-grow`:
     // position absolute trong td). Bản đầu để input nằm trong dòng chảy + nới sang phải → thành một
     // hộp riêng thấp hơn ô, viền xanh riêng, thừa khoảng trống đè ô bên (người dùng chụp màn hình).
@@ -845,10 +855,8 @@ function GridTableInner(props: GridTableProps) {
     // cho dấu ƒ) + 4px thở, không hẹp hơn chính ô. scrollWidth của <input> không gồm đệm phải.
     const cs = getComputedStyle(el);
     const chu = el.scrollWidth - (parseFloat(cs.paddingLeft) || 0);
-    const td = el.closest("td") as HTMLElement | null;
     const rongO = td ? td.clientWidth : el.clientWidth;
-    const mepO = td && tbl ? tbl.getBoundingClientRect().right - td.getBoundingClientRect().left - 2 : 0;
-    const tran = mepO > rongO ? mepO : max;
+    const tran = td ? chan(td.getBoundingClientRect().left, rongO) : chan(el.getBoundingClientRect().left, el.clientWidth);
     // Đệm phải: ô vừa gõ "=" chưa kịp nhận lớp has-formula (React gắn ở lần vẽ sau) nên đệm 15px cho
     // dấu ƒ chưa có — tính trước, kẻo lần vẽ sau thêm đệm là chữ hụt ~3px (đo trên dev).
     const demPhai = Math.max(parseFloat(cs.paddingRight) || 0, el.value.trim().startsWith("=") ? 15 : 0);
@@ -857,6 +865,9 @@ function GridTableInner(props: GridTableProps) {
     // Đo lại một lần ở trạng thái đã nới: còn tràn (phông/đệm khác dự tính) thì bù đúng phần thiếu.
     const thieu = el.scrollWidth - el.clientWidth;
     if (thieu > 0) el.style.width = `${Math.min(parseFloat(el.style.width) + thieu + 2, tran)}px`;
+    // Ô vuông kéo (.fill-handle, gắn vào td ở paintSel) nằm ở góc Ô GỐC — tức giữa cạnh dưới hộp nới, bị
+    // hộp đè mất (không kéo được) mà còn ló 3px ra dưới khung. CSS đọc biến này để dời nó ra góc hộp nới.
+    td?.style.setProperty("--o-noi", el.style.width);
   };
   // Point-mode BÀN PHÍM (Excel): đang gõ công thức (chế độ ENTER) mà ký tự trước con trỏ là
   // "="/toán tử/"("/","… → mũi tên CHÈN THAM CHIẾU Ô rồi di chuyển nó ("=" ↑ → "=H3");
@@ -2260,6 +2271,8 @@ function GridTableInner(props: GridTableProps) {
           }
         }
         lockCell(esc);
+        // Esc trả chữ về lúc vào ô → đo lại hộp nới, không thì hộp giữ bề rộng của chữ vừa gõ dở.
+        fitCell(esc);
         selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
         paintSel();
         return;
@@ -2682,13 +2695,30 @@ function GridTableInner(props: GridTableProps) {
     const contentMin = nameMin + (showDetail ? detailMin : 0);
 
     // Chưa đo được (lần render đầu) → dùng bề rộng lý tưởng, ResizeObserver sẽ chỉnh lại ngay sau.
+    // VIEN: bảng rộng calc(100% − 4px) (styles.css `.excel-table.grid-fixed`) + nửa viền ngoài ~2px → cột chỉ có khung − 6px.
+    const VIEN = 6;
     let scale = 1;
-    if (wrapW > 0 && wrapW < idealFixed + contentMin) {
-      // Phần còn lại cho cột số sau khi chừa đủ chỗ cho cột nội dung.
-      scale = Math.max(floorFixed / idealFixed, (wrapW - contentMin) / idealFixed);
+    if (wrapW > 0 && wrapW < idealFixed + contentMin + VIEN) {
+      // Phần còn lại cho cột số sau khi chừa đủ chỗ cho cột nội dung. Cột chạm SÀN giữ sàn, phần còn lại mới chia theo tỉ lệ
+      // cho các cột chưa chạm. Bản trước co ĐỀU rồi mới kẹp sàn (STT, nút ✕) nên tổng vượt khung: đo ở 1280×720 menu mở, cột
+      // cố định 659px trong khi chỉ còn 642px → lưới bật thanh cuộn ngang 11px và cột ✕ bị cắt mép.
+      const ngan = wrapW - contentMin - VIEN;
+      if (ngan <= floorFixed) scale = 0;   // không đủ cả mức sàn → mọi cột về sàn, .tbl-scroll cuộn ngang (đúng ý cũ)
+      else {
+        scale = ngan / idealFixed;
+        for (let lap = 0; lap < fixed.length; lap++) {
+          const chuaCham = fixed.filter((c) => c.ideal * scale >= c.floor);
+          if (!chuaCham.length) break;
+          const conLai = ngan - fixed.filter((c) => c.ideal * scale < c.floor).reduce((a, c) => a + c.floor, 0);
+          const tiLe = conLai / chuaCham.reduce((a, c) => a + c.ideal, 0);
+          if (Math.abs(tiLe - scale) < 1e-9) break;
+          scale = tiLe;
+        }
+      }
       scale = Math.min(1, scale);
     }
-    const w = (c: { ideal: number; floor: number }) => Math.max(c.floor, Math.round(c.ideal * scale));
+    // Làm tròn XUỐNG: làm tròn thường cộng dồn tới +0,5px mỗi cột; phần lẻ dư về cột Hạng Mục (w: null).
+    const w = (c: { ideal: number; floor: number }) => Math.max(c.floor, Math.floor(c.ideal * scale));
 
     let k = 0;
     const stt = w(fixed[k++]);

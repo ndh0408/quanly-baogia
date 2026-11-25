@@ -67,7 +67,7 @@ export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
   return (
     <div>
       <h1>Thông báo</h1>
-      <p className="page-sub">Bấm 1 thông báo để đánh dấu đã đọc — thông báo về báo giá sẽ mở thẳng báo giá đó.</p>
+      <p className="muted page-sub">Bấm 1 thông báo để đánh dấu đã đọc — thông báo về báo giá sẽ mở thẳng báo giá đó.</p>
       <div className="toolbar">
         <select name="filter" aria-label="Lọc thông báo" value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">Tất cả</option>

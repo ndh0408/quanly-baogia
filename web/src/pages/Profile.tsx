@@ -72,7 +72,7 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
         <section className="card-section">
           <h3>Hồ sơ</h3>
           <form className="form-grid" onSubmit={saveProfile}>
-            <label className="full">Họ tên <b className="req">*</b><input autoComplete="name" name="displayName" value={displayName} required onChange={(e) => setDisplayName(e.target.value)} /></label>
+            <label className="full"><span>Họ tên <b className="req">*</b></span><input autoComplete="name" name="displayName" value={displayName} required onChange={(e) => setDisplayName(e.target.value)} /></label>
             <label className="full">Tên người gửi trên báo giá<input autoComplete="off" name="senderName" value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => setSenderName(e.target.value)} /></label>
             <label>Số điện thoại<input autoComplete="tel" name="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
             <label>Chức danh<input autoComplete="organization-title" name="title" value={title} placeholder="VD: Account, Sale…" onChange={(e) => setTitle(e.target.value)} /></label>
