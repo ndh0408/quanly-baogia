@@ -112,9 +112,10 @@ ENV NODE_ENV=production \
 # (INFRA-11) giữ sàn này có mặt, đúng nháy, và không tụt dưới bản vá.
 #   libexpat >= 2.8.5-r0 — CVE-2026-93990
 #   musl     >= 1.2.6-r3 — CVE-2026-107891 (HIGH, tràn số nguyên → thực thi mã; [D3] đỏ 2026-11-25)
+#   musl-utils >= 1.2.6-r3 — cùng CVE: gói riêng (ldd/getconf…) đi kèm ảnh nền, KHÔNG tự nâng theo musl
 #   zlib     >= 1.3.2-r1 — CVE-2026-85091 (HIGH, tràn bộ đệm heap trong gz_vacate(); [D3] đỏ 2026-11-25)
 RUN apk add --no-cache openssl libc6-compat tini postgresql16-client font-dejavu \
-      'libexpat>=2.8.5-r0' 'musl>=1.2.6-r3' 'zlib>=1.3.2-r1' \
+      'libexpat>=2.8.5-r0' 'musl>=1.2.6-r3' 'musl-utils>=1.2.6-r3' 'zlib>=1.3.2-r1' \
  && addgroup -S app && adduser -S app -G app
 
 # Copy production-only node_modules + generated Prisma client
