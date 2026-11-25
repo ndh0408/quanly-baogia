@@ -8,7 +8,7 @@
 //
 //   node scripts/dev/rc-qa.mjs
 
-const BASE = process.env.BASE || "https://dev.gianguyen.cloud";
+const BASE = process.env.BASE || "https://dev.gianguyengroupp.com.vn";
 // KHÔNG có mật khẩu mặc định trong mã nguồn — xem chú thích ở prisma/seed-demo.js.
 const PASS = process.env.QA_PASS;
 if (!PASS) {

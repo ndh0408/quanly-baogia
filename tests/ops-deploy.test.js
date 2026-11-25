@@ -147,7 +147,7 @@ describe("INFRA-05 — [6/6] kiểm CSDL, worker và đường public, không ch
     expect(r.code, r.out).toBe(0);
     expect(r.log).toMatch(/wget -qO- http:\/\/127\.0\.0\.1:3000\/readyz/);
     expect(r.log).toMatch(/RestartCount[\s\S]*worker registered/);
-    expect(r.curl).toContain("https://gianguyen.cloud/livez");
+    expect(r.curl).toContain("https://gianguyengroupp.com.vn/livez");
   });
 
   it("/readyz hỏng (app không chạm được CSDL) → deploy ĐỎ", () => {

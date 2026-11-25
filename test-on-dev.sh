@@ -8,7 +8,7 @@
 #   · `npm run verify`  — chạy TẤT CẢ ngay trên máy đang ngồi (scripts/verify-local.sh)
 #   · file này          — chạy trên hạ tầng Docker của VM dev, khi máy local không có Postgres/Redis/MinIO
 #
-#   bash test-on-dev.sh            # mặc định SSH staging-ts (= dev.gianguyen.cloud VM)
+#   bash test-on-dev.sh            # mặc định SSH staging-ts (= dev.gianguyengroupp.com.vn VM)
 #   SSH=staging-ts bash test-on-dev.sh
 #
 # Cách hoạt động: đóng gói commit HEAD (git bundle, có cả lịch sử) → SSH vào VM dev → checkout vào

@@ -2,7 +2,7 @@
 # deploy.sh — ship this repo to STAGING or PROD with one identical, safe flow.
 #
 #   bash deploy.sh staging [git-ref]   # → quanly-staging VM (Tailscale, test/demo)
-#   bash deploy.sh prod    [git-ref]   # → coolify VM (gianguyen.cloud, live)
+#   bash deploy.sh prod    [git-ref]   # → coolify VM (gianguyengroupp.com.vn, live)
 #   bash deploy.sh rollback <staging|prod> [git-sha|rollback]
 #                                      # → lùi ẢNH về tag bất biến <git-sha> (RELEASES.log) hoặc
 #                                      #   :rollback (bản chạy trước lượt deploy gần nhất). KHÔNG lùi
@@ -11,7 +11,7 @@
 # git-ref defaults to HEAD. Recommended flow:
 #   1) npm run verify                  # đủ 13 bước trên cây SẠCH → ghi DẤU XANH cho commit HEAD
 #   2) bash deploy.sh staging          # deploy current code to staging
-#   3) test at https://dev.gianguyen.cloud (login with real account)
+#   3) test at https://dev.gianguyengroupp.com.vn (login with real account)
 #   4) bash deploy.sh prod             # only after staging is verified OK
 #
 # ── CỔNG TRƯỚC KHI SHIP (audit 2026-09-22 INFRA-04; chủ repo chốt 2026-09-23: CI = verify-local) ──
@@ -52,9 +52,9 @@ DIR=/opt/stacks/quanly/quanly
 
 case "$TARGET" in
   prod)
-    SSH=coolify-ts;  COMPOSE=docker-compose.prod.yml;    IMAGE=quanly-app:prod;    URL=https://gianguyen.cloud ;;
+    SSH=coolify-ts;  COMPOSE=docker-compose.prod.yml;    IMAGE=quanly-app:prod;    URL=https://gianguyengroupp.com.vn ;;   # 2026-11-25: gianguyen.cloud đã rời Cloudflare (DNS trỏ nơi khác) — production chạy ở gianguyengroupp.com.vn (tunnel cf-gianguyen).
   staging)
-    SSH=staging-ts;  COMPOSE=docker-compose.staging.yml; IMAGE=quanly-app:staging; URL=https://dev.gianguyen.cloud ;;   # Cloudflare tunnel (cloudflared trên chính VM staging → :3000). Địa chỉ ts.net cũ chỉ vào được trong tailnet; chủ repo chốt 2026-09-23 dùng một địa chỉ dev công khai này. SSH vẫn qua tailnet (staging-ts).
+    SSH=staging-ts;  COMPOSE=docker-compose.staging.yml; IMAGE=quanly-app:staging; URL=https://dev.gianguyengroupp.com.vn ;;   # Cloudflare tunnel (cloudflared trên chính VM staging → :3000). Địa chỉ ts.net cũ chỉ vào được trong tailnet; chủ repo chốt 2026-09-23 dùng một địa chỉ dev công khai này. SSH vẫn qua tailnet (staging-ts).
   *)
     echo "Usage: bash deploy.sh <staging|prod> [git-ref]"
     echo "       bash deploy.sh rollback <staging|prod> [git-sha|rollback]"
@@ -113,7 +113,7 @@ kiem_sau_khi_thay() {
     echo "   Container đã chạy bản mới và đã qua /readyz; kiểm tunnel trước khi rollback."
     return 1
   else
-    echo "   ⚠️  không tới được $URL/livez từ máy này (staging: chỉ cảnh báo — tunnel dev.gianguyen.cloud / Cloudflare có đang chạy không?)"
+    echo "   ⚠️  không tới được $URL/livez từ máy này (staging: chỉ cảnh báo — tunnel dev.gianguyengroupp.com.vn / Cloudflare có đang chạy không?)"
   fi
   return 0
 }
