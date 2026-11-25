@@ -35,7 +35,7 @@ async function appVoi(bat) {
 }
 
 describe.runIf(dbAvailable)("§16 lưu tăng dần ở mức trang (INCREMENTAL_QUOTE_SAVE)", () => {
-  let appBat, appTat, u, co, tpl;
+  let appBat, appTat, u, co, tpl, maMuon;
 
   const dangNhap = async (app) => {
     const agent = request.agent(app);
@@ -155,8 +155,14 @@ describe.runIf(dbAvailable)("§16 lưu tăng dần ở mức trang (INCREMENTAL_
       (await prisma.quoteTemplate.findMany({ select: { code: true }, includeDeleted: true })).map((t) => t.code),
     );
     const { TEMPLATE_CONFIGS, getConfig } = await import("../src/templateConfigs.js");
-    const ma = Object.keys(TEMPLATE_CONFIGS).find((m) => !daDung.has(m));
-    if (!ma) throw new Error("CSDL đã dùng hết mã mẫu — bài test cần 1 mã còn trống");
+    let ma = Object.keys(TEMPLATE_CONFIGS).find((m) => !daDung.has(m));
+    if (!ma) {
+      // QuoteTemplate.code là UNIQUE: chạy cả bộ, các bài khác (và 4 mẫu CINETOUR, 2026-11-25) đã giữ hết mã có
+      // config → bài này đỏ oan (chạy riêng thì xanh). Mượn tạm một mã RIÊNG trỏ cùng config với mẫu đầu, gỡ ở afterAll.
+      ma = `${TAG}-tpl`;
+      TEMPLATE_CONFIGS[ma] = TEMPLATE_CONFIGS[Object.keys(TEMPLATE_CONFIGS)[0]];
+      maMuon = ma;
+    }
     tpl = await prisma.quoteTemplate.create({
       data: { companyId: co.id, name: "Mẫu Inc", code: ma, filePath: getConfig(ma).filePath },
     });
@@ -165,6 +171,7 @@ describe.runIf(dbAvailable)("§16 lưu tăng dần ở mức trang (INCREMENTAL_
   afterAll(async () => {
     if (co) await prisma.quote.deleteMany({ where: { companyId: co.id }, hardDelete: true, includeDeleted: true }).catch(() => {});
     if (tpl) await prisma.quoteTemplate.deleteMany({ where: { id: tpl.id }, hardDelete: true, includeDeleted: true }).catch(() => {});
+    if (maMuon) delete (await import("../src/templateConfigs.js")).TEMPLATE_CONFIGS[maMuon];
     if (co) await prisma.company.deleteMany({ where: { id: co.id }, hardDelete: true, includeDeleted: true }).catch(() => {});
     await prisma.loginAttempt.deleteMany({ where: { username: { startsWith: TAG } } }).catch(() => {});
     if (u) await prisma.user.deleteMany({ where: { id: u.id }, hardDelete: true, includeDeleted: true }).catch(() => {});
