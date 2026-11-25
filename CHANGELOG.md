@@ -12,12 +12,14 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1112 commit**, từ 2026-05-29 tới 2026-11-25.
+**1114 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
 ## 2026-11-25
 
+- `10aae29` test(xc-incremental): mượn mã mẫu riêng khi CSDL đã giữ hết mã có config
+- `e8837e2` docs(CHANGELOG): sinh lại
 - `8bd9ceb` docs(ráp tich-hop-1125): số tệp test sau ráp (backend 389, web 190 tệp / 2111 bài) + ba tham chiếu src/money.ts:N trôi
 - `eea917d` chore(bundle web): nâng trần 900.000 → 940.000 byte (chủ repo đồng ý) — bản ráp đo 906.530
 - `8b4f89d` fix(tiền nhóm): hệ số nhóm lẻ (0,7…) — web, PDF, Excel, bộ nạp Excel cộng theo nhóm rồi nhân CHÍNH XÁC, khớp máy chủ từng đồng
