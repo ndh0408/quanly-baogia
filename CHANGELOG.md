@@ -12,15 +12,25 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1102 commit**, từ 2026-05-29 tới 2026-11-25.
+**1112 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
 ## 2026-11-25
 
+- `8bd9ceb` docs(ráp tich-hop-1125): số tệp test sau ráp (backend 389, web 190 tệp / 2111 bài) + ba tham chiếu src/money.ts:N trôi
+- `eea917d` chore(bundle web): nâng trần 900.000 → 940.000 byte (chủ repo đồng ý) — bản ráp đo 906.530
+- `8b4f89d` fix(tiền nhóm): hệ số nhóm lẻ (0,7…) — web, PDF, Excel, bộ nạp Excel cộng theo nhóm rồi nhân CHÍNH XÁC, khớp máy chủ từng đồng
+- `0e07fae` docs(CHANGELOG): sinh lại
 - `351b13a` fix(image): thêm sàn musl-utils >= 1.2.6-r3 (cùng CVE-2026-107891 — gói riêng không tự nâng theo musl)
+- `72ca88c` docs(CHANGELOG): sinh lại
+- `1cc9b50` docs(tính năng): bảng mẫu Excel thêm bốn mẫu CINETOUR (cột Số ca)
 - `f5597b7` docs(CHANGELOG): sinh lại
 - `9832d14` fix(image): sàn musl >= 1.2.6-r3 và zlib >= 1.3.2-r1 (CVE-2026-107891, CVE-2026-85091 — HIGH, trivy [D3] đỏ)
+- `f6fb316` feat(mẫu báo giá): bốn mẫu CINETOUR có cột SỐ CA cho Gia Nguyễn và Colorfull (không ngày / có ngày)
+- `1a7750a` docs(CHANGELOG): sinh lại
+- `59af8e1` test(mã dự án): bài chốt song song đòi thêm 'chưa có mã trước khi chốt' — đỏ trên 7a6ce18
+- `207b3cc` feat(mã dự án): chỉ cấp mã lúc KHÁCH CHỐT — báo giá chưa chốt hiện "NHÁP <số BG>", "Bản mới" nhớ gốc dự án, công cụ dọn mã cũ
 - `38efe43` docs(CHANGELOG): sinh lại
 - `2a3bec8` fix(phụ thuộc): vá mọi lỗ hổng npm audit mới (11/2026) — gốc + web về 0
 - `16175a1` docs(CHANGELOG): sinh lại
