@@ -175,6 +175,15 @@ describe("INFRA-11 — stage runtime ghi SÀN cho gói OS đã có bản vá", (
     expect(m, "stage runtime không ghi sàn libexpat — lớp apk dựng từ cache vẫn mang 2.8.4-r0").not.toBeNull();
     expect(soSanh(m[1], "2.8.5-r0")).toBeGreaterThanOrEqual(0);
   });
+  // 2026-11-25: trivy [D3] đỏ vì hai gói nền của alpine có bản vá mà ảnh node ghim digest chưa mang.
+  it.each([
+    ["musl", "1.2.6-r3", "CVE-2026-107891"],
+    ["zlib", "1.3.2-r1", "CVE-2026-85091"],
+  ])("%s >= %s (%s) — gói nền của ảnh alpine", (goi, san, cve) => {
+    const m = new RegExp(`'${goi}>=(\\d[\\d.]*-r\\d+)'`).exec(apk);
+    expect(m, `stage runtime không ghi sàn ${goi} — image mang bản dính ${cve}`).not.toBeNull();
+    expect(soSanh(m[1], san)).toBeGreaterThanOrEqual(0);
+  });
   it("mọi ràng buộc phiên bản nằm trong nháy đơn — shell đọc `>` trần là CHUYỂN HƯỚNG, sàn biến mất", () => {
     expect(apk.replace(/'[^']*'/g, "").match(/\S*[<>=~]\S*/g) ?? []).toEqual([]);
   });
