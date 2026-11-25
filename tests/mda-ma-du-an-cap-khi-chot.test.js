@@ -102,6 +102,7 @@ describe.runIf(dbAvailable)("mã dự án cấp lúc khách chốt", () => {
   it("HAI báo giá chốt SONG SONG → hai mã liền nhau, không trùng, không lỗ", async () => {
     const truoc = await boDem();
     const [c, d] = [await taoBaoGia(chu, "song-c"), await taoBaoGia(chu, "song-d")];
+    expect([c.projectCode, d.projectCode, await boDem()], "mã phải sinh lúc CHỐT, không phải lúc tạo").toEqual([null, null, truoc]);
     const kq = await Promise.all([chot(chu, c.id), chot(chu, d.id)]);
     for (const r of kq) expect(r.status, JSON.stringify(r.body)).toBe(200);
     const mas = kq.map((r) => r.body.projectCode).sort();
