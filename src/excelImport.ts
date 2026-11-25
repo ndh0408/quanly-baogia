@@ -20,7 +20,7 @@
 import ExcelJS from "exceljs";
 import { TEMPLATE_CONFIGS } from "./templateConfigs.js";
 import { excelFormulaToEditor, unwrapSoLuong, evalEditorFormula } from "./quoteFormula.js";
-import { nhanLamTronDong } from "./tienDong.js";
+import { congTheoHeSoNhom, nhanLamTronDong } from "./tienDong.js";
 
 // ===== Kiểu dữ liệu trả về =====
 export type ImportedKind = "item" | "sub" | "section" | "subsection" | "info";
@@ -1099,14 +1099,19 @@ export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "gr
   // Nhân CHÍNH XÁC rồi làm tròn — khớp src/money.ts (XLSX-06). Double lệch 1đ ở giá không chia hết 10.
   const line = (it: ImportedItem) => nhanLamTronDong(qtyForAmount(it), s.hasDays ? (Number(it.days) || 1) : 1, s.hasShifts ? (Number(it.shifts) || 1) : 1, Number(it.unitPrice) || 0);
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
-  let total = 0, mult = 1, seen = false;
+  // Cộng Thành Tiền dòng theo TỪNG nhóm rồi nhân hệ số CHÍNH XÁC, làm tròn một lần (congTheoHeSoNhom, src/tienDong.ts):
+  // `total += line × mult` bằng double ra 7.040.806,4999… cho nhóm SL 0,7 trong khi app lưu 7.040.807. BẢN SAO của
+  // sheetSubtotalGrouped (shared/quote-math.ts) — sửa thì sửa CẢ.
+  const phan: [number, number][] = [];
+  let tong = 0, mult = 1;   // hàng đứng trước nhóm đầu tiên: ×1
   for (const it of s.items) {
     // Hệ số nhóm: SL trống / 0 / âm → ×1, SL dương nhỏ hơn 1 nhân THẬT (chủ repo 2026-11-25, báo giá #108 "Cổng
     // Aeon BT" SL 0,5 bị kẹp ×1). BẢN SAO của groupMult ở shared/quote-math.ts — sửa thì sửa CẢ.
-    if (it.kind === "section" || it.kind === "subsection") { const q = qtyForAmount(it); mult = q > 0 ? q : 1; seen = true; continue; }
-    if (it.kind === "item" || it.kind === "sub") total += line(it) * (seen ? mult : 1);
+    if (it.kind === "section" || it.kind === "subsection") { phan.push([tong, mult]); tong = 0; const q = qtyForAmount(it); mult = q > 0 ? q : 1; continue; }
+    if (it.kind === "item" || it.kind === "sub") tong += line(it);
   }
-  return total;
+  phan.push([tong, mult]);
+  return congTheoHeSoNhom(phan);
 }
 
 /** Đoán mẫu báo giá của sheet: cột Số Ngày, cách đánh số nhóm con, tên sheet, màu nhóm, chữ cột. */

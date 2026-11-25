@@ -524,7 +524,11 @@ function GridTableInner(props: GridTableProps) {
       const t = tn ?? tinhTongNhom();
       if (hangGoi >= 0 && (t.chuCua[hangGoi] === p.row || t.chuConCua[hangGoi] === p.row)) { fxVongRef.current = true; return 0; }
       const tong = t.tong[p.row] || 0;
-      return p.f === "unitPrice" ? tong : (groupSubtotal ? tong * M.groupMult(items[p.row]) : 0);
+      // Ô Thành Tiền nhóm trả tích CHÍNH XÁC chưa làm tròn — y ô Excel G×F mà tệp xuất ra (công thức trỏ vào nó được bộ tự
+      // kiểm src/quoteFormula.ts soONhomWeb dịch thành công thức sống chỉ khi hai số bằng nhau). `tong * 0,7` bằng double
+      // lệch đuôi: nhóm 1.310.725 × 0,7 ra 917.507,4999… → `=G1` ở đơn giá thành dòng 917.507, Excel / máy chủ 917.508.
+      // Ô chỉ HIỂN THỊ số đã làm tròn (dòng nhóm bên dưới).
+      return p.f === "unitPrice" ? tong : (groupSubtotal ? M.nhanHeSoNhom(tong, M.groupMult(items[p.row])) : 0);
     }
     if (p.f === "_amount") return (laNhom || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays, usesShifts); if (p.f === "_stt") return 0;
     // SỐ LƯỢNG: trả số ĐÃ LÀM TRÒN đúng như ô đang hiển thị (qtyRound 1 số lẻ, hoặc 4 số lẻ với
@@ -3073,6 +3077,8 @@ function GridTableInner(props: GridTableProps) {
                 else if (numberSubs) { letter = String(++subNo); }
                 sttNo = 0;
                 const subAmt = sectionSum[i] || 0;
+                // Ô Thành tiền nhóm HIỆN số nguyên làm tròn nửa-lên chính xác (nhanLamTronDong — cùng phép ô nhóm của PDF):
+                // `fmtNumCell(subAmt * mult)` hiện "6.172,5" cho nhóm SL 0,5, và double 7.040.806,4999… lệch 1đ khỏi số lưu.
                 return <DongNho key={it._k ?? i} sig={chuKy(i, `S|${isSub}|${letter}|${subAmt}|${M.groupMult(it)}`)} ve={() => (
                   <tr data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
                     <td className="col-stt">{String(it.label || letter)}</td>
@@ -3083,7 +3089,7 @@ function GridTableInner(props: GridTableProps) {
                     {usesDays && <td className="col-qty" />}
                     {usesShifts && <td className="col-qty" />}
                     <td className="col-price" title={fxTitle} data-xl="xem-gia-nhom" onDoubleClick={xuLyBam}>{M.fmtNumCell(subAmt)}</td>
-                    <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{groupSubtotal ? M.fmtNumCell(subAmt * M.groupMult(it)) : ""}</td>
+                    <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{groupSubtotal ? M.fmtNumCell(M.nhanLamTronDong(subAmt, M.groupMult(it))) : ""}</td>
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
                     {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
                     {cotNoiBo && <><td className="col-ns" /><td className="col-chung-tu" /><td className="col-luu-kho" /></>}

@@ -34,7 +34,8 @@ function boGiai(items: M.Item[], usesDays: boolean, groupSubtotal: boolean, numb
     const { L, r } = doc(a); const it = items[r]; if (!it) throw new Error("ngoài bảng " + a);
     const f = so[cot.get(L)!].f;
     const nhom = it.kind === "section" || it.kind === "subsection";
-    if (f === "_amount") return nhom ? (groupSubtotal ? tong[r] * M.groupMult(it) : 0) : it.kind === "info" ? 0 : M.lineAmount(it, usesDays);
+    // Ô Thành tiền nhóm: tích CHÍNH XÁC chưa làm tròn, như cellNum (M.nhanHeSoNhom) — y ô Excel Đơn giá × SL.
+    if (f === "_amount") return nhom ? (groupSubtotal ? M.nhanHeSoNhom(tong[r], M.groupMult(it)) : 0) : it.kind === "info" ? 0 : M.lineAmount(it, usesDays);
     if (f === "quantity") return M.qtyForAmount(it);
     throw new Error("công thức tổng trỏ vào cột lạ " + a);
   };
@@ -138,7 +139,11 @@ describe("congThucTongSheet — công thức Tổng sheet theo địa chỉ ô c
       const tinh = evalFormula(ct.congThuc, boGiai(items, usesDays, groupSubtotal, numberSubs, so));
       const ten = `lần ${lan}: ${ct.congThuc} · ${JSON.stringify(items.map((x) => [x.kind, x.quantity, x.unitPrice]))} gs=${groupSubtotal} ns=${numberSubs}`;
       expect(tinh, ten).not.toBeNull();
-      expect(Math.abs((tinh as number) - dung), ten).toBeLessThan(1e-6 * Math.max(1, Math.abs(dung)));
+      // Tổng sheet LÀM TRÒN đến đồng một lần ở cuối (như máy chủ, như ROUND của Excel — 2026-11-25), còn công thức cộng
+      // các ô nhóm CHƯA làm tròn (nhóm SL 0,5 × 12.345 = 6.172,5): lệch nhau tối đa nửa đồng. Sai cấu trúc (thiếu / thừa / đếm
+      // đôi một ô) lệch ít nhất cỡ trăm đồng ở bảng giá trị này nên ngưỡng ½ đồng vẫn bắt được.
+      expect(Math.abs((tinh as number) - dung), ten).toBeLessThanOrEqual(0.5 + 1e-6 * Math.max(1, Math.abs(dung)));
+      expect(Number.isInteger(dung), `${ten} — tổng sheet phải là số nguyên`).toBe(true);
       // Không thừa: ô Thành tiền trỏ tới là mục (item/sub), dòng thông tin nằm giữa một dải (không có ô), hoặc ô NHÓM có
       // mục — chỉ khi nhóm được tính; và không mục nào bị đếm hai lần (vừa tự nó vừa qua ô nhóm của nó).
       const re = new RegExp(`${La2}(\\d+)(?::${La2}(\\d+))?`, "g"); let m: RegExpExecArray | null; const tro: number[] = [];

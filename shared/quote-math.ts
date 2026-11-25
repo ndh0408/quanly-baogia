@@ -93,13 +93,54 @@ export function nhanLamTronDong(...thuaSo: number[]): number {
     m *= a;
     thapPhan += b;
   }
+  return chiaLamTron(m, thapPhan);
+}
+/** m / 10^thapPhan làm tròn nửa-lên theo độ lớn (ROUND_HALF_UP) — đuôi chung của nhanLamTronDong và congTheoHeSoNhom. */
+function chiaLamTron(m: bigint, thapPhan: number): number {
   if (thapPhan === 0) return Number(m) || 0;
   const chia = BigInt(10) ** BigInt(thapPhan);
   const am = m < BigInt(0);
   const tri = am ? -m : m;
   let thuong = tri / chia;
   if ((tri % chia) * BigInt(2) >= chia) thuong += BigInt(1);
-  return Number(am ? -thuong : thuong) || 0;
+  return Number(am ? -thuong : thuong) || 0;   // `|| 0`: không trả -0
+}
+
+// ── HỆ SỐ NHÓM LẺ: CỘNG THEO NHÓM RỒI NHÂN CHÍNH XÁC (chủ repo 2026-11-25) ─────────────────────────
+// Máy chủ (src/money.ts) nhân Thành Tiền dòng với hệ số nhóm bằng Decimal rồi làm tròn MỘT lần ở mức sheet; Excel ghi
+// ô Thành tiền nhóm = Đơn giá nhóm × SL nhóm (không làm tròn) và Tổng Cộng = ROUND(Σ…). Bản cũ cộng `lineAmount × mult`
+// bằng double: nhóm SL 0,7 × 10.058.295 = 7.040.806,4999… → 7.040.806, máy chủ 7.040.806,5 → 7.040.807 — lệch 1đ cả
+// Tổng, VAT lẫn Thành Tiền (tests/cinetour-so-ca.test.js, lần 50 của bảng ngẫu nhiên). Từ khi hệ số nhóm nhận SL < 1
+// (0,5 / 0,7…) ca này thường gặp chứ không còn hiếm.
+// Hệ số nhóm là SL ĐANG HIỆN (groupMult): tối đa 4 số lẻ (qtyRound 1 số, qtyExact 4 số) → hệ số × 10^4 là số nguyên;
+// tổng mỗi nhóm cũng nguyên (Thành Tiền dòng đã làm tròn) → nhân / cộng trên BigInt là ĐÚNG phép Decimal của máy chủ.
+// BẢN SAO: src/tienDong.ts (congTheoHeSoNhom + nhanHeSoNhom) — sửa thì sửa CẢ. Nơi dùng: sheetSubtotalGrouped (dưới),
+// src/pdf.ts (sheetGross + ô Thành tiền nhóm), src/excel.ts (Tổng Cộng + ô nhóm), src/excelImport.ts (computeSubtotal),
+// src/quoteFormula.ts (soONhomWeb), web/src/components/GridTable.tsx (ô Thành tiền nhóm + cellNum), web/src/lib/
+// congThucTong.ts. tests/xg-he-so-nhom-le-chinh-xac.test.js chạy mọi bản trên cùng dữ liệu.
+const HE_SO_THANG = 10_000;
+/** Σ (tổng Thành Tiền — số nguyên — của nhóm × hệ số nhóm), làm tròn nửa-lên MỘT lần ở cuối: khớp Decimal của src/money.ts.
+ *  `phan` = các cặp [tổng nhóm, hệ số]; hàng đứng trước nhóm đầu tiên là một cặp hệ số 1. */
+export function congTheoHeSoNhom(phan: ReadonlyArray<readonly [number, number]>): number {
+  let x = 0, nguyen = true;
+  for (const [tong, heSo] of phan) { x += tong * heSo; if (!Number.isInteger(heSo)) nguyen = false; }
+  if (nguyen) return Math.round(x) || 0;   // hệ số nguyên (mọi sheet không có SL nhóm lẻ): tích và tổng đều nguyên, double đúng
+  if (!CO_BIGINT) {
+    const r = Number(x.toPrecision(15));   // khử nhiễu double như nhanLamTronDong: 7.040.806,4999… → 7.040.806,5
+    return (r < 0 ? -Math.round(-r) : Math.round(r)) || 0;
+  }
+  let s = BigInt(0);
+  for (const [tong, heSo] of phan) s += BigInt(Math.round(Number(tong) || 0)) * BigInt(Math.round((Number(heSo) || 0) * HE_SO_THANG));
+  return chiaLamTron(s, 4);
+}
+/** Thành tiền MỘT nhóm CHƯA làm tròn — đúng con số ô Excel (Đơn giá nhóm × SL nhóm) giữ và công thức trỏ vào ô nhóm đọc:
+ *  double GẦN NHẤT với tích chính xác (10.058.295 × 0,7 → 7.040.806,5, không phải 7.040.806,4999…). Tổng nhóm × (hệ số ×
+ *  10^4) là số nguyên nên còn đúng tuyệt đối khi dưới 2^53; chia 10^4 là phép làm tròn đúng của IEEE. Ô HIỂN THỊ thì dùng
+ *  nhanLamTronDong(tổng, hệ số) — số nguyên làm tròn nửa-lên, không bao giờ hiện ",5". */
+export function nhanHeSoNhom(tong: number, heSo: number): number {
+  const t = Number(tong) || 0, h = Number(heSo) || 0;
+  const k = Math.round(h * HE_SO_THANG), tich = t * k;
+  return Number.isInteger(t) && Math.abs(k - h * HE_SO_THANG) < 1e-6 && Number.isSafeInteger(tich) ? tich / HE_SO_THANG : t * h;
 }
 
 // Thành Tiền 1 dòng: mặc định SL làm tròn 1 số; dòng quantityExact dùng tối đa 4 số lẻ theo file Excel.
@@ -124,14 +165,18 @@ export function lineAmount(it: Item, usesDays: boolean, usesShifts = false) {
  *  mọi bản trên cùng bảng giá trị. */
 export const groupMult = (it: Pick<Item, "quantity" | "quantityExact">) => { const q = qtyForAmount(it); return q > 0 ? q : 1; };
 // Tổng sheet có hệ số nhóm: section.Số Lượng nhân các dòng dưới nó (tới section kế); section tự nó = 0.
+// Trả số NGUYÊN đã làm tròn nửa-lên một lần (như máy chủ): cộng Thành Tiền dòng theo TỪNG nhóm rồi mới nhân hệ số chính
+// xác — `sum += lineAmount × mult` bằng double lệch 1đ khi hệ số lẻ (xem congTheoHeSoNhom).
 export function sheetSubtotalGrouped(items: Item[], usesDays: boolean, groupSubtotal?: boolean, usesShifts = false) {
-  let mult = 1, sum = 0;
+  const phan: [number, number][] = [];
+  let mult = 1, tong = 0;
   for (const it of items || []) {
-    if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? groupMult(it) : 1; continue; }
+    if (it.kind === "section" || it.kind === "subsection") { phan.push([tong, mult]); tong = 0; mult = groupSubtotal ? groupMult(it) : 1; continue; }
     if (it.kind === "info") continue;
-    sum += lineAmount(it, usesDays, usesShifts) * mult;
+    tong += lineAmount(it, usesDays, usesShifts);
   }
-  return sum;
+  phan.push([tong, mult]);
+  return congTheoHeSoNhom(phan);
 }
 // ── GIẢM GIÁ (Discount) sống ở MỨC SHEET, và trừ TRƯỚC khi tính VAT ───────────────────────────
 //     Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền

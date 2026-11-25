@@ -76,6 +76,8 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
   const vatPct = D(quote.vatPercent);
   const sheetTotals = (quote.sheets || []).map((sh) => {
     let mult = 1;
+    // Σ dòng × hệ số nhóm CHÍNH XÁC, làm tròn MỘT lần ở mức sheet — đây là CHUẨN. Bản double ở lưới web / PDF / Excel / bộ
+    // nạp Excel là congTheoHeSoNhom (shared/quote-math.ts + src/tienDong.ts): đổi cách cộng / làm tròn ở đây thì sửa CẢ.
     const gross = (sh.items || []).reduce((acc, it) => {
       if (it.kind === "section" || it.kind === "subsection") {   // nhóm/nhóm con: header — đặt mult, không tự cộng. Item con vẫn vào tổng cộng.
         // Hệ số nhóm lấy SL ĐÃ làm tròn đúng như lưới hiển thị (cùng phép làm tròn với qty dòng

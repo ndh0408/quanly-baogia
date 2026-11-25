@@ -4,7 +4,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
-import { nhanLamTronDong } from "./tienDong.js";
+import { congTheoHeSoNhom, nhanLamTronDong } from "./tienDong.js";
 import { ngayThangNamVN } from "./vnTime.js";
 import { getConfig } from "./templateConfigs.js";
 
@@ -49,15 +49,19 @@ function groupLetter(n: number) {
   while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
   return s;
 }
-// Tổng 1 sheet (chưa trừ Discount) — cùng luật với sheetSubtotalGrouped ở shared/quote-math.ts.
+// Tổng 1 sheet (chưa trừ Discount) — cùng luật với sheetSubtotalGrouped ở shared/quote-math.ts (BẢN SAO — sửa thì sửa CẢ).
+// Cộng Thành Tiền dòng theo TỪNG nhóm rồi nhân hệ số CHÍNH XÁC, làm tròn một lần: `Math.round(Σ amt × mult)` bằng double
+// từng in 7.040.806 cho nhóm SL 0,7 mà số lưu (Decimal) là 7.040.807 — lý do ở congTheoHeSoNhom (src/tienDong.ts).
 export function sheetGross(items: any[], usesDays: boolean, groupSubtotal: boolean, usesShifts = false) {
-  let mult = 1, sum = 0;
+  const phan: [number, number][] = [];
+  let mult = 1, tong = 0;
   for (const it of items || []) {
-    if (it?.kind === "section" || it?.kind === "subsection") { mult = groupSubtotal ? groupMult(it) : 1; continue; }
+    if (it?.kind === "section" || it?.kind === "subsection") { phan.push([tong, mult]); tong = 0; mult = groupSubtotal ? groupMult(it) : 1; continue; }
     if (it?.kind === "info") continue;
-    sum += lineAmount(it, usesDays, usesShifts) * mult;
+    tong += lineAmount(it, usesDays, usesShifts);
   }
-  return Math.round(sum);
+  phan.push([tong, mult]);
+  return congTheoHeSoNhom(phan);
 }
 /**
  * Khối tổng của PDF — MỘT nguồn cho cả phần in ra lẫn bài kiểm.
@@ -373,7 +377,9 @@ function drawItemsTable(
       else stt = String(it.label || ++subNo);
       const gAmt = sectionSum[idx] || 0;
       priceS = fmtNumCell(gAmt);                                      // Đơn Giá nhóm = Σ mục con
-      amtS = groupSubtotal ? fmtNumCell(gAmt * groupMult(it)) : "";   // × hệ số nhóm
+      // × hệ số nhóm, in số NGUYÊN làm tròn nửa-lên chính xác: `gAmt * mult` qua fmtNumCell (1 số lẻ) in "6.172,5"
+      // cho nhóm SL 0,5, và double 7.040.806,4999… in lệch 1đ so với lưới (nhanLamTronDong, cùng phép ô nhóm của lưới).
+      amtS = groupSubtotal ? fmtNumCell(nhanLamTronDong(gAmt, groupMult(it))) : "";
     } else if (!isInfo) {
       stt = String(++itemNo);
       if (it?.detail) text += "\n  " + it.detail;

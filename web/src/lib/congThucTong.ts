@@ -82,11 +82,14 @@ export function congThucTongSheet(items: M.Item[], o: { groupSubtotal?: boolean;
     if (!m.con.length) continue;   // nhóm rỗng góp 0 — không tô ô của nó
     const he = M.groupMult(ds[m.hang]);
     const tongCon = m.con.reduce((acc, r) => acc + tien(r), 0);
-    if (!nhomChaDonCon(m.hang)) { coNhom = true; phanTu.push({ thamChieu: oTT(m.hang), giaTri: tongCon * he }); continue; }
+    // Giá trị ô nhóm = tích CHÍNH XÁC chưa làm tròn (M.nhanHeSoNhom) — đúng số GridTable.cellNum đọc và ô Excel G×F giữ;
+    // `tongCon * he` bằng double in 7.040.806,4999… Tổng sheet làm tròn MỘT lần ở cuối (dòng "làm tròn đến đồng" dưới).
+    const giaTriNhom = M.nhanHeSoNhom(tongCon, he);
+    if (!nhomChaDonCon(m.hang)) { coNhom = true; phanTu.push({ thamChieu: oTT(m.hang), giaTri: giaTriNhom }); continue; }
     const a = m.con[0], b = m.con[m.con.length - 1];
     const goc = a === b ? oTT(a) : `SUM(${oTT(a)}:${oTT(b)})`;
     // Hệ số ≠ 1 (cả SL 0,5) thì nhân ô SL nhóm — như ô Thành Tiền nhóm của src/excel.ts (`gmult !== 1`), sửa thì sửa CẢ.
-    phanTu.push({ thamChieu: he !== 1 ? `${goc}*${o.Lq}${m.hang + 1}` : goc, giaTri: tongCon * he });
+    phanTu.push({ thamChieu: he !== 1 ? `${goc}*${o.Lq}${m.hang + 1}` : goc, giaTri: giaTriNhom });
     ghiChu.push(`Nhóm “${tenNgan(ds[m.hang].name)}” (hàng ${m.hang + 1}): ô Thành tiền nhóm hiện CẢ phần nhóm con, nhưng Tổng sheet chỉ lấy các mục trực tiếp của nhóm${he !== 1 ? ` × SL ${soVN(he)}` : ""}; mỗi nhóm con nhân SL của chính nó.`);
   }
 

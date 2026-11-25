@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getConfig } from "./templateConfigs.js";
 import { stitchXlsxBuffers } from "./xlsxStitcher.js";
 import { buildFormulaContext, bocSoLuongExcel } from "./quoteFormula.js";
-import { nhanLamTronDong } from "./tienDong.js";
+import { congTheoHeSoNhom, nhanHeSoNhom, nhanLamTronDong } from "./tienDong.js";
 import { ngayThangNamVN } from "./vnTime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1055,10 +1055,13 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     }
   }
 
-  let subtotal = 0;
   let itemNo = 0;
   let sectionIdx = -1;
   let mult = 1;
+  // Tổng Cộng (`subtotal`, sau vòng ghi) cộng Thành Tiền dòng theo TỪNG nhóm rồi mới nhân hệ số CHÍNH XÁC (congTheoHeSoNhom)
+  // — `subtotal += amt * mult` bằng double ghi 7.040.806 cho nhóm SL 0,7 mà số lưu (Decimal) và Excel tính lại đều ra 7.040.807.
+  const phanTong: [number, number][] = [];
+  let tongNhomDangCong = 0;
   let subNo = 0;
   // ===== Công thức SỐNG cho dòng NHÓM + subtotal =====
   // Mục tiêu: khách sửa Số Lượng/Đơn Giá 1 mục trong Excel → Đơn giá nhóm, Thành tiền nhóm,
@@ -1128,10 +1131,12 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (showGroupSub && hasGroupBody) {
         // ×SL khi hệ số ≠ 1 — kể cả SL 0,5 (ô SL nhóm mang đúng số đang hiện nên Excel tính lại ra cùng số).
         // Hệ số 1 (SL 1 / trống / 0 / âm) → = đơn giá nhóm, GIỮ NGUYÊN công thức cũ: ô SL nhóm âm mà nhân vào là sai.
+        // Số ghi sẵn = tích CHÍNH XÁC chưa làm tròn (đúng thứ ô G×F giữ khi Excel tính lại): double `sum * 0,7` cho
+        // 7.040.806,4999…, ô định dạng số nguyên hiện lệch 1đ so với lưới và số lưu. Xem nhanHeSoNhom (src/tienDong.ts).
         const fAmt = gmult !== 1 ? `${cols.unitPrice}${r}*${cols.quantity}${r}` : `${cols.unitPrice}${r}`;
-        thanhTien = { formula: fAmt, result: sectionSum[i] * gmult };
+        thanhTien = { formula: fAmt, result: nhanHeSoNhom(sectionSum[i], gmult) };
       } else {
-        thanhTien = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
+        thanhTien = showGroupSub ? (nhanHeSoNhom(sectionSum[i], gmult) || null) : null;
       }
     }
     const kq = { gq, gmult, looseSum, subRows, gia, thanhTien };
@@ -1220,6 +1225,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // SL hàng nhóm: ghi số ĐÃ làm tròn (ô này không set numFmt nên thừa hưởng định dạng template
       // → ghi số thô là khách mở file thấy đủ 4 chữ số, khác hẳn lưới web).
       if (cols.quantity) ws.getCell(`${cols.quantity}${r}`).value = (gq || 0) || null;
+      phanTong.push([tongNhomDangCong, mult]); tongNhomDangCong = 0;
       mult = gmult;
       if (!Number.isInteger(gmult)) coHeSoNhomLe = true;
       seenSection = true;
@@ -1283,7 +1289,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.days) putNum(it, r, "days", cols.days, days);
       // Số Ca trống ghi 1 — cùng lý do với Số Ngày: ô 0 thì Excel tính lại Thành Tiền ra 0 đồng.
       if (cols.shifts) putNum(it, r, "shifts", cols.shifts, Number(it.shifts) || 1);
-      subtotal += amt * mult;
+      tongNhomDangCong += amt;   // × hệ số nhóm ở congTheoHeSoNhom, sau vòng
       // STT + Hạng Mục: only the group head writes them; sub-rows leave them blank,
       // then get covered by the vertical merge applied after this loop.
       if (isSub) {
@@ -1428,8 +1434,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const t = cfg.totals;
   const subtotalRow = actualLastRow + t.subtotal.rowOffset;
 
-  // Hệ số nhóm lẻ → làm tròn tổng sheet TRƯỚC Discount/VAT, đúng thứ tự của src/money.ts (XLSX-07).
-  if (coHeSoNhomLe) subtotal = Math.round(subtotal);
+  // Hệ số nhóm lẻ → tổng sheet làm tròn (nửa-lên, MỘT lần) TRƯỚC Discount/VAT, đúng thứ tự của src/money.ts (XLSX-07).
+  // congTheoHeSoNhom làm cả hai: nhân chính xác và làm tròn — bản cũ `Math.round(Σ amt × mult)` làm tròn số double đã lệch.
+  phanTong.push([tongNhomDangCong, mult]);
+  const subtotal = congTheoHeSoNhom(phanTong);
 
   // ── DISCOUNT RIÊNG CỦA SHEET ────────────────────────────────────────────────────────────────
   // Có Discount → khối tổng dài ra 2 hàng và VAT đổi gốc tính:

@@ -103,3 +103,38 @@ describe("báo giá #108 'Cổng': nhóm SL 0,5 trên lưới", () => {
     expect(thanhTien(0)).toBe("14.631.330");
   });
 });
+
+// ── HỆ SỐ NHÓM LẺ: Ô NHÓM HIỆN SỐ NGUYÊN LÀM TRÒN CHÍNH XÁC (2026-11-25) ──────────────────────────────────────────
+// Bản cũ hiện `fmtNumCell(tổng × hệ số)` (1 số lẻ): nhóm SL 0,5 × 12.345 ra "6.172,5"; nhóm SL 0,7 × 1.310.725 bằng double ra
+// 917.507,4999… nên hiện "917.507,5" và công thức trỏ vào ô nhóm (=G1) đọc 917.507,4999… → dòng đó 917.507 trong khi Excel
+// (G×F) và máy chủ (đơn giá lưu 917.507,5) ra 917.508. Nay: ô HIỆN nhanLamTronDong (nguyên, nửa-lên), GIÁ TRỊ ô = tích chính xác.
+describe("hệ số nhóm lẻ: ô Thành Tiền nhóm hiện số nguyên đúng phép Decimal", () => {
+  it("nhóm SL 0,5 × 12.345 hiện '6.173' (không '6.172,5'); nhóm SL 0,7 năm dòng (ca cinetour lần 50) hiện '7.040.807'", () => {
+    const items = [
+      mk({ kind: "section", name: "Chia đôi", unit: "gói", quantity: 0.5 }),
+      mk({ name: "A", unit: "cái", quantity: 1, unitPrice: 12_345 }),
+      mk({ kind: "section", name: "Nhóm 0,7", unit: "gói", quantity: 0.7 }),
+      ...[2_744_188, 129_497, 475_258, 5_496_093, 1_213_259].map((p) => mk({ name: "B", unit: "cái", quantity: 1, unitPrice: p })),
+    ];
+    const { thanhTien } = moLuoi(items, true);
+    expect(thanhTien(0)).toBe("6.173");
+    expect(thanhTien(2), "Σ dòng × 0,7 bằng double = 7.040.806,4999…").toBe("7.040.807");
+    expect(M.sheetSubtotalGrouped(items, false, true), "6.172,5 + 7.040.806,5 = 7.046.979 — làm tròn MỘT lần, không cộng hai ô đã tròn").toBe(7_046_979);
+  });
+
+  it("công thức =G1 trỏ vào ô Thành Tiền nhóm (SL 0,7 × 1.310.725) đọc 917.507,5 chính xác → dòng 917.508 như Excel / máy chủ", async () => {
+    const items = [
+      mk({ kind: "section", name: "Nhóm 0,7", unit: "gói", quantity: 0.7 }),
+      mk({ name: "Gói", unit: "gói", quantity: 1, unitPrice: 1_310_725 }),
+      mk({ kind: "section", name: "Phí", unit: "", quantity: 0 }),
+      mk({ name: "Theo nhóm trên", unit: "gói", quantity: 1, unitPrice: 0 }),
+    ];
+    const { o, thanhTien } = moLuoi(items, true);
+    expect(thanhTien(0), "double 917.507,4999… từng hiện '917.507,5'").toBe("917.508");
+    go(o(3, "unitPrice"), "=G1");
+    enter(o(3, "unitPrice"));
+    await xaHen();
+    expect(items[3].unitPrice, "giá trị ô nhóm = tích chính xác chưa làm tròn (ô Excel G×F)").toBe(917_507.5);
+    expect(thanhTien(3), "bản cũ 917.507").toBe("917.508");
+  });
+});

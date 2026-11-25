@@ -178,6 +178,21 @@ describe("lineAmount — trình duyệt KHÔNG có BigInt (nhánh dự phòng)",
       vi.resetModules();
     }
   });
+
+  it("tổng theo hệ số nhóm lẻ (congTheoHeSoNhom) vẫn đúng phép Decimal: Σ dòng × 0,7 = 7.040.806,5 → 7.040.807; −1,5 → −2", async () => {
+    vi.resetModules();
+    vi.stubGlobal("BigInt", undefined);
+    try {
+      const M = await import("./quoteMath");
+      const items: import("./quoteMath").Item[] = [{ kind: "section", quantity: 0.7 }, ...[2_744_188, 129_497, 475_258, 5_496_093, 1_213_259].map((p) => ({ kind: "item" as const, quantity: 1, unitPrice: p }))];
+      expect(M.sheetSubtotalGrouped(items, false, true), "double cộng từng dòng × 0,7 = 7.040.806,4999…").toBe(7_040_807);
+      expect(M.congTheoHeSoNhom([[-3, 0.5]]), "ROUND_HALF_UP ra xa 0").toBe(-2);
+      expect(M.congTheoHeSoNhom([[1_310_725, 0.7], [3, 1]])).toBe(917_511);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
 });
 
 // Nhánh chính xác không được làm chậm lưới: đường tắt double lo gần như mọi dòng, BigInt chỉ chạy
