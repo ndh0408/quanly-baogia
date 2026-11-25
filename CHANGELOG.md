@@ -12,12 +12,17 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1092 commit**, từ 2026-05-29 tới 2026-11-09.
+**1094 commit**, từ 2026-05-29 tới 2026-11-25.
 
 ---
 
+## 2026-11-25
+
+- `a336513` fix(hệ số nhóm): nhóm SL nhỏ hơn 1 nhân thật (0,5 → ×0,5) — báo giá #108 "Cổng Aeon BT" thôi tính ×1
+
 ## 2026-11-09
 
+- `7a6ce18` docs(CHANGELOG): sinh lại
 - `1b9a74b` fix(số lượng): SL khác 0 nhỏ hơn 0,05 làm tròn thành 0,1 — thôi mất tiền hạng mục (báo giá #101)
 
 ## 2026-10-07
