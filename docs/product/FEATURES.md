@@ -319,7 +319,7 @@ chọn dùng chung với bước 3 của "Tạo báo giá mới": `web/src/compo
 | **PDF** | `GET /api/export/:id.pdf` | pdfkit, toán tiền lặp lại **y hệt** Excel/lưới |
 | **Hợp đồng dịch vụ** `.docx` | `GET /api/personnel/:id/contract` | sinh từ `templates/hd-dichvu-template.docx` cho hồ sơ nhân sự |
 
-**Bốn mẫu Excel, hai công ty** (bảng ánh xạ ô nằm ở
+**Các mẫu Excel của hai công ty** (bảng ánh xạ ô nằm ở
 [`src/templateConfigs.ts`](../../src/templateConfigs.ts), writer ở [`src/excel.ts`](../../src/excel.ts)):
 
 | Mẫu (code) | Công ty | File | Đặc điểm |
@@ -328,6 +328,13 @@ chọn dùng chung với bước 3 của "Tạo báo giá mới": `web/src/compo
 | GN có ngày (`unibenfood`) | Gia Nguyễn | `templates/GN_CoNgay.xlsx` | **cùng nền với GN không ngày**, thay cột Chi Tiết bằng **Số ngày**; Thành Tiền = Đơn Giá × Số Lượng × Số Ngày. Dựng lại: `node scripts/dung-mau-co-ngay.mjs` |
 | GN Banner (`gn_banner`) | Gia Nguyễn | `templates/Marico_Decor.xlsx` | cùng file GN không ngày, **khác cách đánh STT** (nhóm con đánh 1,2,3; mục dưới không đánh số) |
 | CLF không ngày (`clofull_decor`) | Colorfull | `templates/CLF_KhongNgay.xlsx` | có cột Chi Tiết; khối "Kính gửi" + letterhead người gửi ở F1 |
+| GN CINETOUR không ngày (`gn_cinetour`) | Gia Nguyễn | `templates/GN_Cinetour_KhongNgay.xlsx` | khung GN có ngày, cột F là **Số ca**; Thành Tiền = Đơn Giá × Số Lượng × Số Ca |
+| GN CINETOUR có ngày (`gn_cinetour_conngay`) | Gia Nguyễn | `templates/GN_Cinetour_CoNgay.xlsx` | GN có ngày + cột **Số ca** ngay sau Số ngày (G); Thành Tiền = Đơn Giá × Số Lượng × Số Ngày × Số Ca |
+| CLF CINETOUR không ngày (`clofull_cinetour`) | Colorfull | `templates/CLF_Cinetour_KhongNgay.xlsx` | khung CLF có ngày (giữ Chi Tiết), cột G là **Số ca** |
+| CLF CINETOUR có ngày (`clofull_cinetour_conngay`) | Colorfull | `templates/CLF_Cinetour_CoNgay.xlsx` | CLF có ngày + cột **Số ca** ngay sau Số ngày (H), bảng B…K |
+
+Bốn mẫu CINETOUR: Số ca trống / 0 tính như 1 (y luật Số ngày); ô chọn mẫu xếp chúng sau cùng, mẫu chọn sẵn cho
+sheet mới vẫn là mẫu Không ngày thường. Tệp mẫu dựng lại từ hai mẫu có ngày: `node scripts/dung-mau-cinetour.mjs`.
 
 Ánh xạ bên gửi / bên nhận vào ô Excel:
 
