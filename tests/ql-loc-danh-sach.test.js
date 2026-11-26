@@ -74,6 +74,7 @@ describe("locTheoChieu — mỗi chiều một điều kiện riêng để đế
   it("từng chiều có mặt đúng khi được yêu cầu", () => {
     const p = locTheoChieu({ q: "mai", status: ["draft"], companyIds: [9], creatorIds: [1], from: new Date("2026-09-01"), minTotal: 5, note: "has" }, ctx);
     for (const k of ["q", "status", "company", "creator", "date", "total", "note"]) expect(p[k], k).not.toBeNull();
+    expect(p.total).toEqual({ subtotal: { gte: 5 } });   // lọc "Tổng tiền" theo số CHƯA VAT — khớp cột danh sách
     expect(locTheoChieu({ status: ["draft"] }, ctx).creator).toBeNull();
   });
   it("tìm thông minh: mỗi từ là một OR; tên người/công ty khớp được giải ra id", () => {
@@ -102,7 +103,9 @@ describe("locTheoChieu — mỗi chiều một điều kiện riêng để đế
 
 describe("orderByTheoCot", () => {
   it("bốn cột cũ: một khoá như cũ (không đổi kế hoạch truy vấn đường nóng)", () => {
-    for (const c of ["createdAt", "quoteDate", "total", "quoteNumber"]) expect(orderByTheoCot(c, "desc")).toEqual({ [c]: "desc" });
+    for (const c of ["createdAt", "quoteDate", "quoteNumber"]) expect(orderByTheoCot(c, "desc")).toEqual({ [c]: "desc" });
+    // Cột "Tổng chưa VAT": khoá "total" sắp theo subtotal (số CHƯA VAT mà ô hiện).
+    expect(orderByTheoCot("total", "desc")).toEqual({ subtotal: "desc" });
   });
   it("cột mới: khoá quan hệ đúng + id làm khoá phụ (trang không trùng/sót dòng khi nhiều dòng bằng nhau)", () => {
     expect(orderByTheoCot("company", "asc")).toEqual([{ company: { name: "asc" } }, { id: "desc" }]);
@@ -377,6 +380,29 @@ describe.runIf(dbAvailable)("GET /api/quotes — lọc + tìm thông minh + sắ
     expect(r.body.mine).toBe(3);
     expect(r.body.total).toBe(3);   // phạm vi của Nguyễn Văn Ánh chỉ có q1, q3, q5
     expect(r.body.creators.map((x) => x.name)).toEqual(["Nguyễn Văn Ánh"]);
+  });
+  it("facets 'years' (bộ chọn năm): đếm theo NĂM ngày báo giá và BỎ chiều ngày — đang lọc từ 05/09 vẫn thấy đủ cả năm", async () => {
+    const a = await dangNhap(admin);
+    const r = await a.get(`/api/quotes/facets?q=${TAG}&from=2026-09-05`);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.total).toBe(3);                                  // q2, q4, q5 có ngày ≥ 05/09
+    expect(r.body.years).toEqual([{ value: 2026, count: 5 }]);     // năm: không áp chính bộ lọc ngày → đủ 5
+    const r2 = await a.get(`/api/quotes/facets?q=${TAG}&status=lost`);
+    expect(r2.body.years).toEqual([{ value: 2026, count: 1 }]);    // nhưng VẪN áp mọi bộ lọc khác
+  });
+  it("cột 'Tổng chưa VAT': sắp xếp + lọc tiền theo subtotal (số CHƯA VAT mà ô hiện), không theo total", async () => {
+    const a = await dangNhap(admin);
+    // q5: tổng đã VAT 18tr nhưng cho subtotal 2 tỷ — sắp theo total thì q5 đứng gần cuối, theo subtotal thì đứng ĐẦU.
+    await prisma.quote.update({ where: { id: q5.id }, data: { subtotal: 2_000_000_000 } });
+    try {
+      expect((await ds(a, `q=${TAG}&sort=total&order=desc`))[0]).toBe("q5");
+      expect(await ds(a, `q=${TAG}&minTotal=1900000000`)).toEqual(["q5"]);
+      const r = await a.get(`/api/quotes?q=${TAG}&size=50`);
+      const d5 = r.body.data.find((x) => x.id === q5.id);
+      expect(d5.subtotal).toBe(2_000_000_000);   // web hiện cột này
+    } finally {
+      await prisma.quote.update({ where: { id: q5.id }, data: { subtotal: 18_000_000 } });
+    }
   });
   it("facets: view lược bị 403 (không có gì để đếm và không được dò); chưa đăng nhập 401", async () => {
     for (const u of [hn, chiPhi]) expect((await (await dangNhap(u)).get(`/api/quotes/facets`)).status).toBe(403);

@@ -327,7 +327,7 @@ describe("Điện thoại: bộ lọc thu gọn sau nút 'Bộ lọc khác'", ()
     expect(trong.contains(hop!.querySelector('[aria-label="Trạng thái báo giá"]'))).toBe(false);
     const hang = hop!.querySelector(".bl-them-hang")!;
     expect(hang.querySelector('select[aria-label="Mẫu ngày báo giá"]')).toBeTruthy();
-    expect(hang.querySelector('[aria-label="Tổng tiền"]')).toBeTruthy();
+    expect(hang.querySelector('[aria-label="Tổng chưa VAT"]')).toBeTruthy();
     expect(hang.querySelector('[aria-label="Ghi chú"]')).toBeTruthy();
     expect(nutThem().getAttribute("aria-controls")).toBe(hang.id);
   });

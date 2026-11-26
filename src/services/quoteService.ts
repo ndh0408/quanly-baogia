@@ -1378,6 +1378,7 @@ export async function listInputInvoices(req: Request) {
 
   const chonBaoGia = chonBaoGiaDauVao({
     id: true, companyId: true, status: true, projectCode: true, projectVersion: true, quoteNumber: true, title: true, shortTitle: true,
+    quoteDate: true, convertedAt: true,   // năm dự án (bộ chọn năm) — thongTinBaoGia
     hnStatus: true, hnReviewedAt: true, hnReviewerId: true,
     customer: { select: { code: true, name: true } },
     company: { select: { shortName: true, name: true } },
@@ -1467,7 +1468,7 @@ export async function listProjects(req: Request) {
     select: {
       id: true, quoteNumber: true, projectCode: true, projectVersion: true,
       title: true, shortTitle: true, status: true, hnStatus: true,
-      quoteDate: true, executionDate: true, vatPercent: true,
+      quoteDate: true, executionDate: true, vatPercent: true, convertedAt: true,
       subtotal: true, total: true, discount: true,
       companyId: true,   // luật chọn mẫu dự phòng của bảng nội bộ / HN (bangNoiBoCoNgay) — không trả ra
       company: { select: { name: true, shortName: true } },
@@ -1544,6 +1545,10 @@ export async function listProjects(req: Request) {
       hnStatus: q.hnStatus || null,
       quoteDate: q.quoteDate,
       executionDate: q.executionDate,
+      // NĂM DỰ ÁN (bộ chọn năm ở trang Quản lý dự án, 2026-11-26): năm KHÁCH CHỐT theo giờ VN — cùng năm mà
+      // capMaDuAnKhiChot/nextProjectCode in vào mã (FP_B26_… → 2026). Báo giá chốt từ trước khi có cột convertedAt thì
+      // lùi về ngày báo giá.
+      projectYear: namVN(q.convertedAt ?? q.quoteDate),
       vatPercent: Number(q.vatPercent),
       subtotal: Number(q.subtotal),
       total: Number(q.total),
@@ -2034,7 +2039,7 @@ export async function listQuoteFacets(req: Request) {
   const parts = locTheoChieu(loc, { ...(loc.q ? await nguoiVaCongTy() : { nguoi: [], congTy: [] }), bienLuoc: false });
   const voi = (boQua?: ChieuLoc): Prisma.QuoteWhereInput => ({ AND: [scope, ...ghepLoc(parts, boQua)] });
   const toi = req.session.userId as number;
-  const [theoTrangThai, theoNguoi, theoCongTy, coGhiChu, chuaGhiChu, theoMau, cuaToi, tong] = await Promise.all([
+  const [theoTrangThai, theoNguoi, theoCongTy, coGhiChu, chuaGhiChu, theoMau, cuaToi, tong, ngayBaoGia] = await Promise.all([
     prisma.quote.groupBy({ by: ["status"], where: voi("status"), _count: { _all: true } }),
     prisma.quote.groupBy({ by: ["createdById"], where: voi("creator"), _count: { _all: true } }),
     prisma.quote.groupBy({ by: ["companyId"], where: voi("company"), _count: { _all: true } }),
@@ -2044,7 +2049,13 @@ export async function listQuoteFacets(req: Request) {
     prisma.quoteListNote.groupBy({ by: ["color"], where: { color: { not: null }, quote: { AND: [voi("note"), { deletedAt: null }] } }, _count: { _all: true } }),
     prisma.quote.count({ where: { AND: [voi("creator"), { createdById: toi }] } }),
     prisma.quote.count({ where: voi() }),
+    // BỘ CHỌN NĂM (2026-11-26): đếm theo NĂM của ngày báo giá (giờ VN), bỏ chiều "date" như mọi nhóm đếm khác — chọn
+    // năm 2026 thì các năm khác vẫn hiện số của chúng. Prisma không groupBy được theo biểu thức năm, nên kéo đúng một cột
+    // ngày của tập đã lọc rồi đếm ở đây (vài nghìn dòng, một cột).
+    prisma.quote.findMany({ where: voi("date"), select: { quoteDate: true } }),
   ]);
+  const demNam = new Map<number, number>();
+  for (const { quoteDate } of ngayBaoGia) if (quoteDate) { const n = namVN(quoteDate); demNam.set(n, (demNam.get(n) ?? 0) + 1); }
   const [tenNguoi, tenCongTy] = await Promise.all([
     theoNguoi.length ? prisma.user.findMany({ where: { id: { in: theoNguoi.map((g) => g.createdById) } }, select: { id: true, displayName: true } }) : [],
     theoCongTy.length ? prisma.company.findMany({ where: { id: { in: theoCongTy.map((g) => g.companyId) } }, select: { id: true, name: true, shortName: true } }) : [],
@@ -2059,6 +2070,7 @@ export async function listQuoteFacets(req: Request) {
     creators: xep(theoNguoi.map((g) => ({ id: g.createdById, name: nguoi.get(g.createdById) ?? `#${g.createdById}`, count: g._count._all }))),
     companies: xep(theoCongTy.map((g) => ({ id: g.companyId, name: congTy.get(g.companyId) ?? `#${g.companyId}`, count: g._count._all }))),
     note: { has: coGhiChu, none: chuaGhiChu, colors: Object.fromEntries(theoMau.map((g) => [g.color as string, g._count._all])) },
+    years: [...demNam.entries()].sort((a, b) => b[0] - a[0]).map(([value, count]) => ({ value, count })),
   };
 }
 

@@ -7,6 +7,8 @@ import { CHUNG_TU } from "../lib/gridShared";
 import { useTrangAnToan } from "../lib/phienBan";
 import { LOAI_BANG, canhBaoKhoan, fmtNgayThuan, fmtSoLuong, hinhThucCua, tenBangRieng, thieuAnhChungTu, trangThaiVat } from "../lib/khoanChi";
 import { HopKhoanChi } from "../components/HopKhoanChi";
+import { BangCuonNgang } from "../components/BangCuonNgang";
+import { ChonNam, demTheoNam, namHieuLuc, useNamDaNho } from "../components/ChonNam";
 
 // Trang HÓA ĐƠN ĐẦU VÀO (kế toán) — chủ repo 2026-09-30: "trang của những cái nào đã duyệt ở phần nội bộ".
 // Mỗi HÀNG bảng nội bộ của báo giá (Chi phí HCM · Phí khách hàng · Báo giá Hà Nội) mà người có quyền duyệt đã
@@ -140,7 +142,14 @@ export function InvoicesInPage({ me }: { me: Me }) {
   const dat = (p: Partial<BoLoc>) => setB((x) => ({ ...x, ...p }));
   // Bản sao MỚI (không đặt lại đúng đối tượng hằng): ghim dòng vừa sửa nhận bộ lọc theo danh tính đối tượng.
   const xoaLoc = () => setB({ ...BO_LOC_RONG });
-  const rows = data?.data ?? KHONG_HANG;   // mảng cố định: `?? []` đẻ mảng MỚI mỗi lượt vẽ → useMemo bên dưới tính lại mỗi lần
+  const tatCa = data?.data ?? KHONG_HANG;   // mảng cố định: `?? []` đẻ mảng MỚI mỗi lượt vẽ → useMemo bên dưới tính lại mỗi lần
+  // Bộ chọn năm ("thư mục theo năm", nhớ trên máy này): NĂM DỰ ÁN của báo giá chứa khoản (năm chốt, chưa chốt thì năm
+  // ngày báo giá — máy chủ tính, src/inputInvoices.ts). Lọc TRƯỚC mọi bộ lọc khác, nên thẻ tiền / số đếm / "Cần chú ý"
+  // đều là của năm đang xem. Không bị "Xóa tất cả" bỏ đi.
+  const [namChon, chonNam] = useNamDaNho("quanly.hoaDonVao.nam");
+  const cacNam = useMemo(() => demTheoNam(tatCa, (r) => r.projectYear), [tatCa]);
+  const nam = namHieuLuc(namChon, cacNam);
+  const rows = useMemo(() => (nam ? tatCa.filter((r) => String(r.projectYear ?? "") === nam) : tatCa), [tatCa, nam]);
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
 
   // Dòng vừa sửa đứng yên tới khi ĐỔI BỘ LỌC: ghim gắn với đúng bộ lọc lúc ghim, đổi lọc là tự rơi (không cần effect).
@@ -169,7 +178,7 @@ export function InvoicesInPage({ me }: { me: Me }) {
   // Phân trang: đổi bộ lọc / sắp xếp thì về trang 1 — giữ số trang cũ là nhìn vào một trang trống.
   const [trang, setTrang] = useState(1);
   const soTrang = Math.max(1, Math.ceil(sorted.length / CO_TRANG));
-  useEffect(() => { setTrang(1); }, [b, sortKey, sortDir]);
+  useEffect(() => { setTrang(1); }, [b, sortKey, sortDir, nam]);
   const trangNay = Math.min(trang, soTrang);
   const hien = sorted.slice((trangNay - 1) * CO_TRANG, trangNay * CO_TRANG);
 
@@ -184,7 +193,7 @@ export function InvoicesInPage({ me }: { me: Me }) {
   // ── HỘP KHOẢN CHI (vẽ ở MỨC TRANG, ngoài <tr>) ──────────────────────────────────────────────────────────────────
   const [hop, setHop] = useState<{ key: string; row: InputInvoiceRow } | null>(null);
   const nutMo = useRef<HTMLElement | null>(null);
-  const hopRow = useMemo(() => (hop ? rows.find((r) => r.key === hop.key) ?? null : null), [hop, rows]);
+  const hopRow = useMemo(() => (hop ? tatCa.find((r) => r.key === hop.key) ?? null : null), [hop, tatCa]);
   // Ghi được → hộp ghi; không ghi được mà có mã (báo giá đã xoá…) → hộp CHỈ XEM: xem ảnh chứng từ, ngày HĐ, ghi chú, lịch sử
   // ảnh — tiền đã chi vẫn phải đối chiếu được. Hàng thiếu mã không định vị được khoản nên không có gì để mở.
   const coTheMoHop = (r: InputInvoiceRow) => (canPay || canEdit) && (r.coTheGhi || !!r.rid);
@@ -214,6 +223,9 @@ export function InvoicesInPage({ me }: { me: Me }) {
       <h1>Hóa đơn đầu vào</h1>
       <p className="muted">Các <b>hàng đã duyệt</b> ở bảng nội bộ của báo giá (Chi phí HCM · Phí khách hàng · Báo giá Hà Nội) — mỗi hàng là một khoản chi cần <b>hóa đơn đầu vào</b>. Cột <b>Kế toán</b>: tích <b>Đã chi</b> + ảnh chứng từ, ghi <b>Ngày hóa đơn</b> và <b>Ghi chú kế toán</b>. Duyệt / bỏ duyệt và đổi chứng từ làm ở màn soạn báo giá.{moDuoc && " Bấm dòng để mở báo giá."}</p>
       {!canPay && <p className="muted inv-in-goi-y">Bạn chưa có quyền tích ĐÃ CHI — nhờ quản trị cấp quyền <b>Hóa đơn đầu vào: tích ĐÃ CHI + ảnh chứng từ</b>.</p>}
+
+      <ChonNam cacNam={cacNam} nam={nam} chon={chonNam} tong={tatCa.length}
+        goiY={(n) => `Khoản chi của báo giá năm ${n} (năm khách chốt; chưa chốt thì năm ngày báo giá)`} />
 
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">
@@ -282,7 +294,7 @@ export function InvoicesInPage({ me }: { me: Me }) {
             </div>
           ) : (
             <>
-              <div className="list-wrap">
+              <BangCuonNgang className="list-wrap">
                 <table className="list-table inv-in-table">
                   <thead><tr>{HEADERS.map((h) => {
                     const sk = SORT_COLS[h];
@@ -337,7 +349,7 @@ export function InvoicesInPage({ me }: { me: Me }) {
                     })}
                   </tbody>
                 </table>
-              </div>
+              </BangCuonNgang>
               <div className="list-foot">
                 <span className="muted">Hiển thị {(trangNay - 1) * CO_TRANG + 1}–{(trangNay - 1) * CO_TRANG + hien.length} / {shown.length} khoản{shown.length !== rows.length ? ` (lọc từ ${rows.length})` : ""}</span>
                 {soTrang > 1 && (

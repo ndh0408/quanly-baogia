@@ -4,11 +4,13 @@ import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-quer
 import { api, type Me, type QuoteRow, type QuoteListNote, type QuoteListResult } from "../lib/api";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
-import { statusLabel, fmtMoney, fmtDate, codeLabel, tieuDeHienThi, errMsg, dash } from "../lib/format";
+import { statusLabel, fmtMoney, fmtDate, codeLabel, laNhap, tieuDeHienThi, errMsg, dash } from "../lib/format";
 import { xuatBaoGia } from "../lib/exportQuote";
 import { useTrangAnToan } from "../lib/phienBan";
 import { QuoteNote, type GhiChuThayDoi } from "../components/QuoteNote";
 import { BoLocBaoGia } from "../components/BoLocBaoGia";
+import { BangCuonNgang } from "../components/BangCuonNgang";
+import { ChonNam, docNamDaNho, ghiNamDaNho } from "../components/ChonNam";
 import { LOC_RONG, demBoLoc, docTuUrl, ghiLenUrl, thamSoApi, type BoLocDS } from "../lib/locDanhSach";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm thông minh (debounce) + bộ lọc (trạng thái, người tạo, công ty,
@@ -23,7 +25,22 @@ const hnBadge = (st?: string | null) => HN_LIST_STATUS[st || ""] || { label: "Ch
 // (account HN / tài khoản chi phí) được sắp theo; các cột MỚI máy chủ chỉ cho view đầy đủ (sắp theo thứ người ta không
 // thấy là cách dò nó), nên view lược không vẽ mũi tên ở đó.
 const SORT_CU = ["createdAt", "quoteDate", "total", "quoteNumber"];
+// Cột "Tổng chưa VAT (VNĐ)" (2026-11-26, chủ repo chuyển lời): danh sách hiện số CHƯA VAT = `subtotal` (đã trừ
+// Discount, trước VAT). Trước đây ô hiện `total` (đã cộng VAT) mà tiêu đề chỉ ghi "Tổng" nên người xem hiểu nhầm.
+// Không lùi về `total` khi thiếu: số đã có VAT nằm dưới tiêu đề "chưa VAT" là sai, thà hiện "—".
+const tongChuaVat = (r: QuoteRow): number | null => r.subtotal ?? null;
 const SORT_MOI = ["title", "toCompany", "status", "company", "creator", "customerCode"];
+// BỘ CHỌN NĂM (2026-11-26, "cả danh sách báo giá … tất cả luôn"): nút năm = bộ lọc NGÀY BÁO GIÁ trọn năm đó (01/01–31/12),
+// dùng lại đúng hai ô Từ/Đến đã có — không thêm khoá URL mới, link dán cho nhau vẫn mở đúng. Năm đang xem nhớ trên máy
+// này: mở lại trang (không có ngày trên URL) là về đúng năm đó.
+const KHOA_NAM_BG = "quanly.baoGia.nam";
+const dauNam = (y: string) => `${y}-01-01`;
+const cuoiNam = (y: string) => `${y}-12-31`;
+/** Năm mà bộ lọc ngày đang phủ TRỌN (đúng 01/01–31/12 cùng năm); khoảng ngày khác → "". */
+const namCuaLoc = (b: { tu: string; den: string }): string => {
+  const y = b.tu.slice(0, 4);
+  return /^\d{4}$/.test(y) && b.tu === dauNam(y) && b.den === cuoiNam(y) ? y : "";
+};
 const PAGE_SIZE = 20;
 
 export function QuoteListPage({ me }: { me: Me }) {
@@ -78,10 +95,20 @@ export function QuoteListPage({ me }: { me: Me }) {
   const sp0 = new URLSearchParams((location.hash.split("?")[1]) || "");
   // BỘ LỌC (components/BoLocBaoGia). View lược chỉ có ô tìm + trạng thái + ngày (xem thanh lọc bên dưới): giá trị khác
   // trên URL (gõ tay / link cũ) bị bỏ, thay vì áp NGẦM một bộ lọc mà màn hình không hề hiện ra.
-  const [loc, setLoc] = useState<BoLocDS>(() => { const l = docTuUrl(sp0); return stripped ? { ...LOC_RONG, q: l.q, status: l.status, tu: l.tu, den: l.den } : l; });
+  const [loc, setLoc] = useState<BoLocDS>(() => {
+    const l = docTuUrl(sp0);
+    // Không có ngày trên URL → mở lại đúng năm đang xem lần trước (view đầy đủ — view lược không có bộ chọn năm).
+    const nho = !stripped && !l.tu && !l.den ? docNamDaNho(KHOA_NAM_BG) : "";
+    const coNam = /^\d{4}$/.test(nho) ? { tu: dauNam(nho), den: cuoiNam(nho) } : {};
+    return stripped ? { ...LOC_RONG, q: l.q, status: l.status, tu: l.tu, den: l.den } : { ...l, ...coNam };
+  });
   const datLoc = (p: Partial<BoLocDS>) => setLoc((c) => ({ ...c, ...p }));
   const xoaLoc = () => setLoc(LOC_RONG);
   const dangLoc = demBoLoc(loc) > 0;
+  const namDangXem = namCuaLoc(loc);
+  // Nhớ theo ĐÚNG thứ đang hiện: chọn năm → nhớ; Xóa tất cả / sửa tay ngày sang khoảng khác → quên.
+  useEffect(() => { if (!stripped) ghiNamDaNho(KHOA_NAM_BG, namDangXem); }, [namDangXem, stripped]);
+  const chonNamBG = (y: string) => datLoc(y ? { tu: dauNam(y), den: cuoiNam(y) } : { tu: "", den: "" });
   const sortHopLe = (s: string | null): s is string => !!s && (SORT_CU.includes(s) || (!stripped && SORT_MOI.includes(s)));
   const [sort, setSort] = useState(sortHopLe(sp0.get("sort")) ? sp0.get("sort")! : "createdAt");
   const [order, setOrder] = useState<"asc" | "desc">(sp0.get("order") === "asc" ? "asc" : "desc");
@@ -209,6 +236,8 @@ export function QuoteListPage({ me }: { me: Me }) {
             <input name="q" type="search" className="grow" placeholder="Tìm theo mã, tiêu đề, khách, người tạo, ghi chú…" title="Gõ nhiều từ, không cần dấu, không cần đúng thứ tự — ví dụ: sao mai hcm" value={loc.q} onChange={(e) => datLoc({ q: e.target.value })} aria-label="Tìm báo giá" />
             {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
           </div>
+          <ChonNam cacNam={(facets?.years ?? []).map((x) => ({ nam: String(x.value), dem: x.count }))}
+            nam={namDangXem} chon={chonNamBG} goiY={(n) => `Báo giá có ngày báo giá trong năm ${n}`} />
           <BoLocBaoGia loc={loc} dat={datLoc} xoa={xoaLoc} facets={facets} meId={me.id} />
         </>
       )}
@@ -233,7 +262,7 @@ export function QuoteListPage({ me }: { me: Me }) {
               onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,textarea")) return; open(r.id); }}
               onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("button,a,input,textarea")) open(r.id); }}>
               <div className="ql-card-head">
-                <strong>{codeLabel(r)}</strong>
+                <strong className={laNhap(r) ? "ma-nhap" : undefined}>{codeLabel(r)}</strong>
                 {isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}
               </div>
               {(r.shortTitle || r.title) && <div className="ql-card-title">{tieuDeHienThi(r)}</div>}
@@ -247,7 +276,7 @@ export function QuoteListPage({ me }: { me: Me }) {
                   ? <div className="ql-crow"><dt>Tổng HN</dt><dd>{r.hnTotal == null ? dash : <b>{fmtMoney(r.hnTotal)}</b>}</dd></div>
                   : isInternalViewer
                   ? <div className="ql-crow"><dt>Đã thanh toán</dt><dd><b>{payProg(r)} hàng</b></dd></div>
-                  : <div className="ql-crow"><dt>Tổng (VNĐ)</dt><dd>{r.total == null ? dash : <b>{fmtMoney(r.total)}</b>}</dd></div>}
+                  : <div className="ql-crow"><dt>Tổng chưa VAT (VNĐ)</dt><dd>{tongChuaVat(r) == null ? dash : <b>{fmtMoney(tongChuaVat(r)!)}</b>}</dd></div>}
                 <div className="ql-crow"><dt>Công ty</dt><dd>{r.company?.shortName || r.company?.name || dash}</dd></div>
                 {!stripped && <div className="ql-crow"><dt>Khách</dt><dd>{r.toCompany || dash}{r.customerCode ? ` · ${r.customerCode}` : ""}</dd></div>}
               </dl>
@@ -265,7 +294,7 @@ export function QuoteListPage({ me }: { me: Me }) {
           ))}
         </div>
       ) : (
-        <div className="list-wrap">
+        <BangCuonNgang className="list-wrap">
           <table className="list-table ql-table">
             <thead>
               <tr>
@@ -274,7 +303,7 @@ export function QuoteListPage({ me }: { me: Me }) {
                 <SortTh f="title" label="Tiêu đề" />
                 <SortTh f="quoteDate" label="Ngày" />
                 <th scope="col" className="num">Sheet</th>
-                {!stripped && <SortTh f="total" label="Tổng (VNĐ)" right />}
+                {!stripped && <SortTh f="total" label="Tổng chưa VAT (VNĐ)" right />}
                 <SortTh f="company" label="Công ty" />
                 {isAccountHn ? <th scope="col" className="num">Tổng HN</th> : isInternalViewer ? <th scope="col" className="num">Đã TT</th> : <><SortTh f="toCompany" label="Khách" /><SortTh f="customerCode" label="Mã KH" /></>}
                 <SortTh f="status" label="Trạng thái" />
@@ -286,12 +315,12 @@ export function QuoteListPage({ me }: { me: Me }) {
               {rows.map((r) => (
                 <tr key={r.id} className="qrow" title="Bấm để mở báo giá"
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,textarea")) return; open(r.id); }}>
-                  <td><a href={`#/quotes/${r.id}`}><strong>{codeLabel(r)}</strong></a>{laPhu(r) && <span className="muted" title="Bạn được thêm vào làm cùng — báo giá này của người khác" style={{ marginLeft: 6, fontSize: 11 }}>· phụ</span>}</td>
+                  <td><a href={`#/quotes/${r.id}`} className={laNhap(r) ? "ma-nhap" : undefined}><strong>{codeLabel(r)}</strong></a>{laPhu(r) && <span className="muted" title="Bạn được thêm vào làm cùng — báo giá này của người khác" style={{ marginLeft: 6, fontSize: 11 }}>· phụ</span>}</td>
                   {(isAdmin || isInternalViewer) && <td>{r.createdBy?.displayName || dash}</td>}{isAccountHn && <td>{r.createdBy?.displayName || dash}</td>}
                   <td title={r.title}>{tieuDeHienThi(r)}</td>
                   <td>{fmtDate(r.quoteDate) || dash}</td>
                   <td className="num">{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</td>
-                  {!stripped && <td className="num">{r.total == null ? dash : fmtMoney(r.total)}</td>}
+                  {!stripped && <td className="num">{tongChuaVat(r) == null ? dash : fmtMoney(tongChuaVat(r)!)}</td>}
                   <td>{r.company?.shortName || r.company?.name || dash}</td>
                   {isAccountHn ? <td className="num">{r.hnTotal == null ? dash : fmtMoney(r.hnTotal)}</td> : isInternalViewer ? <td className="num">{payProg(r)} hàng</td> : <><td>{r.toCompany || dash}</td><td>{r.customerCode ? <strong>{r.customerCode}</strong> : dash}</td></>}
                   <td>{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
@@ -306,7 +335,7 @@ export function QuoteListPage({ me }: { me: Me }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </BangCuonNgang>
       )}
 
       {rows.length > 0 && (

@@ -132,7 +132,7 @@ export function locTheoChieu(loc: BoLoc, ctx: NguCanhLoc): Record<ChieuLoc, Dieu
     company: loc.companyIds?.length ? { companyId: { in: loc.companyIds } } : null,
     creator: !ctx.bienLuoc && loc.creatorIds?.length ? { createdById: { in: loc.creatorIds } } : null,
     date: ngay,
-    total: tien ? { total: tien } : null,
+    total: tien ? { subtotal: tien } : null,   // lọc theo số CHƯA VAT — đúng con số cột danh sách hiện
     note: ghiChu.length === 0 ? null : ghiChu.length === 1 ? ghiChu[0] : { AND: ghiChu },
   };
 }
@@ -151,6 +151,9 @@ export function ghepLoc(parts: Record<ChieuLoc, Dieu | null>, boQua?: ChieuLoc):
  */
 export function orderByTheoCot(sort: string, order: "asc" | "desc" | string) {
   const dir = order === "asc" ? "asc" : "desc";
+  // Cột "Tổng chưa VAT (VNĐ)" (2026-11-26): khoá tham số vẫn là "total" (tab/đường dẫn cũ còn chạy), nhưng ô hiện
+  // `subtotal` — số CHƯA VAT — nên sắp theo đúng cột đó, không thì thứ tự lệch với con số người ta nhìn thấy.
+  if (sort === "total") return { subtotal: dir } as Prisma.QuoteOrderByWithRelationInput;
   if ((COT_SAP_XEP_CU as readonly string[]).includes(sort)) return { [sort]: dir } as Prisma.QuoteOrderByWithRelationInput;
   const chinh: Prisma.QuoteOrderByWithRelationInput | null =
     sort === "company" ? { company: { name: dir } }

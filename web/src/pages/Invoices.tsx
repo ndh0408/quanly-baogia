@@ -5,6 +5,8 @@ import { toast } from "../lib/ui";
 import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, dash, Stat } from "../lib/format";
 import { smartTextMatch } from "../lib/filterText";
 import { nhomHoaDon, tienCoVat, nhanHangMuc } from "../lib/hoaDonChia";
+import { BangCuonNgang } from "../components/BangCuonNgang";
+import { ChonNam, demTheoNam, namHieuLuc, useNamDaNho } from "../components/ChonNam";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
 // (QuoteSheet): kế toán NHẬP ở đây → trang Dự án THAM CHIẾU (read-only). Mỗi sheet đã chốt = 1 dòng.
@@ -151,12 +153,21 @@ const missingFields = (r: Row): MissingFilter[] => [
   "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "signedAt", "invoiceYear", "invoiceNote",
 ].filter((field) => !hasValue(r[field as keyof Row])) as MissingFilter[];
 
+/**
+ * NĂM của một hóa đơn cho bộ chọn năm: năm kế toán ghi (cột Năm) → năm của Ngày HĐơn → chưa xuất thì NĂM DỰ ÁN (năm khách
+ * chốt). Bước cuối là để hóa đơn CHƯA XUẤT vẫn nằm trong "thư mục" năm của nó — trước đây ô lọc Năm bỏ rơi chúng, chọn
+ * một năm là hóa đơn còn phải xuất biến mất khỏi màn hình.
+ */
+const namCuaHoaDon = (r: Row): number | null =>
+  r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : null) || r.q.projectYear || null;
+
 export function InvoicesPage({ me }: { me: Me }) {
   const canEdit = me.permissions.includes("invoice:edit");
   const canPay = me.permissions.includes("invoice:pay");
   const qc = useQueryClient();
   const [q, setQ] = useState("");
-  const [year, setYear] = useState("");
+  // Bộ chọn năm ("thư mục theo năm", nhớ trên máy này) — thay ô chọn "Năm" cũ; không bị "Xóa tất cả" bỏ đi.
+  const [namChon, chonNam] = useNamDaNho("quanly.hoaDonRa.nam");
   const [month, setMonth] = useState("");   // lọc theo THÁNG của Ngày HĐơn
   const [cty, setCty] = useState("");
   const [status, setStatus] = useState<StatusFilter>("");
@@ -189,13 +200,14 @@ export function InvoicesPage({ me }: { me: Me }) {
   const [hienKhongXuat, setHienKhongXuat] = useState(false);
   const load = () => { qc.invalidateQueries({ queryKey: ["quoteProjects"] }); };
 
-  const years = useMemo(() => [...new Set(rows.map((r) => r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : null)).filter(Boolean))].sort() as number[], [rows]);
+  const cacNam = useMemo(() => demTheoNam(rows, namCuaHoaDon), [rows]);
+  const year = namHieuLuc(namChon, cacNam);
   // Lọc NGỮ CẢNH trước (tìm kiếm/pháp nhân/thời gian). Số lượng trên nút lọc nhanh tính từ tập này,
   // nên vẫn đúng khi người dùng đang xem riêng một công ty hoặc một khoảng ngày.
   const contextRows = rows.filter((r) => {
     const inputDate = toInputDate(r.invoiceDate);
     const done = !!(r.invoiceNo && r.invoiceDate);
-    if (year && String(r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : "")) !== year) return false;
+    if (year && String(namCuaHoaDon(r) ?? "") !== year) return false;
     if (month && String(r.invoiceDate ? new Date(r.invoiceDate).getMonth() + 1 : "") !== month) return false;
     if (dateFrom && (!inputDate || inputDate < dateFrom)) return false;
     if (dateTo && (!inputDate || inputDate > dateTo)) return false;
@@ -231,9 +243,9 @@ export function InvoicesPage({ me }: { me: Me }) {
     unsigned: contextRows.filter((r) => !r.signedAt).length,
     paid: contextRows.filter((r) => !!r.paidAt).length,
   };
-  const activeFilterCount = [q.trim(), cty, year, month, status, collection, missing, dateFrom, dateTo].filter(Boolean).length;
+  const activeFilterCount = [q.trim(), cty, month, status, collection, missing, dateFrom, dateTo].filter(Boolean).length;
   const clearFilters = () => {
-    setQ(""); setCty(""); setYear(""); setMonth(""); setStatus(""); setCollection(""); setMissing(""); setDateFrom(""); setDateTo("");
+    setQ(""); setCty(""); setMonth(""); setStatus(""); setCollection(""); setMissing(""); setDateFrom(""); setDateTo("");
   };
 
   // Sort client 4 cột chính (Ngày HĐơn / Trước VAT / Sau VAT / Công nợ) — pattern th.sortable + aria-sort như trang Mã khách hàng.
@@ -258,11 +270,13 @@ export function InvoicesPage({ me }: { me: Me }) {
 
   // Sheet Để sau / Không xuất trong phạm vi ô tìm kiếm + CTy (bảng nhóm riêng bên dưới dùng cùng phép lọc).
   const heldLoc = (hold: "later" | "skip") => held.filter((h) => h.hold === hold
+    && (!year || String(h.q.projectYear ?? "") === year)   // sheet chưa xuất: theo năm dự án
     && (!cty || defaultCty(h.q) === cty)
     && smartTextMatch(q, [h.q.customerName, h.q.customerCode, h.q.title, h.code, h.name, h.subtotal, fmtMoney(h.subtotal), h.amount, fmtMoney(h.amount)]));
   // "Để sau" chưa xuất nhưng VẪN PHẢI THU → cộng vào Tổng + Chưa thu (chủ repo 2026-10-06); "Không xuất" thì không.
   // Chỉ cộng khi không lọc theo thứ chỉ hóa đơn mới có (số/ngày HĐ, đã thu, quá hạn, ô thiếu) — sheet chưa xuất không có.
-  const tinhDeSau = !status && !missing && (collection === "" || collection === "unpaid") && !year && !month && !dateFrom && !dateTo;
+  // Năm KHÔNG chặn nữa: heldLoc đã lọc sheet Để sau theo năm dự án, nên cộng đúng phần của năm đang xem.
+  const tinhDeSau = !status && !missing && (collection === "" || collection === "unpaid") && !month && !dateFrom && !dateTo;
   const deSauTien = tinhDeSau ? heldLoc("later").reduce((s, h) => s + h.amount, 0) : 0;
   const deSauTruoc = tinhDeSau ? heldLoc("later").reduce((s, h) => s + h.subtotal, 0) : 0;
   const sumAmount = shown.reduce((s, r) => s + r.amount, 0) + deSauTien;
@@ -409,6 +423,9 @@ export function InvoicesPage({ me }: { me: Me }) {
       <p className="muted">Hóa đơn <b>xuất cho khách</b> — theo dõi theo <b>dự án đã chốt</b> (mỗi <b>mã hóa đơn</b> một khối; Hạng mục tự sinh = tiêu đề rút gọn_tên sheet, mỗi sheet một dòng). Hóa đơn nhận từ nhà cung cấp xem ở <a href="#/invoices-in">Hóa đơn đầu vào</a>. <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
       <p className="muted inv-chia-goiy" role="note">Chia sheet thành hóa đơn (_01, _02…, Để sau, Không xuất) hoặc <b>làm lại một hóa đơn đã xuất</b> do <b>chủ báo giá</b> làm trong màn báo giá — cần đổi thì báo chủ báo giá (cột <b>Acc</b>).</p>
 
+      <ChonNam cacNam={cacNam} nam={year} chon={chonNam} tong={rows.length}
+        goiY={(n) => `Hóa đơn năm ${n} — theo cột Năm / Ngày HĐơn; chưa xuất thì theo năm khách chốt`} />
+
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">
           <input name="q" className="grow" type="search" placeholder="Tìm không dấu: khách, MSX, số HĐ, PO, tiền, ngày, ghi chú…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
@@ -430,7 +447,6 @@ export function InvoicesPage({ me }: { me: Me }) {
         </div>
         <div className="toolbar inv-filter-row inv-filter-extra">
           <select name="cty" value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-          <select name="year" value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
           <select name="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Lọc theo tháng (Ngày HĐơn)" title="Theo tháng của Ngày HĐơn">
             <option value="">Tháng: Tất cả</option>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={String(i + 1)}>Tháng {i + 1}</option>)}
           </select>
@@ -471,7 +487,7 @@ export function InvoicesPage({ me }: { me: Me }) {
             <div className="empty">{rows.length ? <>Không có hóa đơn khớp bộ lọc.{activeFilterCount > 0 && <div style={{ marginTop: 10 }}><button className="btn btn-sm" onClick={clearFilters}>Xóa tất cả bộ lọc</button></div>}</> : 'Chưa có dự án nào ở trạng thái "Đã chốt".'}</div>
           ) : (
             <>
-              <div className="tbl-scroll">
+              <BangCuonNgang>
                 <table className="list-table inv-table">
                   <thead><tr>{HEADERS.map((h) => {
                     const sk = SORT_COLS[h];
@@ -564,8 +580,8 @@ export function InvoicesPage({ me }: { me: Me }) {
                     })}
                   </tbody>
                 </table>
-              </div>
-              <div className="list-foot"><span className="muted">Hiển thị {sorted.length} / {rows.length} hóa đơn{activeFilterCount ? ` · ${activeFilterCount} bộ lọc đang dùng` : ""}</span></div>
+              </BangCuonNgang>
+              <div className="list-foot"><span className="muted">Hiển thị {sorted.length} / {rows.length} hóa đơn{year ? ` · năm ${year}` : ""}{activeFilterCount ? ` · ${activeFilterCount} bộ lọc đang dùng` : ""}</span></div>
             </>
           )}
           {heldTable("later")}

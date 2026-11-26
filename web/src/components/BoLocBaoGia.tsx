@@ -7,7 +7,7 @@ import { demBoLoc, hienTien, khoangNgay, mauNgayDangKhop, MAU_NGAY, parseTien, t
 // BỘ LỌC ĐẦY ĐỦ của Danh sách báo giá (chủ repo 2026-09-30: "bộ lọc … chưa đầy đủ và thông minh"). Hai hàng, cùng bố cục
 // với trang Hóa đơn đầu ra:
 //   · Trạng thái (chip, có số đếm) · Người tạo · Công ty (chọn nhiều) · "Của tôi";
-//   · Ngày báo giá (mẫu nhanh + từ/đến) · Tổng tiền (gõ "100tr", "1,5 tỷ") · Ghi chú (có/chưa + theo MÀU như nhãn Zalo).
+//   · Ngày báo giá (mẫu nhanh + từ/đến) · Tổng chưa VAT (gõ "100tr", "1,5 tỷ" — lọc theo `subtotal`, đúng số cột danh sách hiện) · Ghi chú (có/chưa + theo MÀU như nhãn Zalo).
 // Số đếm lấy từ `GET /api/quotes/facets`: mỗi nhóm đếm theo mọi bộ lọc KHÁC của nó. Chưa có số đếm (đang tải / lỗi) thì
 // bộ lọc vẫn dùng bình thường, chỉ thiếu con số.
 
@@ -95,8 +95,8 @@ export function BoLocBaoGia({ loc, dat, xoa, facets: duLieuDem, meId }: {
         <label className="inv-date-filter"><span>Từ</span><input name="tu" type="date" aria-label="Ngày báo giá từ" value={loc.tu} max={loc.den || undefined} onChange={(e) => dat({ tu: e.target.value })} /></label>
         <label className="inv-date-filter"><span>Đến</span><input name="den" type="date" aria-label="Ngày báo giá đến" value={loc.den} min={loc.tu || undefined} onChange={(e) => dat({ den: e.target.value })} /></label>
 
-        <span className="bl-tien" role="group" aria-label="Tổng tiền">
-          <span className="bl-nhan" aria-hidden="true">Tổng tiền:</span>
+        <span className="bl-tien" role="group" aria-label="Tổng chưa VAT">
+          <span className="bl-nhan" aria-hidden="true">Tổng chưa VAT:</span>
           <OTien nhan="Tổng từ" goiY="Từ 100tr" value={loc.tienTu} onChange={(v) => dat({ tienTu: v })} />
           <OTien nhan="Tổng đến" goiY="Đến 1,5 tỷ" value={loc.tienDen} onChange={(v) => dat({ tienDen: v })} />
         </span>

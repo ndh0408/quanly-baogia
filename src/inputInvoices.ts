@@ -24,6 +24,7 @@
 // thứ hai ở đây là cách có hai con số cho cùng một khoản chi. Không bao giờ mang `paidProof` (ảnh ủy nhiệm chi).
 import { extraTableSum, bangNoiBoCoNgay, bangNoiBoCoCa, type MauBangNoiBo } from "./quoteUtils.js";
 import { codeLabel, sheetCode, soMa } from "./quoteCode.js";
+import { namVN } from "./vnTime.js";
 import { daDuyetHangHn, dauDuyetHangHn } from "./hnDuyetHang.js";
 import {
   hangCuaPhia,
@@ -48,6 +49,9 @@ export type HangDauVao = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "side"> &
    */
   key: string;
   quoteId: number; quoteCode: string; title: string; status: string;
+  /** Năm dự án — năm khách chốt (giờ VN), chưa chốt thì năm của ngày báo giá. Cùng luật `projectYear` của trang
+   *  Quản lý dự án; bộ chọn năm của trang Hóa đơn đầu vào lọc theo nó. `null` khi báo giá không có ngày nào. */
+  projectYear: number | null;
   customerCode: string | null; customerName: string | null; companyName: string | null; createdByName: string | null;
   /** `null` ở hàng Hà Nội: bảng HN thuộc CẢ báo giá, không thuộc trang nào. */
   sheetId: number | null; sheetName: string | null; sheetCode: string | null;
@@ -70,6 +74,7 @@ export type BaoGiaDauVao = {
   id: number; companyId: number | null; status: string;
   projectCode?: string | null; projectVersion?: number | null; quoteNumber?: string | null;
   title: string; shortTitle?: string | null;
+  quoteDate?: Date | string | null; convertedAt?: Date | string | null;
   hnStatus?: string | null; hnReviewedAt?: Date | string | null; hnReviewerId?: number | null; hnRejectNote?: string | null;
   customer?: { code?: string | null; name?: string | null } | null;
   company?: { shortName?: string | null; name?: string | null } | null;
@@ -97,8 +102,17 @@ const iso = (v: unknown): string | null => {
 /** Tiêu đề hiển thị: tiêu đề rút gọn người dùng đặt, không có thì tiêu đề chính (cùng luật `tieuDeHienThi` của web). */
 const tieuDe = (q: BaoGiaDauVao) => chu(q.shortTitle) ?? ((q.title || "").replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim() || q.title || "");
 
+/** Năm dự án: năm CHỐT (giờ VN — đúng năm in trong mã dự án), chưa chốt thì năm ngày báo giá. */
+const namDuAn = (q: BaoGiaDauVao): number | null => {
+  const v = q.convertedAt ?? q.quoteDate;
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(String(v));
+  return Number.isNaN(d.getTime()) ? null : namVN(d);
+};
+
 const thongTinBaoGia = (q: BaoGiaDauVao) => ({
   quoteId: q.id, quoteCode: codeLabel(q), title: tieuDe(q), status: String(q.status ?? ""),
+  projectYear: namDuAn(q),
   customerCode: chu(q.customer?.code), customerName: chu(q.customer?.name),
   companyName: chu(q.company?.shortName) ?? chu(q.company?.name), createdByName: chu(q.createdBy?.displayName),
 });

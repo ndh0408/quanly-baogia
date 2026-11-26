@@ -103,6 +103,7 @@ beforeEach(() => {
   h.confirm.mockReset(); h.confirm.mockImplementation(async () => h.dongY);
   h.nen.mockReset(); h.nen.mockImplementation(async () => h.anhNen);
   _datLai();
+  try { localStorage.clear(); } catch { /* jsdom luôn có */ }   // bộ chọn năm nhớ năm — không để rò sang bài khác
 });
 afterEach(() => {
   if (root) act(() => root!.unmount()); root = null; document.body.innerHTML = ""; location.hash = "";
@@ -744,5 +745,30 @@ describe("hộp 'Khoản chi' — không mất, không ghi đè im lặng, khôn
     expect(hopThoai()).toBeNull();
     expect(thuTai()).toBe(false);
     expect(w.__editorDirty).toBe(false);
+  });
+});
+
+describe("bộ chọn NĂM — thư mục theo năm (2026-11-26)", () => {
+  it("nút năm theo năm dự án; bấm 2025 chỉ còn khoản năm đó, thẻ tiền theo năm đó; nhớ cho lần mở sau; Tất cả về đủ", async () => {
+    const ds = [hang({ projectYear: 2026, amount: 1000 }), hang({ projectYear: 2026, amount: 2000 }), hang({ projectYear: 2025, amount: 5000 })];
+    await mo(ds);
+    const nut = () => [...khung.querySelectorAll('[aria-label="Chọn năm"] button')] as HTMLButtonElement[];
+    expect(nut().map((b) => b.textContent)).toEqual(["Tất cả3", "20262", "20251"]);
+    await bam(nut()[2]);
+    expect(tenDong()).toEqual(["Hạng mục 3"]);
+    expect(stat("Tổng tiền đã duyệt")).toMatch(/^5\.000/);
+    expect(localStorage.getItem("quanly.hoaDonVao.nam")).toBe("2025");
+    act(() => root!.unmount()); root = null; document.body.innerHTML = "";
+    await mo(ds);
+    expect(tenDong()).toEqual(["Hạng mục 3"]);   // mở lại: vẫn đúng năm đang xem
+    await bam(nut()[0]);
+    expect(tenDong()).toHaveLength(3);
+    expect(localStorage.getItem("quanly.hoaDonVao.nam")).toBeNull();
+  });
+  it("năm đã nhớ mà không còn dữ liệu năm đó → hiện đủ, không giấu sạch bảng", async () => {
+    localStorage.setItem("quanly.hoaDonVao.nam", "2019");
+    await mo([hang({ projectYear: 2026 }), hang({ projectYear: 2025 })]);
+    expect(tenDong()).toHaveLength(2);
+    expect(khung.querySelector('[aria-label="Chọn năm"] button[aria-pressed="true"]')!.textContent).toBe("Tất cả2");
   });
 });

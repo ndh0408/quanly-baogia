@@ -1754,6 +1754,17 @@ button.qn-text:hover {
 .list-table.ql-table td a {
   color: var(--primary-hover);
 }
+/* Báo giá CHƯA CHỐT hiện "NHÁP <số BG>" (chưa có mã dự án) — chữ XÁM, cùng màu huy hiệu "Nháp", để tách khỏi mã dự án
+   đã cấp (nâu vàng). 2026-11-26 chủ repo chuyển lời: "màu của chữ Nháp… em cho thành màu khác". #4b5563 đạt ≥ 6:1 trên
+   hàng trắng, hàng xám và hàng đang rê chuột. */
+.list-table.ql-table td a.ma-nhap,
+.ql-card-head .ma-nhap {
+  color: #4b5563;
+}
+[data-theme="dark"] .list-table.ql-table td a.ma-nhap,
+[data-theme="dark"] .ql-card-head .ma-nhap {
+  color: #aab2c7;
+}
 
 /* Thẻ báo giá (mobile, React) — thay bảng rộng phải cuộn ngang. */
 .ql-cards {
@@ -3328,6 +3339,51 @@ button.qn-text:hover {
 [data-theme="dark"] .proj-table th:nth-child(4),
 [data-theme="dark"] .proj-table td:nth-child(4) {
   box-shadow: 2px 0 5px -2px rgba(0, 0, 0, 0.55);
+}
+
+/* THANH CUỘN NGANG NỔI (components/BangCuonNgang.tsx) — bảng rộng (Quản lý dự án) có thanh cuộn ngang DÍNH ĐÁY MÀN HÌNH
+   thay vì nằm dưới dòng cuối cùng (sau hàng trăm dòng, không ai thấy → cột bên phải bị khuất mà không biết). Thanh gốc
+   của khung bị ẩn khi đã có thanh nổi, kẻo cuộn tới cuối bảng thấy HAI thanh chồng nhau; khung vẫn cuộn được bằng
+   touchpad / Shift+lăn chuột / vuốt. Thanh nổi to + đậm hơn thanh mặc định (10px, màu viền) cho dễ thấy, dễ nắm. */
+.bang-cuon-ngang > .tbl-scroll.co-thanh-noi {
+  scrollbar-width: none;
+}
+.bang-cuon-ngang > .tbl-scroll.co-thanh-noi::-webkit-scrollbar {
+  display: none;
+}
+.thanh-cuon-noi {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--card-2);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+}
+.thanh-cuon-noi::-webkit-scrollbar {
+  height: 14px;
+}
+.thanh-cuon-noi::-webkit-scrollbar-track {
+  background: var(--card-2);
+}
+.thanh-cuon-noi::-webkit-scrollbar-thumb {
+  background: #9aa3b3;
+  border: 3px solid var(--card-2);
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+.thanh-cuon-noi::-webkit-scrollbar-thumb:hover {
+  background: #6b7384;
+  background-clip: padding-box;
+}
+[data-theme="dark"] .thanh-cuon-noi::-webkit-scrollbar-thumb {
+  background: #5b6575;
+  background-clip: padding-box;
+}
+[data-theme="dark"] .thanh-cuon-noi::-webkit-scrollbar-thumb:hover {
+  background: #7d8698;
+  background-clip: padding-box;
 }
 
 /* Màu "hoàn tất/đã thu" sáng hơn trên nền tối (--success nền không đổi theo theme) */

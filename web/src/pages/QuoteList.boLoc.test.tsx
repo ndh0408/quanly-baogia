@@ -54,6 +54,7 @@ beforeEach(() => {
   h.listQuotes.mockClear(); h.quoteFacets.mockClear(); h.setQuoteListNote.mockClear();
   h.quoteFacets.mockImplementation(async (p: Tham) => { h.dem.push({ ...p }); return FACETS; });
   window.matchMedia = ((q: string) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  try { localStorage.clear(); } catch { /* jsdom luôn có */ }   // bộ chọn năm nhớ năm — không để rò sang bài khác
 });
 afterEach(() => { if (root) act(() => root!.unmount()); root = null; document.body.innerHTML = ""; location.hash = ""; });
 
@@ -219,16 +220,16 @@ describe("Danh sách báo giá — sắp xếp MỌI cột", () => {
   it("view đầy đủ: mọi cột dữ liệu bấm được (trừ Sheet, Ghi chú, Thao tác); thứ tự cột đúng", async () => {
     await mo(QUYEN_ADMIN);
     const ten = tieuDe().map((t) => (t.textContent || "").replace(/\s[▲▼]$/, "") || t.getAttribute("aria-label"));
-    expect(ten).toEqual(["Mã dự án", "Người tạo", "Tiêu đề", "Ngày", "Sheet", "Tổng (VNĐ)", "Công ty", "Khách", "Mã KH", "Trạng thái", "Ghi chú", "Thao tác"]);
+    expect(ten).toEqual(["Mã dự án", "Người tạo", "Tiêu đề", "Ngày", "Sheet", "Tổng chưa VAT (VNĐ)", "Công ty", "Khách", "Mã KH", "Trạng thái", "Ghi chú", "Thao tác"]);
     const sapDuoc = tieuDe().filter((t) => t.classList.contains("sortable")).map((t) => (t.textContent || "").replace(/\s[▲▼]$/, ""));
-    expect(sapDuoc).toEqual(["Mã dự án", "Người tạo", "Tiêu đề", "Ngày", "Tổng (VNĐ)", "Công ty", "Khách", "Mã KH", "Trạng thái"]);
+    expect(sapDuoc).toEqual(["Mã dự án", "Người tạo", "Tiêu đề", "Ngày", "Tổng chưa VAT (VNĐ)", "Công ty", "Khách", "Mã KH", "Trạng thái"]);
   });
 
   it("bấm từng cột gửi ĐÚNG khoá sắp xếp; ngày/tiền mặc định GIẢM dần, chữ TĂNG dần; bấm lại đảo chiều; aria-sort theo", async () => {
     await mo(QUYEN_ADMIN);
     const ca: [string, string, string][] = [
       ["Mã dự án", "quoteNumber", "asc"], ["Người tạo", "creator", "asc"], ["Tiêu đề", "title", "asc"], ["Ngày", "quoteDate", "desc"],
-      ["Tổng (VNĐ)", "total", "desc"], ["Công ty", "company", "asc"], ["Khách", "toCompany", "asc"], ["Mã KH", "customerCode", "asc"], ["Trạng thái", "status", "asc"],
+      ["Tổng chưa VAT (VNĐ)", "total", "desc"], ["Công ty", "company", "asc"], ["Khách", "toCompany", "asc"], ["Mã KH", "customerCode", "asc"], ["Trạng thái", "status", "asc"],
     ];
     for (const [cot, khoa, chieu] of ca) {
       await bam(thCot(cot));
@@ -309,5 +310,43 @@ describe("Danh sách báo giá — VIEW LƯỢC (account HN / tài khoản chi p
     const p = h.goi[0];
     for (const k of ["creator", "minTotal", "maxTotal", "note", "noteColor", "companyId"]) expect(Object.keys(p), k).not.toContain(k);
     expect(p).toMatchObject({ status: "draft", from: "2026-09-01", sort: "createdAt" });
+  });
+});
+
+describe("Danh sách báo giá — bộ chọn NĂM (2026-11-26)", () => {
+  const nutNam = () => [...hop.querySelectorAll('[aria-label="Chọn năm"] button')] as HTMLButtonElement[];
+  beforeEach(() => {
+    h.quoteFacets.mockImplementation(async (p: Tham) => { h.dem.push({ ...p }); return { ...FACETS, years: [{ value: 2026, count: 2 }, { value: 2025, count: 1 }] }; });
+  });
+  it("số trên nút năm lấy từ facets.years; bấm 2025 = lọc NGÀY BÁO GIÁ trọn năm 2025; nút đó sáng", async () => {
+    await mo();
+    expect(nutNam().map((b) => b.textContent)).toEqual(["Tất cả", "20262", "20251"]);
+    expect(nutNam()[0].getAttribute("aria-pressed")).toBe("true");
+    await bam(nutNam()[2]);
+    expect(cuoi()).toMatchObject({ from: "2025-01-01", to: "2025-12-31" });
+    expect(nutNam()[2].getAttribute("aria-pressed")).toBe("true");
+  });
+  it("nhớ năm cho lần mở sau (không có ngày trên URL); link có ngày riêng thì theo link; Tất cả là quên", async () => {
+    await mo();
+    await bam(nutNam()[1]);
+    expect(localStorage.getItem("quanly.baoGia.nam")).toBe("2026");
+    act(() => root!.unmount()); root = null; document.body.innerHTML = ""; h.goi.length = 0;
+    await mo();
+    expect(h.goi[0]).toMatchObject({ from: "2026-01-01", to: "2026-12-31" });
+    act(() => root!.unmount()); root = null; document.body.innerHTML = ""; h.goi.length = 0;
+    await mo(QUYEN_DAY_DU, "#/list?from=2026-09-01");
+    expect(h.goi[0]).toMatchObject({ from: "2026-09-01" });
+    expect(Object.keys(h.goi[0])).not.toContain("to");
+    expect(localStorage.getItem("quanly.baoGia.nam")).toBeNull();   // đang xem khoảng ngày khác → quên năm
+    await bam(nutNam()[1]);
+    await bam(nutNam()[0]);
+    expect(Object.keys(cuoi())).not.toContain("from");
+    expect(localStorage.getItem("quanly.baoGia.nam")).toBeNull();
+  });
+  it("view lược KHÔNG có bộ chọn năm (không có số đếm) và không tự áp năm đã nhớ", async () => {
+    localStorage.setItem("quanly.baoGia.nam", "2025");
+    await mo(QUYEN_HN);
+    expect(nutNam()).toHaveLength(0);
+    expect(Object.keys(h.goi[0])).not.toContain("from");
   });
 });

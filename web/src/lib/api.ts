@@ -96,7 +96,7 @@ export type QuoteRow = {
   title: string; status: string; quoteDate: string; createdById?: number;
   createdBy?: { id: number; displayName: string } | null;
   company?: { id: number; name: string; shortName?: string } | null;
-  total?: number; toCompany?: string; customerCode?: string | null; sheetCount?: number;
+  total?: number; subtotal?: number; toCompany?: string; customerCode?: string | null; sheetCount?: number;
   hnStatus?: string | null; hnSheetCount?: number; hnTotal?: number; _accountHnRow?: boolean;
   internalRows?: number; internalPaidRows?: number; _internalRow?: boolean; // chi phí: tiến độ thanh toán nội bộ
   listNote?: QuoteListNote | null;
@@ -114,6 +114,8 @@ export type QuoteFacets = {
   creators: { id: number; name: string; count: number }[];
   companies: { id: number; name: string; count: number }[];
   note: { has: number; none: number; colors: Record<string, number> };
+  /** Số báo giá theo NĂM ngày báo giá (giờ VN), mới trước — bộ chọn năm. Máy chủ cũ không trả thì không có. */
+  years?: { value: number; count: number }[];
 };
 export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
@@ -179,6 +181,7 @@ export type InputInvoiceRow = Omit<KhoanChiDto, "key" | "rid" | "quoteId" | "sid
   /** `quoteId:side:rid` khi hàng có rid duy nhất; hàng thiếu / trùng rid: khoá theo vị trí và `coTheGhi = false`. */
   key: string;
   quoteId: number; quoteCode: string; title: string; status: string;
+  projectYear?: number | null;   // năm dự án (năm chốt, chưa chốt thì năm ngày báo giá) — bộ chọn năm
   customerCode: string | null; customerName: string | null; companyName: string | null; createdByName: string | null;
   sheetId: number | null; sheetName: string | null; sheetCode: string | null;   // null ở hàng Hà Nội (bảng HN thuộc cả báo giá)
   side: PhiaKhoanChi;
@@ -225,6 +228,7 @@ export type ProjectSheet = {
 export type ProjectQuote = {
   shortTitle?: string | null;
   id: number; title: string; status: string; vatPercent?: number; subtotal?: number; executionDate?: string | null;
+  projectYear?: number | null;   // năm khách chốt (giờ VN) — bộ chọn năm ở trang Quản lý dự án
   quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; customerCode?: string | null; customerName?: string | null; customerDebtDays?: number | null; hnStatus?: string | null;
   company?: { shortName?: string; name?: string } | null; createdBy?: { displayName?: string } | null; sheets?: ProjectSheet[];
 };

@@ -4,6 +4,8 @@ import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
 import { fmtMoney, fmtDate, tieuDeHienThi, sheetCode, soMa, statusLabel, dash, Stat, trangKhachTuChoi } from "../lib/format";
 import { laKhongXuat } from "../lib/hoaDonChia";
+import { BangCuonNgang } from "../components/BangCuonNgang";
+import { ChonNam, demTheoNam, namHieuLuc, useNamDaNho } from "../components/ChonNam";
 
 // Port "Quản lý dự án" (renderProjects) — bê ĐẦY ĐỦ: báo giá ĐÃ CHỐT, mỗi sheet 1 dòng, bảng 23
 // cột theo dõi hóa đơn (Trạng thái: Hóa đơn→Thanh toán→Hoàn tất) + sửa-tại-ô (admin: Số HĐ/Ngày TT/PO/
@@ -57,6 +59,8 @@ export function ProjectsPage({ me }: { me: Me }) {
   const [q, setQ] = useState("");
   const [account, setAccount] = useState("");
   const [customer, setCustomer] = useState("");
+  // "Thư mục theo năm": năm KHÁCH CHỐT (projectYear, giờ VN — đúng năm in trong mã dự án FP_B26_… → 2026).
+  const [namChon, chonNam] = useNamDaNho("quanly.duAn.nam");
 
   // Tải qua TanStack Query. CHỈ đổi cơ chế lấy dữ liệu; sửa-tại-ô vẫn cập nhật cục bộ (rows state)
   // để không re-render cả trang / mất focus. Đồng bộ rows từ cache khi data đổi.
@@ -73,7 +77,10 @@ export function ProjectsPage({ me }: { me: Me }) {
   const accounts = useMemo(() => [...new Set(rows.map((r) => r.q.createdBy?.displayName).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "vi")), [rows]);
   const customers = useMemo(() => [...new Set(rows.map((r) => r.q.customerCode).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "vi")), [rows]);
   const norm = (s: unknown) => (s == null ? "" : String(s)).toLowerCase();
+  const cacNam = useMemo(() => demTheoNam(rows, (r) => r.q.projectYear), [rows]);
+  const nam = namHieuLuc(namChon, cacNam);
   const shown = rows.filter((r) => {
+    if (nam && String(r.q.projectYear ?? "") !== nam) return false;
     if (account && (r.q.createdBy?.displayName || "") !== account) return false;
     if (customer && (r.q.customerCode || "") !== customer) return false;
     if (q && ![r.q.title, r.code, r.hangMuc, r.q.customerCode, r.q.createdBy?.displayName].map(norm).join(" ").includes(norm(q))) return false;
@@ -92,7 +99,7 @@ export function ProjectsPage({ me }: { me: Me }) {
     try { await api.signSheet(row.sheetId, signed); toast(signed ? "Đã ký chứng từ" : "Đã bỏ ký", "success"); patch(row.key, signed ? { signedAt: new Date().toISOString(), signedByName: me.displayName } : { signedAt: null, signedByName: null }); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
   };
-  const clear = () => { setQ(""); setAccount(""); setCustomer(""); };
+  const clear = () => { setQ(""); setAccount(""); setCustomer(""); };   // KHÔNG bỏ năm: năm là "thư mục" đang xem, không phải bộ lọc tạm
 
   // 2026-07-06: trang Dự án CHỈ THAM CHIẾU dữ liệu hóa đơn (nhập ở trang HÓA ĐƠN) — mọi ô hóa
   // đơn read-only, giữ nguyên ĐÈN ĐỎ "việc cần làm" (.cell-need, theme-aware). Nút Ký vẫn ở đây.
@@ -106,6 +113,8 @@ export function ProjectsPage({ me }: { me: Me }) {
     <div>
       <h1>Quản lý dự án</h1>
       <p className="muted">Dự án = báo giá <b>đã chốt</b>. {!isAdmin && <b>Bạn chỉ xem được dự án do mình tạo. </b>}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Dữ liệu hóa đơn (Số HĐ, PO, ngày, chứng từ…) là <b>tham chiếu từ trang Hóa đơn đầu ra</b> — kế toán nhập bên đó. Bấm vào dòng để mở báo giá.</p>
+
+      <ChonNam cacNam={cacNam} nam={nam} chon={chonNam} tong={rows.length} goiY={(n) => `Dự án khách chốt trong năm ${n}`} />
 
       <div className="toolbar" style={{ margin: "4px 0 6px" }}>
         <input name="q" className="grow" type="search" placeholder="Tìm: phim, mã sản xuất, khách hàng, account…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm kiếm dự án" />
@@ -130,7 +139,7 @@ export function ProjectsPage({ me }: { me: Me }) {
           {shown.length === 0 ? (
             <div className="empty">{rows.length ? "Không có dự án khớp tìm kiếm/bộ lọc." : 'Chưa có báo giá nào ở trạng thái "Đã chốt".'}</div>
           ) : (
-            <div className="tbl-scroll">
+            <BangCuonNgang>
               <table className="list-table proj-table">
                 <thead><tr>{HEADERS.map((h) => <th key={h} scope="col" className={NUM_COLS.has(h) ? "num" : undefined}>{h}</th>)}</tr></thead>
                 <tbody>
@@ -176,10 +185,10 @@ export function ProjectsPage({ me }: { me: Me }) {
                   })}
                 </tbody>
               </table>
-            </div>
+            </BangCuonNgang>
           )}
           {shown.length > 0 && (
-            <div className="list-foot"><span className="muted">Hiển thị {shown.length} / {rows.length} dòng</span></div>
+            <div className="list-foot"><span className="muted">Hiển thị {shown.length} / {rows.length} dòng{nam ? ` · năm ${nam}` : ""}</span></div>
           )}
         </>
       )}
