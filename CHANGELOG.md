@@ -12,12 +12,18 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**1117 commit**, từ 2026-05-29 tới 2026-11-25.
+**1120 commit**, từ 2026-05-29 tới 2026-11-26.
 
 ---
 
+## 2026-11-26
+
+- `7192ea0` docs(số liệu): 194 tệp test web sau khi thêm test bộ chọn năm
+- `be769d1` feat(danh sách): cột Tổng chưa VAT, chữ NHÁP màu xám, bộ chọn năm + thanh cuộn ngang nổi ở mọi trang danh sách
+
 ## 2026-11-25
 
+- `7bd69f8` docs(CHANGELOG): sinh lại sau khi ráp sửa giao diện
 - `f9864ad` fix(phân quyền): cột vai trò rộng đều, nút Lưu mọi cột cùng một hàng
 - `ce8fdb4` docs(CHANGELOG): sinh lại
 - `10aae29` test(xc-incremental): mượn mã mẫu riêng khi CSDL đã giữ hết mã có config
